@@ -124,12 +124,14 @@ struct ArucoDisplayConfig {
 // ---- Touchscreen Monitor ----------------------------------------------------
 
 struct TouchscreenConfig {
-    int   width       = 1920;
-    int   height      = 1080;
-    int   xOffset     = 3440;    // X position of the touchscreen in the desktop coordinate space
-    int   yOffset     = 0;       // Y position (0 when monitors are top-aligned)
-    float pixelsPerMm = 3.6430f; // Physical pixel density of the touchscreen [px/mm]
-    float mmPerPixel  = 0.27450f;// Inverse — use whichever direction is convenient
+    int         width          = 1920;
+    int         height         = 1080;
+    int         xOffset        = 3440;    // X position of the touchscreen in the desktop coordinate space
+    int         yOffset        = 0;       // Y position (0 when monitors are top-aligned)
+    float       pixelsPerMm    = 3.6430f; // Physical pixel density of the touchscreen [px/mm]
+    float       mmPerPixel     = 0.27450f;// Inverse — use whichever direction is convenient
+    int         xinputDeviceId = 9;       // xinput device ID for the touchscreen
+    std::string xinputOutput   = "HDMI-0";// X output name to map the touchscreen to
 };
 
 
@@ -152,6 +154,18 @@ struct TelemetryConfig {
     int rows   = 6;    // Number of grid rows    (cell height = height / rows)
     int xPos   = 0;    // Window X position on the desktop
     int yPos   = 1100; // Window Y position — set to approx. display height + title bar
+};
+
+
+// ---- Controller Panel (separate tall narrow panel for controller telemetry) -
+
+struct ControllerPanelConfig {
+    int width  = 256;
+    int height = 1344;
+    int cols   = 16;   // Number of grid columns (cell width = width / cols)
+    int rows   = 42;   // Number of grid rows    (cell height = height / rows)
+    int xPos   = 1570; // Window X position on the desktop
+    int yPos   = 0;    // Window Y position on the desktop
 };
 
 
@@ -185,8 +199,9 @@ public:
     ArucoDisplayConfig  arucoDisplay;
     TouchscreenConfig   touchscreen;
     DisplayConfig       display;
-    TelemetryConfig     telemetry;
-    SerialConfig        serial;
+    TelemetryConfig        telemetry;
+    ControllerPanelConfig  controllerPanel;
+    SerialConfig           serial;
 
 private:
     // Build cameraMatrix and distCoeffs from the scalar values after loading

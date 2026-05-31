@@ -46,11 +46,74 @@ ArucoHandler::ArucoHandler(const ArucoDetectConfig&   detectCfg,
 }
 
 
+ArucoHandler::~ArucoHandler() { Stop(); }
+
+
 // =============================================================================
-// Detection
+// Detection thread — lifecycle and I/O
 // =============================================================================
 
-std::vector<DetectedMarker> ArucoHandler::detect(const cv::Mat& grayFrame) {
+void ArucoHandler::Start() {
+    detectRunning_ = true;
+    detectThread_  = std::thread(&ArucoHandler::DetectLoop, this);
+    std::cout << "ArucoHandler: Detection thread started.\n";
+}
+
+void ArucoHandler::Stop() {
+    detectRunning_ = false;
+    frameCv_.notify_all();   // Wake the thread so it can check the exit flag
+    if (detectThread_.joinable()) detectThread_.join();
+    std::cout << "ArucoHandler: Detection thread stopped.\n";
+}
+
+void ArucoHandler::SubmitFrame(const cv::Mat& grayFrame) {
+    {
+        std::lock_guard<std::mutex> lock(frameMutex_);
+        // Ref-counted assignment — no pixel data copied.
+        // The camera handler allocates a fresh buffer each frame, so the buffer
+        // referenced here is safe to read even after the main loop moves on.
+        pendingFrame_ = grayFrame;
+        frameReady_   = true;
+    }
+    frameCv_.notify_one();
+}
+
+std::vector<DetectedMarker> ArucoHandler::GetLatestDetection() {
+    std::lock_guard<std::mutex> lock(resultMutex_);
+    return latestResult_;   // ref-counted Mat copies inside, cheap
+}
+
+void ArucoHandler::DetectLoop() {
+    while (detectRunning_) {
+        cv::Mat frame;
+        {
+            std::unique_lock<std::mutex> lock(frameMutex_);
+            // Sleep until a new frame arrives or Stop() signals exit
+            frameCv_.wait(lock, [this]{ return frameReady_ || !detectRunning_; });
+            if (!detectRunning_) break;
+
+            // Move the frame into a local variable before releasing the lock so
+            // the main loop can submit the next frame immediately — the two
+            // threads never touch the same buffer at the same time.
+            frame       = std::move(pendingFrame_);
+            frameReady_ = false;
+        }
+
+        auto result = RunDetection(frame);
+
+        {
+            std::lock_guard<std::mutex> lock(resultMutex_);
+            latestResult_ = std::move(result);
+        }
+    }
+}
+
+
+// =============================================================================
+// Detection implementation (was detect())
+// =============================================================================
+
+std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame) {
 
     std::vector<DetectedMarker>           results;
     std::vector<int>                      detectedIds;
@@ -113,29 +176,50 @@ std::vector<DetectedMarker> ArucoHandler::detect(const cv::Mat& grayFrame) {
 // Touchscreen display
 // =============================================================================
 
-void ArucoHandler::showMarkerGrid() {
-    // Fullscreen sequence on Linux — order matters.
-    // The window must be created, shown, and moved to the target monitor
-    // BEFORE requesting fullscreen. If fullscreen is set first, the WM may
-    // fullscreen the window on the primary display instead of the touchscreen.
+void ArucoHandler::SetGridVisible(bool visible) {
+    if (visible == gridVisible_) return;   // No change — avoid recreating the window
+    gridVisible_ = visible;
 
-    cv::namedWindow(TOUCHSCREEN_WIN, cv::WINDOW_NORMAL);
+    if (visible) {
+        // Fullscreen sequence on Linux — order matters.
+        // Create and show first, then move, then request fullscreen.
+        cv::namedWindow(TOUCHSCREEN_WIN, cv::WINDOW_NORMAL);
+        cv::imshow(TOUCHSCREEN_WIN, markerGridImage_);
+        cv::waitKey(1);
+        cv::moveWindow(TOUCHSCREEN_WIN, touchCfg_.xOffset, touchCfg_.yOffset);
+        cv::waitKey(1);
+        cv::setWindowProperty(TOUCHSCREEN_WIN, cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
+        cv::waitKey(1);
+        std::cout << "ArucoHandler: Grid shown ("
+                  << displayCfg_.cols << "x" << displayCfg_.rows << ")\n";
+    } else {
+        cv::destroyWindow(TOUCHSCREEN_WIN);
+        std::cout << "ArucoHandler: Grid hidden.\n";
+    }
+}
 
-    // Show the image first so the window physically exists in the WM
-    cv::imshow(TOUCHSCREEN_WIN, markerGridImage_);
+void ArucoHandler::ShowSingleMarker(int id) {
+    if (id < 1) return;
+
+    // White background — same dimensions as the full grid image
+    cv::Mat img(touchCfg_.height, touchCfg_.width, CV_8UC1, cv::Scalar(255));
+
+    // Marker size in pixels — same calculation used by renderGridImage()
+    const int sz = static_cast<int>(std::round(displayCfg_.markerSizeMm * touchCfg_.pixelsPerMm));
+
+    // Grid position for this marker ID (1-based, left-to-right top-to-bottom)
+    const int col = (id - 1) % displayCfg_.cols;
+    const int row = (id - 1) / displayCfg_.cols;
+    cv::Point2i origin = gridCellOrigin(col, row);
+
+    cv::Mat markerImg;
+    cv::aruco::generateImageMarker(dictionary_, id, sz, markerImg, 1);
+    markerImg.copyTo(img(cv::Rect(origin.x, origin.y, sz, sz)));
+
+    cv::imshow(TOUCHSCREEN_WIN, img);
     cv::waitKey(1);
 
-    // Move to the touchscreen monitor, then give the WM a moment to process it
-    cv::moveWindow(TOUCHSCREEN_WIN, touchCfg_.xOffset, touchCfg_.yOffset);
-    cv::waitKey(1);
-
-    // Now request fullscreen — the WM will fullscreen it on whichever monitor
-    // the window is currently on (the touchscreen, after the move above)
-    cv::setWindowProperty(TOUCHSCREEN_WIN, cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
-    cv::waitKey(1);
-
-    std::cout << "ArucoHandler: Touchscreen grid displayed fullscreen ("
-              << displayCfg_.cols << " cols x " << displayCfg_.rows << " rows)\n";
+    std::cout << "ArucoHandler: Fitts target → marker " << id << "\n";
 }
 
 void ArucoHandler::updateGridConfig(int cols, int rows, float markerSizeMm, float paddingMm) {
@@ -144,7 +228,7 @@ void ArucoHandler::updateGridConfig(int cols, int rows, float markerSizeMm, floa
     displayCfg_.markerSizeMm = markerSizeMm;
     displayCfg_.paddingMm    = paddingMm;
     renderGridImage();
-    showMarkerGrid();
+    // Re-show only if currently visible (caller is responsible for visibility)
 }
 
 

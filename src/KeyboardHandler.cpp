@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <iostream>
+#include <random>
 
 // =============================================================================
 // KeyboardHandler.cpp
@@ -45,7 +46,6 @@ void KeyboardHandler::ProcessKey(int key) {
     // ---- Enter (carriage return or line feed) --------------------------------
     if (key == 13 || key == 10) {
         if (!inputBuffer_.empty()) {
-            std::cout << "\n";           // Move off the echo line before printing result
             ParseCommand(inputBuffer_);
             inputBuffer_.clear();
             state_.inputBuffer.clear();
@@ -86,22 +86,48 @@ void KeyboardHandler::ParseCommand(const std::string& cmd) {
     {
         int id = (cmd[1] - '0') * 10 + (cmd[2] - '0');
         state_.activeTagId = id;
-        if (id == 0)
-            std::cout << "KeyboardHandler: Active tag cleared.\n";
-        else
-            std::cout << "KeyboardHandler: Active tag → ID " << id << "\n";
+        state_.outputBuffer = (id == 0) ? "Active tag cleared"
+                                        : "Active tag: ID " + std::to_string(id);
+        return;
+    }
+
+    // Fitts task — select a new random target marker (only active in FITTS state)
+    if (cmd == "r") {
+        if (state_.systemState == SystemState::FITTS) {
+            // Uniform distribution over the 45 markers displayed on the grid (1–45)
+            static std::mt19937 rng{ std::random_device{}() };
+            static std::uniform_int_distribution<int> dist(1, 45);
+            state_.fittsTargetId = dist(rng);
+            state_.activeTagId   = state_.fittsTargetId;   // green outline on operator display
+            state_.outputBuffer  = "Target: marker " + std::to_string(state_.fittsTargetId);
+        } else {
+            state_.outputBuffer = "'r' is only active in FITTS state";
+        }
+        return;
+    }
+
+    // State commands
+    if (cmd == "cal") {
+        state_.systemState  = SystemState::CALIBRATING;
+        state_.outputBuffer = "State: CALIBRATING";
+        return;
+    }
+    if (cmd == "idle") {
+        state_.systemState  = SystemState::IDLE;
+        state_.outputBuffer = "State: IDLE";
+        return;
+    }
+    if (cmd == "fitts") {
+        state_.systemState  = SystemState::FITTS;
+        state_.outputBuffer = "State: FITTS";
         return;
     }
 
     // Add more commands here with additional else-if branches
 
-    std::cout << "KeyboardHandler: Unknown command '" << cmd << "'\n";
+    state_.outputBuffer = "Unknown: '" + cmd + "'";
 }
 
 void KeyboardHandler::EchoBuffer() const {
-    // \r returns the cursor to the start of the current line so each keystroke
-    // overwrites the previous echo rather than printing a new line each time.
-    // The trailing spaces erase any characters left over from a longer previous buffer.
-    std::cout << "\rCmd> " << inputBuffer_ << "   \rCmd> " << inputBuffer_;
-    std::cout.flush();
+    // Input is now shown in the telemetry panel — no console echo needed
 }

@@ -11,8 +11,8 @@
 # ---- Camera -----------------------------------------------------------------
 camera:
    device: "/dev/video0"
-   width: 1600
-   height: 1200
+   width: 1600    # 1600
+   height: 1200   # 1200
    framerate: 90
    rotate_180: 0          # 1 = flip camera image 180 degrees (upside-down mount)
 
@@ -55,10 +55,10 @@ aruco_detect:
 aruco_detector:
    # Adaptive threshold: converts grayscale to binary before finding borders.
    # Larger win_size_max catches markers farther from the camera (slower).
-   adaptive_thresh_constant:     7
+   adaptive_thresh_constant:     5
    adaptive_thresh_win_size_min: 3
    adaptive_thresh_win_size_max: 23
-   adaptive_thresh_win_size_step: 4
+   adaptive_thresh_win_size_step: 10
 
    # Marker geometry filters: reject detections that are too small/large/imprecise.
    min_marker_perimeter_rate:      0.01
@@ -82,7 +82,7 @@ aruco_detector:
    perspective_remove_ignored_margin_per_cell: 0.13
 
    # ArUco3 detection — faster and more robust algorithm for small/distant markers.
-   use_aruco3_detection: 1
+   use_aruco3_detection: 0
 
 
 # ---- ArUco Marker Display (on the touchscreen) ------------------------------
@@ -103,13 +103,15 @@ touchscreen:
    y_offset: 0            # Y offset of the touchscreen (0 if monitors are top-aligned)
    pixels_per_mm: 3.6430  # Physical pixel density of the touchscreen [px/mm]
    mm_per_pixel:  0.27450 # Inverse conversion — use whichever direction is convenient
+   xinput_device_id: 9    # xinput device ID for the touchscreen (run 'xinput list' to find it)
+   xinput_output: "HDMI-0" # X output name to map the touchscreen to (run 'xrandr' to find it)
 
 
 # ---- Operator Display (main monitor) ----------------------------------------
 display:
    width: 1600
    height: 1070
-   x_pos: 0
+   x_pos: 1830
    y_pos: 0
 
 
@@ -119,11 +121,18 @@ display:
 telemetry:
    width: 1600
    height: 256
-   cols: 40
+   cols: 47
    rows: 8
-   x_pos: 0
+   x_pos: 1830
    y_pos: 1200
 
+controller:
+   width: 300
+   height: 1056
+   cols: 10
+   rows: 33
+   x_pos: 1500
+   y_pos: 0
 
 # ---- Serial (Teensy) --------------------------------------------------------
 serial:

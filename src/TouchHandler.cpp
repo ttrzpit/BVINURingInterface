@@ -121,4 +121,18 @@ void TouchHandler::initXInput() {
 
     XFlush(xDisplay_);
     free(mask);
+
+    // Map the touchscreen input device to the correct monitor so that touch
+    // coordinates align with the display. Equivalent to running manually:
+    //   xinput map-to-output <device_id> <output>
+    // Device ID and output name are set in config.yaml [touchscreen].
+    std::string cmd = "xinput map-to-output "
+                    + std::to_string(cfg_.xinputDeviceId)
+                    + " " + cfg_.xinputOutput;
+    int result = system(cmd.c_str());
+    if (result != 0)
+        std::cerr << "TouchHandler: xinput map-to-output failed (exit " << result
+                  << ") — check xinput_device_id and xinput_output in config.yaml\n";
+    else
+        std::cout << "TouchHandler: Touchscreen mapped to " << cfg_.xinputOutput << "\n";
 }

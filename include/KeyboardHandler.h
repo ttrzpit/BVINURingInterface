@@ -23,15 +23,26 @@
 #include <string>
 
 
+// ---- System state -----------------------------------------------------------
+
+enum class SystemState {
+    IDLE,         ///< Default — no active task, ArUco grid hidden
+    CALIBRATING,  ///< Calibration in progress — ArUco grid shown on touchscreen
+    FITTS         ///< Fitts task running
+};
+
 // ---- Output type ------------------------------------------------------------
 
 /**
  * @brief Keyboard-driven state distributed by main.cpp each loop.
  */
 struct KeyboardState {
-    int         activeTagId   = 0;   ///< ArUco ID to highlight on the operator display (0 = none)
-    bool        quitRequested = false;
-    std::string inputBuffer;         ///< Command currently being typed — shown on the display
+    int         activeTagId    = 0;                ///< ArUco ID to highlight (0 = none)
+    bool        quitRequested  = false;
+    SystemState systemState    = SystemState::IDLE; ///< Current system operating state
+    int         fittsTargetId  = 0;                ///< Randomly selected Fitts target (0 = none)
+    std::string inputBuffer;                        ///< Command currently being typed
+    std::string outputBuffer;                       ///< Result of the last executed command
 };
 
 

@@ -75,22 +75,27 @@ int main() {
     DisplayHandler display(cfg.display,
                            cv::Point2i(static_cast<int>(cfg.camera.cx),
                                        static_cast<int>(cfg.camera.cy)),
-                           cfg.telemetry);
+                           cfg.telemetry,
+                           cfg.controllerPanel);
 
     SerialHandler  serial(cfg.serial);
 
     // ---- Start background threads -------------------------------------------
     camera.start();    // Camera grab loop runs on its own thread
+    aruco.Start();     // ArUco detection runs on its own thread
     serial.start();    // Serial receive loop runs on its own thread (stub)
 
-    // ---- Show initial ArUco grid on the touchscreen -------------------------
-    // This window persists for the duration of the program.
-    // Call aruco.updateGridConfig(...) at any point to change the layout.
-    aruco.showMarkerGrid();
+    // The ArUco grid image is generated at startup (inside the ArucoHandler
+    // constructor) but the window is NOT shown until the system enters CALIBRATING.
 
-    std::cout << "\nMain: Running. Press ESC to quit.\n\n";
+    std::cout << "\nMain: Running. Press ESC to quit.\n";
+    std::cout << "Main: Commands — 'cal' = calibrate, 'idle' = idle, 'fitts' = Fitts\n\n";
 
     KeyboardHandler keyboard;
+
+    double lastFrameTimestamp = -1.0;
+    SystemState prevState     = SystemState::IDLE;
+    int    prevFittsTarget    = 0;
 
     // ---- Main loop ----------------------------------------------------------
     while (g_running) {
@@ -103,24 +108,49 @@ int main() {
         const KeyboardState& kb = keyboard.GetState();
         if (kb.quitRequested) break;
 
-        // b. Camera frame — returns the most recently completed frame.
-        //    Non-blocking: if the camera thread hasn't produced a new frame yet,
-        //    we get the same frame as last iteration (ready flag is still true).
-        CameraFrame frame = camera.getLatestFrame();
-
-        // c. ArUco detection — only runs when a valid frame is available
-        std::vector<DetectedMarker> markers;
-        if (frame.ready) {
-            markers = aruco.detect(frame.gray);
+        // Handle system state transitions
+        if (kb.systemState != prevState) {
+            // Grid is visible in both CALIBRATING and FITTS states
+            bool showGrid = (kb.systemState == SystemState::CALIBRATING ||
+                             kb.systemState == SystemState::FITTS);
+            aruco.SetGridVisible(showGrid);
+            // Reset Fitts target when leaving FITTS state
+            if (prevState == SystemState::FITTS) prevFittsTarget = 0;
+            prevState = kb.systemState;
         }
+
+        // In FITTS state, show the selected target marker whenever it changes
+        if (kb.systemState == SystemState::FITTS &&
+            kb.fittsTargetId != prevFittsTarget && kb.fittsTargetId > 0) {
+            aruco.ShowSingleMarker(kb.fittsTargetId);
+            prevFittsTarget = kb.fittsTargetId;
+        }
+
+        // b. Camera frame — check if the camera thread has produced a NEW frame
+        //    by comparing timestamps. Without this, the non-blocking getLatestFrame()
+        //    would return the same frame repeatedly and the loop would spin at
+        //    hundreds of Hz with no useful work done.
+        CameraFrame frame = camera.getLatestFrame();
+        bool isNewFrame = frame.ready && (frame.timestamp != lastFrameTimestamp);
+        if (isNewFrame) {
+            lastFrameTimestamp = frame.timestamp;
+        }
+
+        // c. ArUco detection — only submit when there is genuinely a new frame.
+        //    GetLatestDetection() is always called so the main loop always has
+        //    the freshest result, even if a new frame hasn't arrived yet.
+        if (isNewFrame) {
+            aruco.SubmitFrame(frame.gray);
+        }
+        std::vector<DetectedMarker> markers = aruco.GetLatestDetection();
 
         // d. Touch state — drains pending X11 events, returns current state
         TouchState touchState = touch.getLatestTouch();
 
-        // e. Operator display + telemetry panel — telemetry is populated and shown
-        //    inside Update() via DisplayHandler::PopulateTelemetryPanel()
-        //    activeTagId drives the green corner outline in DrawMarkerOverlays
-        if (frame.ready) {
+        // e. Operator display + telemetry — only refresh on a new camera frame
+        //    so that the frequency counter in DisplayHandler measures the true
+        //    camera processing rate rather than the raw loop spin rate.
+        if (isNewFrame) {
             display.Update(frame.undistorted, markers, touchState, kb);
         }
 
@@ -132,6 +162,7 @@ int main() {
     // ---- Clean shutdown -----------------------------------------------------
     std::cout << "\nMain: Shutting down...\n";
 
+    aruco.Stop();
     camera.stop();
     serial.stop();
     cv::destroyAllWindows();

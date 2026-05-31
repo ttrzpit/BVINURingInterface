@@ -123,8 +123,10 @@ bool Config::load(const std::string& filepath) {
         ts["height"]        >> touchscreen.height;
         ts["x_offset"]      >> touchscreen.xOffset;
         ts["y_offset"]      >> touchscreen.yOffset;
-        ts["pixels_per_mm"] >> touchscreen.pixelsPerMm;
-        ts["mm_per_pixel"]  >> touchscreen.mmPerPixel;
+        ts["pixels_per_mm"]     >> touchscreen.pixelsPerMm;
+        ts["mm_per_pixel"]      >> touchscreen.mmPerPixel;
+        ts["xinput_device_id"]  >> touchscreen.xinputDeviceId;
+        ts["xinput_output"]     >> touchscreen.xinputOutput;
     }
 
     // ---- Display ------------------------------------------------------------
@@ -145,6 +147,17 @@ bool Config::load(const std::string& filepath) {
         tel["rows"]   >> telemetry.rows;
         tel["x_pos"]  >> telemetry.xPos;
         tel["y_pos"]  >> telemetry.yPos;
+    }
+
+    // ---- Controller panel ---------------------------------------------------
+    cv::FileNode cp = fs["controller"];
+    if (!cp.empty()) {
+        cp["width"]  >> controllerPanel.width;
+        cp["height"] >> controllerPanel.height;
+        cp["cols"]   >> controllerPanel.cols;
+        cp["rows"]   >> controllerPanel.rows;
+        cp["x_pos"]  >> controllerPanel.xPos;
+        cp["y_pos"]  >> controllerPanel.yPos;
     }
 
     // ---- Serial -------------------------------------------------------------
