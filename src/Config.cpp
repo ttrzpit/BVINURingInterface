@@ -98,6 +98,13 @@ bool Config::load(const std::string& filepath) {
         int inv = 0;
         adet["detect_inverted_marker"] >> inv;
         arucoDetector.detectInvertedMarker = (inv != 0);
+
+        adet["perspective_remove_pixel_per_cell"]          >> arucoDetector.perspectiveRemovePixelPerCell;
+        adet["perspective_remove_ignored_margin_per_cell"] >> arucoDetector.perspectiveRemoveIgnoredMarginPerCell;
+
+        int a3 = 1;
+        adet["use_aruco3_detection"] >> a3;
+        arucoDetector.useAruco3Detection = (a3 != 0);
     }
 
     // ---- ArUco display ------------------------------------------------------
@@ -105,17 +112,19 @@ bool Config::load(const std::string& filepath) {
     if (!adisp.empty()) {
         adisp["cols"]           >> arucoDisplay.cols;
         adisp["rows"]           >> arucoDisplay.rows;
-        adisp["marker_size_px"] >> arucoDisplay.markerSizePx;
-        adisp["padding_px"]     >> arucoDisplay.paddingPx;
+        adisp["marker_size_mm"] >> arucoDisplay.markerSizeMm;
+        adisp["padding_mm"]     >> arucoDisplay.paddingMm;
     }
 
     // ---- Touchscreen --------------------------------------------------------
     cv::FileNode ts = fs["touchscreen"];
     if (!ts.empty()) {
-        ts["width"]    >> touchscreen.width;
-        ts["height"]   >> touchscreen.height;
-        ts["x_offset"] >> touchscreen.xOffset;
-        ts["y_offset"] >> touchscreen.yOffset;
+        ts["width"]         >> touchscreen.width;
+        ts["height"]        >> touchscreen.height;
+        ts["x_offset"]      >> touchscreen.xOffset;
+        ts["y_offset"]      >> touchscreen.yOffset;
+        ts["pixels_per_mm"] >> touchscreen.pixelsPerMm;
+        ts["mm_per_pixel"]  >> touchscreen.mmPerPixel;
     }
 
     // ---- Display ------------------------------------------------------------
@@ -123,6 +132,19 @@ bool Config::load(const std::string& filepath) {
     if (!disp.empty()) {
         disp["width"]  >> display.width;
         disp["height"] >> display.height;
+        disp["x_pos"]  >> display.xPos;
+        disp["y_pos"]  >> display.yPos;
+    }
+
+    // ---- Telemetry ----------------------------------------------------------
+    cv::FileNode tel = fs["telemetry"];
+    if (!tel.empty()) {
+        tel["width"]  >> telemetry.width;
+        tel["height"] >> telemetry.height;
+        tel["cols"]   >> telemetry.cols;
+        tel["rows"]   >> telemetry.rows;
+        tel["x_pos"]  >> telemetry.xPos;
+        tel["y_pos"]  >> telemetry.yPos;
     }
 
     // ---- Serial -------------------------------------------------------------

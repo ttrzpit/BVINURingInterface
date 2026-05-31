@@ -31,6 +31,12 @@
 },
 {
   "directory": "/home/tom/Code/BVINURingInterface/build",
+  "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/KeyboardHandler.cpp.o -c /home/tom/Code/BVINURingInterface/src/KeyboardHandler.cpp",
+  "file": "/home/tom/Code/BVINURingInterface/src/KeyboardHandler.cpp",
+  "output": "CMakeFiles/BVINURingInterface.dir/src/KeyboardHandler.cpp.o"
+},
+{
+  "directory": "/home/tom/Code/BVINURingInterface/build",
   "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/SerialHandler.cpp.o -c /home/tom/Code/BVINURingInterface/src/SerialHandler.cpp",
   "file": "/home/tom/Code/BVINURingInterface/src/SerialHandler.cpp",
   "output": "CMakeFiles/BVINURingInterface.dir/src/SerialHandler.cpp.o"

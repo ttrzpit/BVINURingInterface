@@ -27,8 +27,10 @@
 
 #include "ArucoHandler.h"
 #include "CameraHandler.h"
+#include "Colors.h"
 #include "Config.h"
 #include "DisplayHandler.h"
+#include "KeyboardHandler.h"
 #include "SerialHandler.h"
 #include "TouchHandler.h"
 
@@ -72,7 +74,8 @@ int main() {
 
     DisplayHandler display(cfg.display,
                            cv::Point2i(static_cast<int>(cfg.camera.cx),
-                                       static_cast<int>(cfg.camera.cy)));
+                                       static_cast<int>(cfg.camera.cy)),
+                           cfg.telemetry);
 
     SerialHandler  serial(cfg.serial);
 
@@ -87,13 +90,18 @@ int main() {
 
     std::cout << "\nMain: Running. Press ESC to quit.\n\n";
 
+    KeyboardHandler keyboard;
+
     // ---- Main loop ----------------------------------------------------------
     while (g_running) {
 
-        // a. Keyboard — cv::pollKey() must be called every iteration to keep
-        //    ALL OpenCV windows responsive; without it they freeze.
+        // a. Keyboard — PollKey() must be called every iteration to keep all
+        //    OpenCV windows responsive. The result is fed to KeyboardHandler
+        //    which manages multi-character commands and the quit flag.
         int key = display.PollKey();
-        if (key == 27) break;   // ESC
+        keyboard.ProcessKey(key);
+        const KeyboardState& kb = keyboard.GetState();
+        if (kb.quitRequested) break;
 
         // b. Camera frame — returns the most recently completed frame.
         //    Non-blocking: if the camera thread hasn't produced a new frame yet,
@@ -109,9 +117,11 @@ int main() {
         // d. Touch state — drains pending X11 events, returns current state
         TouchState touchState = touch.getLatestTouch();
 
-        // e. Operator display — shows camera frame + marker overlays + status bar
+        // e. Operator display + telemetry panel — telemetry is populated and shown
+        //    inside Update() via DisplayHandler::PopulateTelemetryPanel()
+        //    activeTagId drives the green corner outline in DrawMarkerOverlays
         if (frame.ready) {
-            display.Update(frame.undistorted, markers, touchState);
+            display.Update(frame.undistorted, markers, touchState, kb);
         }
 
         // f. Serial (stub — uncomment when Teensy is connected)

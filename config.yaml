@@ -44,9 +44,9 @@ camera:
 
 # ---- ArUco Marker Detection -------------------------------------------------
 aruco_detect:
-   marker_size_mm: 18.0   # Physical side length of ring markers [mm] — used for pose estimation
+   marker_size_mm: 20.0   # Physical side length of ring markers [mm] — used for pose estimation
    valid_id_min: 0        # Discard detected markers with ID below this
-   valid_id_max: 20       # Discard detected markers with ID above this
+   valid_id_max: 46       # Discard detected markers with ID above this
 
 
 # ---- ArUco Detector Algorithm Parameters ------------------------------------
@@ -57,34 +57,42 @@ aruco_detector:
    # Larger win_size_max catches markers farther from the camera (slower).
    adaptive_thresh_constant:     7
    adaptive_thresh_win_size_min: 3
-   adaptive_thresh_win_size_max: 53
+   adaptive_thresh_win_size_max: 23
    adaptive_thresh_win_size_step: 4
 
    # Marker geometry filters: reject detections that are too small/large/imprecise.
    min_marker_perimeter_rate:      0.01
    max_marker_perimeter_rate:      4.0
    polygonal_approx_accuracy_rate: 0.03
-   min_corner_distance_rate:       0.02
-   min_distance_to_border:         1
+   min_corner_distance_rate:       0.05
+   min_distance_to_border:         3
 
    # Corner refinement improves 3D pose accuracy at a small speed cost.
    # method: 0=none  1=subpix  2=contour  3=apriltag
    corner_refinement_method:         1
-   corner_refinement_max_iterations: 50
+   corner_refinement_max_iterations: 30
    corner_refinement_min_accuracy:   0.01
 
    # Detect markers on glossy/reflective surfaces that invert the black/white pattern.
-   detect_inverted_marker: 1
+   detect_inverted_marker: 0
+
+   # Perspective removal — resolution of the internal bit-extraction step.
+   # Higher pixel_per_cell = more accurate but slower.
+   perspective_remove_pixel_per_cell:          8
+   perspective_remove_ignored_margin_per_cell: 0.13
+
+   # ArUco3 detection — faster and more robust algorithm for small/distant markers.
+   use_aruco3_detection: 1
 
 
 # ---- ArUco Marker Display (on the touchscreen) ------------------------------
 # The C x R grid starts at marker ID 1 and increments left-to-right, top-to-bottom.
 # Spacing between markers is auto-calculated from screen size, padding, and marker size.
 aruco_display:
-   cols: 4                # Number of grid columns
-   rows: 2                # Number of grid rows
-   marker_size_px: 150    # Rendered marker side length [px]
-   padding_px: 80         # Distance from the screen edge to the nearest marker [px]
+   cols: 9                # Number of grid columns
+   rows: 5                # Number of grid rows
+   marker_size_mm: 20.0   # Marker side length [mm] — converted to pixels at runtime
+   padding_mm: 22.0       # Padding on all 4 sides [mm] — converted to pixels at runtime
 
 
 # ---- Touchscreen Monitor ----------------------------------------------------
@@ -93,12 +101,28 @@ touchscreen:
    height: 1080
    x_offset: 3440         # X offset of the touchscreen in the desktop coordinate space
    y_offset: 0            # Y offset of the touchscreen (0 if monitors are top-aligned)
+   pixels_per_mm: 3.6430  # Physical pixel density of the touchscreen [px/mm]
+   mm_per_pixel:  0.27450 # Inverse conversion — use whichever direction is convenient
 
 
 # ---- Operator Display (main monitor) ----------------------------------------
 display:
    width: 1600
-   height: 1200
+   height: 1070
+   x_pos: 0
+   y_pos: 0
+
+
+# ---- Telemetry Panel (1600x270, directly below the operator display) ---------
+# Grid: 50 columns x 6 rows. Cell size = width/cols x height/rows = 32x45 px.
+# y_pos: set to operator display height + window title bar (~30 px).
+telemetry:
+   width: 1600
+   height: 256
+   cols: 40
+   rows: 8
+   x_pos: 0
+   y_pos: 1200
 
 
 # ---- Serial (Teensy) --------------------------------------------------------

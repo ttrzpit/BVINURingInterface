@@ -40,3 +40,15 @@ target_link_libraries(BVINURingInterface PRIVATE
     ${XI_LIB}            # XInput2 (touchscreen)
     Threads::Threads     # pthreads (std::thread)
 )
+
+# ---- Runtime resources -------------------------------------------------------
+
+# Symlink config.yaml into the build directory so the binary finds it whether
+# it is launched from the build directory or the project root.
+# A symlink (not a copy) means edits to the source config.yaml take effect
+# immediately — no rebuild needed.
+add_custom_command(
+    TARGET BVINURingInterface POST_BUILD
+    COMMAND ln -sf ${CMAKE_SOURCE_DIR}/config.yaml ${CMAKE_BINARY_DIR}/config.yaml
+    COMMENT "Symlinking config.yaml into build directory"
+)

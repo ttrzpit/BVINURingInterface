@@ -1,5 +1,6 @@
 #include "ArucoHandler.h"
 
+#include <iomanip>
 #include <iostream>
 
 // =============================================================================
@@ -113,25 +114,35 @@ std::vector<DetectedMarker> ArucoHandler::detect(const cv::Mat& grayFrame) {
 // =============================================================================
 
 void ArucoHandler::showMarkerGrid() {
-    // Create a normal (non-fullscreen) window, position it at the touchscreen's
-    // desktop offset, and size it to exactly fill that monitor.
-    // Using WINDOW_NORMAL instead of fullscreen is more reliable across
-    // different Linux window managers.
-    cv::namedWindow(TOUCHSCREEN_WIN, cv::WINDOW_NORMAL);
-    cv::moveWindow(TOUCHSCREEN_WIN, touchCfg_.xOffset, touchCfg_.yOffset);
-    cv::resizeWindow(TOUCHSCREEN_WIN, touchCfg_.width, touchCfg_.height);
-    cv::imshow(TOUCHSCREEN_WIN, markerGridImage_);
-    cv::waitKey(1);  // Flush window event queue so the window actually appears
+    // Fullscreen sequence on Linux — order matters.
+    // The window must be created, shown, and moved to the target monitor
+    // BEFORE requesting fullscreen. If fullscreen is set first, the WM may
+    // fullscreen the window on the primary display instead of the touchscreen.
 
-    std::cout << "ArucoHandler: Touchscreen grid displayed ("
+    cv::namedWindow(TOUCHSCREEN_WIN, cv::WINDOW_NORMAL);
+
+    // Show the image first so the window physically exists in the WM
+    cv::imshow(TOUCHSCREEN_WIN, markerGridImage_);
+    cv::waitKey(1);
+
+    // Move to the touchscreen monitor, then give the WM a moment to process it
+    cv::moveWindow(TOUCHSCREEN_WIN, touchCfg_.xOffset, touchCfg_.yOffset);
+    cv::waitKey(1);
+
+    // Now request fullscreen — the WM will fullscreen it on whichever monitor
+    // the window is currently on (the touchscreen, after the move above)
+    cv::setWindowProperty(TOUCHSCREEN_WIN, cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
+    cv::waitKey(1);
+
+    std::cout << "ArucoHandler: Touchscreen grid displayed fullscreen ("
               << displayCfg_.cols << " cols x " << displayCfg_.rows << " rows)\n";
 }
 
-void ArucoHandler::updateGridConfig(int cols, int rows, int markerSizePx, int paddingPx) {
+void ArucoHandler::updateGridConfig(int cols, int rows, float markerSizeMm, float paddingMm) {
     displayCfg_.cols         = cols;
     displayCfg_.rows         = rows;
-    displayCfg_.markerSizePx = markerSizePx;
-    displayCfg_.paddingPx    = paddingPx;
+    displayCfg_.markerSizeMm = markerSizeMm;
+    displayCfg_.paddingMm    = paddingMm;
     renderGridImage();
     showMarkerGrid();
 }
@@ -147,12 +158,12 @@ void ArucoHandler::renderGridImage() {
     const int screenH = touchCfg_.height;
     const int cols    = displayCfg_.cols;
     const int rows    = displayCfg_.rows;
-    const int sz      = displayCfg_.markerSizePx;
-    const int pad     = displayCfg_.paddingPx;
 
-    // Calculate equal spacing so markers fill the usable area evenly.
-    // Usable area = screen minus padding on both sides.
-    // If there is only one column/row, spacing is irrelevant (no gaps needed).
+    // Convert mm values to pixels using the touchscreen's physical pixel density
+    const int sz  = static_cast<int>(std::round(displayCfg_.markerSizeMm * touchCfg_.pixelsPerMm));
+    const int pad = static_cast<int>(std::round(displayCfg_.paddingMm    * touchCfg_.pixelsPerMm));
+
+    // Space markers evenly within the usable area (screen minus equal padding on all 4 sides)
     float spacingX = (cols > 1)
         ? static_cast<float>(screenW - 2 * pad - cols * sz) / (cols - 1)
         : 0.0f;
@@ -160,33 +171,42 @@ void ArucoHandler::renderGridImage() {
         ? static_cast<float>(screenH - 2 * pad - rows * sz) / (rows - 1)
         : 0.0f;
 
-    // Black background — grayscale image so marker images paste in cleanly
-    markerGridImage_ = cv::Mat::zeros(screenH, screenW, CV_8UC1);
+    // White background
+    markerGridImage_ = cv::Mat(screenH, screenW, CV_8UC1, cv::Scalar(255));
 
     // Place markers left-to-right, top-to-bottom, IDs starting at 1
     int markerID = 1;
     for (int r = 0; r < rows; r++) {
         for (int c = 0; c < cols; c++) {
             cv::Point2i origin = gridCellOrigin(c, r);
-
             cv::Mat markerImg;
-            // borderBits=1 adds one quiet-zone cell (standard for ArUco)
             cv::aruco::generateImageMarker(dictionary_, markerID, sz, markerImg, 1);
             markerImg.copyTo(markerGridImage_(cv::Rect(origin.x, origin.y, sz, sz)));
-
             markerID++;
         }
     }
 
-    std::cout << "ArucoHandler: Grid rendered — "
-              << (markerID - 1) << " markers, spacing "
-              << static_cast<int>(spacingX) << "x"
-              << static_cast<int>(spacingY) << " px\n";
+    // Derived values for the console report
+    float c2cX_mm = (sz + spacingX) * touchCfg_.mmPerPixel;
+    float c2cY_mm = (sz + spacingY) * touchCfg_.mmPerPixel;
+    float gapX_mm = spacingX        * touchCfg_.mmPerPixel;
+    float gapY_mm = spacingY        * touchCfg_.mmPerPixel;
+
+    std::cout << std::fixed << std::setprecision(2)
+              << "ArucoHandler: Grid rendered — "
+              << cols << " cols x " << rows << " rows = " << (markerID - 1) << " markers\n"
+              << "  Marker size:              " << displayCfg_.markerSizeMm       << " mm  |  " << sz                          << " px\n"
+              << "  H spacing (center-ctr):   " << c2cX_mm                       << " mm  |  " << static_cast<int>(sz + spacingX) << " px\n"
+              << "  H spacing (edge-edge):    " << gapX_mm                        << " mm  |  " << static_cast<int>(spacingX)     << " px\n"
+              << "  V spacing (center-ctr):   " << c2cY_mm                       << " mm  |  " << static_cast<int>(sz + spacingY) << " px\n"
+              << "  V spacing (edge-edge):    " << gapY_mm                        << " mm  |  " << static_cast<int>(spacingY)     << " px\n"
+              << "  Padding (all sides):      " << displayCfg_.paddingMm          << " mm  |  " << pad                           << " px\n"
+              << std::defaultfloat;
 }
 
 cv::Point2i ArucoHandler::gridCellOrigin(int col, int row) const {
-    const int   sz  = displayCfg_.markerSizePx;
-    const int   pad = displayCfg_.paddingPx;
+    const int sz  = static_cast<int>(std::round(displayCfg_.markerSizeMm * touchCfg_.pixelsPerMm));
+    const int pad = static_cast<int>(std::round(displayCfg_.paddingMm    * touchCfg_.pixelsPerMm));
 
     float spacingX = (displayCfg_.cols > 1)
         ? static_cast<float>(touchCfg_.width  - 2 * pad - displayCfg_.cols * sz) / (displayCfg_.cols - 1)
@@ -218,7 +238,10 @@ void ArucoHandler::initDetector() {
         static_cast<cv::aruco::CornerRefineMethod>(detectorCfg_.cornerRefinementMethod);
     detectorParams_.cornerRefinementMaxIterations = detectorCfg_.cornerRefinementMaxIterations;
     detectorParams_.cornerRefinementMinAccuracy   = detectorCfg_.cornerRefinementMinAccuracy;
-    detectorParams_.detectInvertedMarker          = detectorCfg_.detectInvertedMarker;
+    detectorParams_.detectInvertedMarker                  = detectorCfg_.detectInvertedMarker;
+    detectorParams_.perspectiveRemovePixelPerCell         = detectorCfg_.perspectiveRemovePixelPerCell;
+    detectorParams_.perspectiveRemoveIgnoredMarginPerCell = detectorCfg_.perspectiveRemoveIgnoredMarginPerCell;
+    detectorParams_.useAruco3Detection                    = detectorCfg_.useAruco3Detection;
 
     detector_ = cv::aruco::ArucoDetector(dictionary_, detectorParams_);
 

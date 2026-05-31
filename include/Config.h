@@ -97,28 +97,39 @@ struct ArucoDetectorConfig {
 
     // Detect markers printed on reflective or glossy surfaces that invert the
     // black/white pattern under certain lighting conditions.
-    bool detectInvertedMarker = true;
+    bool detectInvertedMarker = false;
+
+    // Perspective removal — controls the resolution of the internal bit-extraction
+    // step. Higher pixel-per-cell values are more accurate but slower.
+    int    perspectiveRemovePixelPerCell        = 8;
+    double perspectiveRemoveIgnoredMarginPerCell = 0.13;
+
+    // ArUco3 detection — improved algorithm that is faster and more robust for
+    // small or distant markers. Requires OpenCV 4.6+.
+    bool useAruco3Detection = true;
 };
 
 
 // ---- ArUco Display (touchscreen grid) ---------------------------------------
 
 struct ArucoDisplayConfig {
-    int cols         = 4;    // Grid columns
-    int rows         = 2;    // Grid rows
-    int markerSizePx = 150;  // Rendered marker side length [px]
-    int paddingPx    = 80;   // Distance from screen edge to nearest marker [px]
-    // Spacing between markers is auto-calculated at runtime from the above + screen dims
+    int   cols         = 4;     // Grid columns
+    int   rows         = 2;     // Grid rows
+    float markerSizeMm = 20.0f; // Marker side length [mm] — converted to px at render time
+    float paddingMm    = 22.0f; // Padding on all 4 sides [mm] — converted to px at render time
+    // Spacing between markers is auto-calculated from paddingMm, markerSizeMm, and screen dimensions
 };
 
 
 // ---- Touchscreen Monitor ----------------------------------------------------
 
 struct TouchscreenConfig {
-    int width   = 1920;
-    int height  = 1080;
-    int xOffset = 3440;  // X position of the touchscreen in the desktop coordinate space
-    int yOffset = 0;     // Y position (0 when monitors are top-aligned)
+    int   width       = 1920;
+    int   height      = 1080;
+    int   xOffset     = 3440;    // X position of the touchscreen in the desktop coordinate space
+    int   yOffset     = 0;       // Y position (0 when monitors are top-aligned)
+    float pixelsPerMm = 3.6430f; // Physical pixel density of the touchscreen [px/mm]
+    float mmPerPixel  = 0.27450f;// Inverse — use whichever direction is convenient
 };
 
 
@@ -126,7 +137,21 @@ struct TouchscreenConfig {
 
 struct DisplayConfig {
     int width  = 1600;
-    int height = 1200;
+    int height = 1070;
+    int xPos   = 0;    // Window X position on the desktop
+    int yPos   = 0;    // Window Y position on the desktop
+};
+
+
+// ---- Telemetry Panel (below the operator display) ---------------------------
+
+struct TelemetryConfig {
+    int width  = 1600;
+    int height = 270;
+    int cols   = 50;   // Number of grid columns (cell width = width / cols)
+    int rows   = 6;    // Number of grid rows    (cell height = height / rows)
+    int xPos   = 0;    // Window X position on the desktop
+    int yPos   = 1100; // Window Y position — set to approx. display height + title bar
 };
 
 
@@ -160,6 +185,7 @@ public:
     ArucoDisplayConfig  arucoDisplay;
     TouchscreenConfig   touchscreen;
     DisplayConfig       display;
+    TelemetryConfig     telemetry;
     SerialConfig        serial;
 
 private:

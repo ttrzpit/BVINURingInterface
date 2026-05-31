@@ -85,7 +85,7 @@ public:
      * @brief Change the grid layout parameters and immediately re-render.
      *        Useful for adjusting the display without restarting the program.
      */
-    void updateGridConfig(int cols, int rows, int markerSizePx, int paddingPx);
+    void updateGridConfig(int cols, int rows, float markerSizeMm, float paddingMm);
 
 private:
     void        initDetector();        // Configure detector parameters
