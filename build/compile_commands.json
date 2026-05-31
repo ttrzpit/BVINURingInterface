@@ -1,0 +1,44 @@
+[
+{
+  "directory": "/home/tom/Code/BVINURingInterface/build",
+  "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/main.cpp.o -c /home/tom/Code/BVINURingInterface/main.cpp",
+  "file": "/home/tom/Code/BVINURingInterface/main.cpp",
+  "output": "CMakeFiles/BVINURingInterface.dir/main.cpp.o"
+},
+{
+  "directory": "/home/tom/Code/BVINURingInterface/build",
+  "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/ArucoHandler.cpp.o -c /home/tom/Code/BVINURingInterface/src/ArucoHandler.cpp",
+  "file": "/home/tom/Code/BVINURingInterface/src/ArucoHandler.cpp",
+  "output": "CMakeFiles/BVINURingInterface.dir/src/ArucoHandler.cpp.o"
+},
+{
+  "directory": "/home/tom/Code/BVINURingInterface/build",
+  "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/CameraHandler.cpp.o -c /home/tom/Code/BVINURingInterface/src/CameraHandler.cpp",
+  "file": "/home/tom/Code/BVINURingInterface/src/CameraHandler.cpp",
+  "output": "CMakeFiles/BVINURingInterface.dir/src/CameraHandler.cpp.o"
+},
+{
+  "directory": "/home/tom/Code/BVINURingInterface/build",
+  "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/Config.cpp.o -c /home/tom/Code/BVINURingInterface/src/Config.cpp",
+  "file": "/home/tom/Code/BVINURingInterface/src/Config.cpp",
+  "output": "CMakeFiles/BVINURingInterface.dir/src/Config.cpp.o"
+},
+{
+  "directory": "/home/tom/Code/BVINURingInterface/build",
+  "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/DisplayHandler.cpp.o -c /home/tom/Code/BVINURingInterface/src/DisplayHandler.cpp",
+  "file": "/home/tom/Code/BVINURingInterface/src/DisplayHandler.cpp",
+  "output": "CMakeFiles/BVINURingInterface.dir/src/DisplayHandler.cpp.o"
+},
+{
+  "directory": "/home/tom/Code/BVINURingInterface/build",
+  "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/SerialHandler.cpp.o -c /home/tom/Code/BVINURingInterface/src/SerialHandler.cpp",
+  "file": "/home/tom/Code/BVINURingInterface/src/SerialHandler.cpp",
+  "output": "CMakeFiles/BVINURingInterface.dir/src/SerialHandler.cpp.o"
+},
+{
+  "directory": "/home/tom/Code/BVINURingInterface/build",
+  "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/TouchHandler.cpp.o -c /home/tom/Code/BVINURingInterface/src/TouchHandler.cpp",
+  "file": "/home/tom/Code/BVINURingInterface/src/TouchHandler.cpp",
+  "output": "CMakeFiles/BVINURingInterface.dir/src/TouchHandler.cpp.o"
+}
+]

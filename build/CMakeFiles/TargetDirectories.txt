@@ -1,0 +1,3 @@
+/home/tom/Code/BVINURingInterface/build/CMakeFiles/BVINURingInterface.dir
+/home/tom/Code/BVINURingInterface/build/CMakeFiles/edit_cache.dir
+/home/tom/Code/BVINURingInterface/build/CMakeFiles/rebuild_cache.dir

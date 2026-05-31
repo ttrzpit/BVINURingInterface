@@ -1,0 +1,108 @@
+%YAML:1.0
+---
+# =============================================================================
+# BVI NURing Interface — Runtime Configuration
+#
+# Edit this file to change parameters without recompiling the program.
+# Uses OpenCV's FileStorage YAML format (no extra dependencies).
+# =============================================================================
+
+
+# ---- Camera -----------------------------------------------------------------
+camera:
+   device: "/dev/video0"
+   width: 1600
+   height: 1200
+   framerate: 90
+   rotate_180: 0          # 1 = flip camera image 180 degrees (upside-down mount)
+
+   # Intrinsic parameters from camera calibration (high-resolution mode)
+   fx: 600.98172          # Horizontal focal length [px]
+   fy: 599.86930          # Vertical focal length [px]
+   cx: 801.26194          # Principal point X [px]
+   cy: 535.69455          # Principal point Y [px]
+
+   # Radial/tangential distortion coefficients [k1, k2, p1, p2, k3]
+   distortion: [ 0.01561, -0.03298, 0.00020, 0.00136, 0.00561 ]
+
+   # Hardware settings (tuned for indoor ArUco detection)
+   brightness: 0
+   contrast: 0
+   saturation: 32
+   hue: 0
+   auto_white_balance: 0
+   gamma: 120
+   gain: 18
+   sharpness: 0
+   backlight: 0
+   auto_exposure: 1       # 1 = manual, 3 = aperture priority
+   exposure_level: 32
+   auto_focus: 0
+   focus_level: 0
+   zoom: 0
+
+
+# ---- ArUco Marker Detection -------------------------------------------------
+aruco_detect:
+   marker_size_mm: 18.0   # Physical side length of ring markers [mm] — used for pose estimation
+   valid_id_min: 0        # Discard detected markers with ID below this
+   valid_id_max: 20       # Discard detected markers with ID above this
+
+
+# ---- ArUco Detector Algorithm Parameters ------------------------------------
+# These control the internal OpenCV detection pipeline.
+# Change with care — they trade detection speed against recall (missed markers).
+aruco_detector:
+   # Adaptive threshold: converts grayscale to binary before finding borders.
+   # Larger win_size_max catches markers farther from the camera (slower).
+   adaptive_thresh_constant:     7
+   adaptive_thresh_win_size_min: 3
+   adaptive_thresh_win_size_max: 53
+   adaptive_thresh_win_size_step: 4
+
+   # Marker geometry filters: reject detections that are too small/large/imprecise.
+   min_marker_perimeter_rate:      0.01
+   max_marker_perimeter_rate:      4.0
+   polygonal_approx_accuracy_rate: 0.03
+   min_corner_distance_rate:       0.02
+   min_distance_to_border:         1
+
+   # Corner refinement improves 3D pose accuracy at a small speed cost.
+   # method: 0=none  1=subpix  2=contour  3=apriltag
+   corner_refinement_method:         1
+   corner_refinement_max_iterations: 50
+   corner_refinement_min_accuracy:   0.01
+
+   # Detect markers on glossy/reflective surfaces that invert the black/white pattern.
+   detect_inverted_marker: 1
+
+
+# ---- ArUco Marker Display (on the touchscreen) ------------------------------
+# The C x R grid starts at marker ID 1 and increments left-to-right, top-to-bottom.
+# Spacing between markers is auto-calculated from screen size, padding, and marker size.
+aruco_display:
+   cols: 4                # Number of grid columns
+   rows: 2                # Number of grid rows
+   marker_size_px: 150    # Rendered marker side length [px]
+   padding_px: 80         # Distance from the screen edge to the nearest marker [px]
+
+
+# ---- Touchscreen Monitor ----------------------------------------------------
+touchscreen:
+   width: 1920
+   height: 1080
+   x_offset: 3440         # X offset of the touchscreen in the desktop coordinate space
+   y_offset: 0            # Y offset of the touchscreen (0 if monitors are top-aligned)
+
+
+# ---- Operator Display (main monitor) ----------------------------------------
+display:
+   width: 1600
+   height: 1200
+
+
+# ---- Serial (Teensy) --------------------------------------------------------
+serial:
+   port_send: "/dev/ttyACM0"
+   port_receive: "/dev/ttyACM1"
+   baud_rate: 115200

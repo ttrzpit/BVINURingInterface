@@ -1,0 +1,20 @@
+# ninja log v5
+1	457	1780189244856938405	CMakeFiles/BVINURingInterface.dir/main.cpp.o	6a77a15712398559
+528	676	1780189245072941626	BVINURingInterface	1eb627b249f78a1b
+2	371	1780189244769937107	CMakeFiles/BVINURingInterface.dir/src/TouchHandler.cpp.o	b846bf13cdbd9828
+2	460	1780189244858938434	CMakeFiles/BVINURingInterface.dir/src/DisplayHandler.cpp.o	d808a524245fe8ad
+2	374	1780189244773937166	CMakeFiles/BVINURingInterface.dir/src/SerialHandler.cpp.o	d4f6138dcd8e5f72
+1	458	1780189244857938420	CMakeFiles/BVINURingInterface.dir/src/Config.cpp.o	9bc3c77ee0e5302e
+1	513	1780189244911939225	CMakeFiles/BVINURingInterface.dir/src/ArucoHandler.cpp.o	a6c2b3cfc02e7bb8
+1	528	1780189244927939464	CMakeFiles/BVINURingInterface.dir/src/CameraHandler.cpp.o	f3d49555ca76c340
+1	428	1780190003911265944	CMakeFiles/BVINURingInterface.dir/main.cpp.o	6a77a15712398559
+2	437	1780190003922266062	CMakeFiles/BVINURingInterface.dir/src/DisplayHandler.cpp.o	d808a524245fe8ad
+437	565	1780190004049267417	BVINURingInterface	1eb627b249f78a1b
+2	339	1780190548107147983	CMakeFiles/BVINURingInterface.dir/src/TouchHandler.cpp.o	b846bf13cdbd9828
+2	369	1780190548137148721	CMakeFiles/BVINURingInterface.dir/src/SerialHandler.cpp.o	d4f6138dcd8e5f72
+1	439	1780190548211150543	CMakeFiles/BVINURingInterface.dir/main.cpp.o	6a77a15712398559
+2	455	1780190548226150913	CMakeFiles/BVINURingInterface.dir/src/CameraHandler.cpp.o	f3d49555ca76c340
+2	458	1780190548229150987	CMakeFiles/BVINURingInterface.dir/src/Config.cpp.o	9bc3c77ee0e5302e
+2	459	1780190548230151011	CMakeFiles/BVINURingInterface.dir/src/DisplayHandler.cpp.o	d808a524245fe8ad
+2	513	1780190548285152365	CMakeFiles/BVINURingInterface.dir/src/ArucoHandler.cpp.o	a6c2b3cfc02e7bb8
+513	645	1780190548415155566	BVINURingInterface	1eb627b249f78a1b

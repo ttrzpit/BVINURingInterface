@@ -1,0 +1,164 @@
+#include "Config.h"
+
+#include <iostream>
+
+// =============================================================================
+// Config.cpp — Loads config.yaml using OpenCV FileStorage
+//
+// cv::FileStorage is built into OpenCV — no extra packages needed.
+// Reads a YAML file written in OpenCV's dialect (starts with %YAML:1.0).
+//
+// Each section in the YAML maps to one of the sub-config structs.
+// Fields that are missing from the file keep their default values from Config.h.
+// =============================================================================
+
+
+bool Config::load(const std::string& filepath) {
+
+    cv::FileStorage fs(filepath, cv::FileStorage::READ);
+
+    if (!fs.isOpened()) {
+        std::cerr << "Config: Could not open '" << filepath
+                  << "' — all parameters using defaults.\n";
+        buildDerivedCameraValues();
+        return false;
+    }
+
+    // ---- Camera -------------------------------------------------------------
+    cv::FileNode cam = fs["camera"];
+    if (!cam.empty()) {
+        cam["device"]     >> camera.device;
+        cam["width"]      >> camera.width;
+        cam["height"]     >> camera.height;
+        cam["framerate"]  >> camera.framerate;
+
+        // FileStorage has no native bool — read as int and convert
+        int rot = 0;
+        cam["rotate_180"] >> rot;
+        camera.rotate180 = (rot != 0);
+
+        cam["fx"] >> camera.fx;
+        cam["fy"] >> camera.fy;
+        cam["cx"] >> camera.cx;
+        cam["cy"] >> camera.cy;
+
+        cv::FileNode dist = cam["distortion"];
+        if (!dist.empty() && static_cast<int>(dist.size()) == 5) {
+            for (int i = 0; i < 5; i++) camera.distortion[i] = static_cast<double>(dist[i]);
+        }
+
+        cam["brightness"]  >> camera.brightness;
+        cam["contrast"]    >> camera.contrast;
+        cam["saturation"]  >> camera.saturation;
+        cam["hue"]         >> camera.hue;
+
+        int awb = 0;
+        cam["auto_white_balance"] >> awb;
+        camera.autoWhiteBalance = (awb != 0);
+
+        cam["gamma"]          >> camera.gamma;
+        cam["gain"]           >> camera.gain;
+        cam["sharpness"]      >> camera.sharpness;
+        cam["backlight"]      >> camera.backlight;
+        cam["auto_exposure"]  >> camera.autoExposure;
+        cam["exposure_level"] >> camera.exposureLevel;
+
+        int af = 0;
+        cam["auto_focus"] >> af;
+        camera.autoFocus = (af != 0);
+
+        cam["focus_level"] >> camera.focusLevel;
+        cam["zoom"]        >> camera.zoom;
+    }
+
+    // ---- ArUco detection ----------------------------------------------------
+    cv::FileNode ad = fs["aruco_detect"];
+    if (!ad.empty()) {
+        ad["marker_size_mm"] >> arucoDetect.markerSizeMm;
+        ad["valid_id_min"]   >> arucoDetect.validIdMin;
+        ad["valid_id_max"]   >> arucoDetect.validIdMax;
+    }
+
+    // ---- ArUco detector algorithm parameters --------------------------------
+    cv::FileNode adet = fs["aruco_detector"];
+    if (!adet.empty()) {
+        adet["adaptive_thresh_constant"]        >> arucoDetector.adaptiveThreshConstant;
+        adet["adaptive_thresh_win_size_min"]    >> arucoDetector.adaptiveThreshWinSizeMin;
+        adet["adaptive_thresh_win_size_max"]    >> arucoDetector.adaptiveThreshWinSizeMax;
+        adet["adaptive_thresh_win_size_step"]   >> arucoDetector.adaptiveThreshWinSizeStep;
+        adet["min_marker_perimeter_rate"]       >> arucoDetector.minMarkerPerimeterRate;
+        adet["max_marker_perimeter_rate"]       >> arucoDetector.maxMarkerPerimeterRate;
+        adet["polygonal_approx_accuracy_rate"]  >> arucoDetector.polygonalApproxAccuracyRate;
+        adet["min_corner_distance_rate"]        >> arucoDetector.minCornerDistanceRate;
+        adet["min_distance_to_border"]          >> arucoDetector.minDistanceToBorder;
+        adet["corner_refinement_method"]        >> arucoDetector.cornerRefinementMethod;
+        adet["corner_refinement_max_iterations"] >> arucoDetector.cornerRefinementMaxIterations;
+        adet["corner_refinement_min_accuracy"]  >> arucoDetector.cornerRefinementMinAccuracy;
+
+        int inv = 0;
+        adet["detect_inverted_marker"] >> inv;
+        arucoDetector.detectInvertedMarker = (inv != 0);
+    }
+
+    // ---- ArUco display ------------------------------------------------------
+    cv::FileNode adisp = fs["aruco_display"];
+    if (!adisp.empty()) {
+        adisp["cols"]           >> arucoDisplay.cols;
+        adisp["rows"]           >> arucoDisplay.rows;
+        adisp["marker_size_px"] >> arucoDisplay.markerSizePx;
+        adisp["padding_px"]     >> arucoDisplay.paddingPx;
+    }
+
+    // ---- Touchscreen --------------------------------------------------------
+    cv::FileNode ts = fs["touchscreen"];
+    if (!ts.empty()) {
+        ts["width"]    >> touchscreen.width;
+        ts["height"]   >> touchscreen.height;
+        ts["x_offset"] >> touchscreen.xOffset;
+        ts["y_offset"] >> touchscreen.yOffset;
+    }
+
+    // ---- Display ------------------------------------------------------------
+    cv::FileNode disp = fs["display"];
+    if (!disp.empty()) {
+        disp["width"]  >> display.width;
+        disp["height"] >> display.height;
+    }
+
+    // ---- Serial -------------------------------------------------------------
+    cv::FileNode ser = fs["serial"];
+    if (!ser.empty()) {
+        ser["port_send"]    >> serial.portSend;
+        ser["port_receive"] >> serial.portReceive;
+        ser["baud_rate"]    >> serial.baudRate;
+    }
+
+    fs.release();
+    buildDerivedCameraValues();
+
+    std::cout << "Config:       Loaded '" << filepath << "'\n";
+    std::cout << "Config:       Camera " << camera.width << "x" << camera.height
+              << " @ " << camera.framerate << " fps\n";
+    std::cout << "Config:       ArUco grid " << arucoDisplay.cols << "x"
+              << arucoDisplay.rows << ", IDs [" << arucoDetect.validIdMin
+              << ", " << arucoDetect.validIdMax << "]\n";
+    return true;
+}
+
+
+void Config::buildDerivedCameraValues() {
+
+    // Build 3×3 camera intrinsic matrix from the scalar parameters
+    camera.cameraMatrix = (cv::Mat_<double>(3, 3)
+        << camera.fx, 0.0,       camera.cx,
+           0.0,       camera.fy, camera.cy,
+           0.0,       0.0,       1.0);
+
+    // Build 1×5 distortion coefficient vector
+    camera.distCoeffs = (cv::Mat_<double>(1, 5)
+        << camera.distortion[0],
+           camera.distortion[1],
+           camera.distortion[2],
+           camera.distortion[3],
+           camera.distortion[4]);
+}

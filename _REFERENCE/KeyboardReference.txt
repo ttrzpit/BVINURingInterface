@@ -1,0 +1,11 @@
+Key Code    functions
+ESC 27      exiting
+1-5         select active marker
+`           disable all markers
+E           enable amplifier
+S           enable serial commands
+X           e-stop, kill amp and serial
+[]          increase / decrease K
+;'          increase/decrease B 
+v           enable Visualizer
+c           clear Visualizer
