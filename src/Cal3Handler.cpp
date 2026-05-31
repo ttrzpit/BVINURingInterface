@@ -1,0 +1,224 @@
+#include "Cal3Handler.h"
+
+#include <cmath>
+#include <iomanip>
+#include <iostream>
+#include <numeric>
+
+// =============================================================================
+// Cal3Handler.cpp — Camera-to-Fingertip Offset Calibration
+//
+// Multi-tag solvePnP builds the pose from ALL visible ArUco markers at once.
+// Each marker's 4 corners provide 4 point correspondences, so even 2 visible
+// markers give 8 correspondences — more than enough for a robust solution.
+//
+// World coordinate frame:
+//   Origin  = top-left corner of the touchscreen
+//   X right, Y down (matching screen image coordinates), Z toward camera
+//   Units: millimetres
+//
+// solvePnP returns the screen→camera transform (R, t):
+//   p_cam = R * p_world + t
+// Camera position in world: p_cam_world = -R^T * t
+// =============================================================================
+
+Cal3Handler::Cal3Handler(const TouchscreenConfig&  touchCfg,
+                          const CameraConfig&       camCfg,
+                          const ArucoDisplayConfig& displayCfg)
+    : touchCfg_(touchCfg)
+    , camCfg_(camCfg)
+    , displayCfg_(displayCfg)
+{}
+
+void Cal3Handler::Reset() {
+    phase_          = Phase::WAITING;
+    touchStartSecs_ = 0.0;
+    cooldownEndSecs_= 0.0;
+    sampleCount_    = 0;
+    offsets_.clear();
+    rollSamples_.clear();
+    lastOffset_     = {};
+    finalOffset_    = {};
+    rollReference_  = 0.0f;
+    status_         = "Touch screen (0/" + std::to_string(MAX_SAMPLES) + ")";
+    std::cout << "Cal3: Reset — ready to record " << MAX_SAMPLES << " touches.\n";
+}
+
+
+// =============================================================================
+// Update — called once per main loop iteration
+// =============================================================================
+
+bool Cal3Handler::Update(const TouchState&                  touch,
+                          const std::vector<DetectedMarker>& markers,
+                          double                             nowSecs) {
+    if (phase_ == Phase::DONE) return false;
+
+    switch (phase_) {
+
+        case Phase::WAITING:
+            if (touch.isTouched) {
+                phase_         = Phase::HOLDING;
+                touchStartSecs_= nowSecs;
+                status_        = "Hold steady...";
+            }
+            break;
+
+        case Phase::HOLDING:
+            if (!touch.isTouched) {
+                // Lifted before hold duration — reset without penalising
+                phase_  = Phase::WAITING;
+                status_ = "Released too early — try again ("
+                        + std::to_string(sampleCount_) + "/" + std::to_string(MAX_SAMPLES) + ")";
+            } else if (nowSecs - touchStartSecs_ >= HOLD_SECS) {
+                // Stable touch — attempt to record
+                cv::Vec3d   rvec;
+                cv::Point3f camPos;
+
+                if (!ComputeCameraPoseInScreen(markers, rvec, camPos)) {
+                    // solvePnP failed — not enough markers visible; ask to retry
+                    phase_  = Phase::WAITING;
+                    status_ = "Not enough markers visible — reposition and try again.";
+                    std::cerr << "Cal3: solvePnP failed — need >= 2 visible markers.\n";
+                    break;
+                }
+
+                // Offset = fingertip (touch) − camera, in screen-world mm
+                float touch_x_mm = touch.position.x * touchCfg_.mmPerPixel;
+                float touch_y_mm = touch.position.y * touchCfg_.mmPerPixel;
+
+                cv::Point3f offset(touch_x_mm - camPos.x,
+                                   touch_y_mm - camPos.y,
+                                   -camPos.z);   // Z: camera is above screen (camPos.z > 0)
+
+                offsets_.push_back(offset);
+                lastOffset_ = offset;
+
+                // Store roll reference from Z rotation of rvec
+                // (rvec[2] approximates in-plane rotation; refine convention later)
+                float roll = static_cast<float>(rvec[2]);
+                rollSamples_.push_back(roll);
+
+                sampleCount_++;
+
+                std::cout << std::fixed << std::setprecision(1)
+                          << "Cal3: Sample " << sampleCount_ << "/" << MAX_SAMPLES
+                          << " — d = (" << offset.x << ", " << offset.y
+                          << ", " << offset.z << ") mm"
+                          << "  touch=(" << touch.position.x << ", " << touch.position.y
+                          << " px)"
+                          << "  cam_screen=(" << camPos.x << ", " << camPos.y << " mm)\n"
+                          << std::defaultfloat;
+
+                if (sampleCount_ >= MAX_SAMPLES) {
+                    // Average all offsets
+                    cv::Point3f sum{0, 0, 0};
+                    for (const auto& o : offsets_) sum += o;
+                    finalOffset_ = sum * (1.0f / MAX_SAMPLES);
+
+                    float rollSum = std::accumulate(rollSamples_.begin(), rollSamples_.end(), 0.0f);
+                    rollReference_ = rollSum / static_cast<float>(rollSamples_.size());
+
+                    phase_  = Phase::DONE;
+                    status_ = "Complete!";
+
+                    std::cout << std::fixed << std::setprecision(2)
+                              << "Cal3: === CALIBRATION COMPLETE ===\n"
+                              << "Cal3: offset_cam_to_fingertip (d) = ("
+                              << finalOffset_.x << ", "
+                              << finalOffset_.y << ", "
+                              << finalOffset_.z << ") mm\n"
+                              << "Cal3: roll_reference = " << rollReference_ << " rad\n"
+                              << std::defaultfloat;
+                } else {
+                    cooldownEndSecs_ = nowSecs + COOLDOWN_SECS;
+                    phase_  = Phase::COOLDOWN;
+                    status_ = "Sample " + std::to_string(sampleCount_) + "/"
+                            + std::to_string(MAX_SAMPLES)
+                            + " — wait 2 s...";
+                }
+                return true;   // New sample recorded this call
+            }
+            break;
+
+        case Phase::COOLDOWN:
+            if (nowSecs >= cooldownEndSecs_) {
+                phase_  = Phase::WAITING;
+                status_ = "Touch screen ("
+                        + std::to_string(sampleCount_) + "/" + std::to_string(MAX_SAMPLES) + ")";
+            }
+            break;
+
+        default: break;
+    }
+    return false;
+}
+
+
+// =============================================================================
+// Private — multi-tag solvePnP
+// =============================================================================
+
+bool Cal3Handler::ComputeCameraPoseInScreen(const std::vector<DetectedMarker>& markers,
+                                             cv::Vec3d&   rvecOut,
+                                             cv::Point3f& camPosOut) const {
+    std::vector<cv::Point3f> objectPoints;
+    std::vector<cv::Point2f> imagePoints;
+
+    // Pre-compute spacing (same formula as ArucoHandler::renderGridImage)
+    const float sz_px  = std::round(displayCfg_.markerSizeMm * touchCfg_.pixelsPerMm);
+    const float pad_px = std::round(displayCfg_.paddingMm    * touchCfg_.pixelsPerMm);
+    const float sz_mm  = displayCfg_.markerSizeMm;
+
+    const float spacingX_px = (displayCfg_.cols > 1)
+        ? (touchCfg_.width  - 2.0f * pad_px - displayCfg_.cols * sz_px) / (displayCfg_.cols - 1)
+        : 0.0f;
+    const float spacingY_px = (displayCfg_.rows > 1)
+        ? (touchCfg_.height - 2.0f * pad_px - displayCfg_.rows * sz_px) / (displayCfg_.rows - 1)
+        : 0.0f;
+
+    for (const auto& m : markers) {
+        if (m.id < 1 || m.id > displayCfg_.cols * displayCfg_.rows) continue;
+
+        const int col = (m.id - 1) % displayCfg_.cols;
+        const int row = (m.id - 1) / displayCfg_.cols;
+
+        // Top-left of this marker in screen pixels, then convert to mm
+        const float ox_mm = (pad_px + col * (sz_px + spacingX_px)) * touchCfg_.mmPerPixel;
+        const float oy_mm = (pad_px + row * (sz_px + spacingY_px)) * touchCfg_.mmPerPixel;
+
+        // Four corners in world mm (Z = 0, flat screen plane)
+        // Order matches OpenCV ArUco: top-left, top-right, bottom-right, bottom-left
+        objectPoints.push_back({ ox_mm,          oy_mm,          0.0f });
+        objectPoints.push_back({ ox_mm + sz_mm,  oy_mm,          0.0f });
+        objectPoints.push_back({ ox_mm + sz_mm,  oy_mm + sz_mm,  0.0f });
+        objectPoints.push_back({ ox_mm,          oy_mm + sz_mm,  0.0f });
+
+        for (int k = 0; k < 4; k++) {
+            imagePoints.push_back({ m.cornersPx[k].x, m.cornersPx[k].y });
+        }
+    }
+
+    // Require at least 2 markers (8 correspondences) for a reliable pose
+    if (static_cast<int>(objectPoints.size()) < 8) return false;
+
+    cv::Vec3d rvec, tvec;
+    bool ok = cv::solvePnP(objectPoints, imagePoints,
+                            camCfg_.cameraMatrix, camCfg_.distCoeffs,
+                            rvec, tvec, false, cv::SOLVEPNP_ITERATIVE);
+    if (!ok) return false;
+
+    // Invert the screen→camera transform to get camera position in screen world
+    // p_world = R^T * (p_cam − t)  →  camera is at p_cam=0, so:
+    // cam_in_world = R^T * (-t)
+    cv::Mat R;
+    cv::Rodrigues(rvec, R);
+    cv::Mat t_mat = cv::Mat(tvec);
+    cv::Mat camWorld = -R.t() * t_mat;   // 3×1, double
+
+    camPosOut = cv::Point3f(static_cast<float>(camWorld.at<double>(0)),
+                             static_cast<float>(camWorld.at<double>(1)),
+                             static_cast<float>(camWorld.at<double>(2)));
+    rvecOut = rvec;
+    return true;
+}

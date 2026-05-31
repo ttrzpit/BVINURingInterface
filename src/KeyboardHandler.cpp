@@ -112,6 +112,11 @@ void KeyboardHandler::ParseCommand(const std::string& cmd) {
         state_.outputBuffer = "State: CALIBRATING";
         return;
     }
+    if (cmd == "cal3") {
+        state_.systemState  = SystemState::CAL3;
+        state_.outputBuffer = "State: CAL3 — touch screen 10 times";
+        return;
+    }
     if (cmd == "idle") {
         state_.systemState  = SystemState::IDLE;
         state_.outputBuffer = "State: IDLE";

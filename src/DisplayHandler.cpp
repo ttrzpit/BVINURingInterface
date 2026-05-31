@@ -218,9 +218,10 @@ void DisplayHandler::PopulateTelemetryPanel(
         std::string stateStr;
         cv::Scalar  stateFill;
         switch (kb.systemState) {
-            case SystemState::CALIBRATING: stateStr = "CALIBRATING"; stateFill = Colors::YelBk;  break;
-            case SystemState::FITTS:       stateStr = "FITTS";        stateFill = Colors::GreBk;  break;
-            default:                       stateStr = "IDLE";          stateFill = Colors::GraBk;  break;
+            case SystemState::CALIBRATING: stateStr = "CALIBRATING"; stateFill = Colors::YelBk; break;
+            case SystemState::CAL3:        stateStr = "CAL3";         stateFill = Colors::OraBk; break;
+            case SystemState::FITTS:       stateStr = "FITTS";        stateFill = Colors::GreBk; break;
+            default:                       stateStr = "IDLE";         stateFill = Colors::GraBk; break;
         }
         AddBodyCell(stateStr, "C3", 3, 1, "center", bodyFontSize, stateFill);
     }

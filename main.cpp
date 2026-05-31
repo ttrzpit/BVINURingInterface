@@ -26,6 +26,7 @@
 #include <iostream>
 
 #include "ArucoHandler.h"
+#include "Cal3Handler.h"
 #include "CameraHandler.h"
 #include "Colors.h"
 #include "Config.h"
@@ -71,6 +72,7 @@ int main() {
                          cfg.camera.distCoeffs);
 
     TouchHandler   touch(cfg.touchscreen);
+    Cal3Handler    cal3(cfg.touchscreen, cfg.camera, cfg.arucoDisplay);
 
     DisplayHandler display(cfg.display,
                            cv::Point2i(static_cast<int>(cfg.camera.cx),
@@ -110,20 +112,17 @@ int main() {
 
         // Handle system state transitions
         if (kb.systemState != prevState) {
-            // Grid is visible in both CALIBRATING and FITTS states
+            // Grid is visible in CALIBRATING, CAL3, and FITTS states
             bool showGrid = (kb.systemState == SystemState::CALIBRATING ||
+                             kb.systemState == SystemState::CAL3         ||
                              kb.systemState == SystemState::FITTS);
             aruco.SetGridVisible(showGrid);
-            // Reset Fitts target when leaving FITTS state
+
+            if (kb.systemState == SystemState::CAL3) {
+                cal3.Reset();   // Fresh start each time CAL3 is entered
+            }
             if (prevState == SystemState::FITTS) prevFittsTarget = 0;
             prevState = kb.systemState;
-        }
-
-        // In FITTS state, show the selected target marker whenever it changes
-        if (kb.systemState == SystemState::FITTS &&
-            kb.fittsTargetId != prevFittsTarget && kb.fittsTargetId > 0) {
-            aruco.ShowSingleMarker(kb.fittsTargetId);
-            prevFittsTarget = kb.fittsTargetId;
         }
 
         // b. Camera frame — check if the camera thread has produced a NEW frame
@@ -147,7 +146,22 @@ int main() {
         // d. Touch state — drains pending X11 events, returns current state
         TouchState touchState = touch.getLatestTouch();
 
-        // e. Operator display + telemetry — only refresh on a new camera frame
+        // e. CAL3 — update touch-collection state machine now that both
+        //    markers and touchState are available
+        if (kb.systemState == SystemState::CAL3) {
+            double nowSecs = cv::getTickCount() / cv::getTickFrequency();
+            cal3.Update(touchState, markers, nowSecs);
+            keyboard.SetExternalStatus(cal3.GetStatus());
+        }
+
+        // In FITTS state, show the selected target marker whenever it changes
+        if (kb.systemState == SystemState::FITTS &&
+            kb.fittsTargetId != prevFittsTarget && kb.fittsTargetId > 0) {
+            aruco.ShowSingleMarker(kb.fittsTargetId);
+            prevFittsTarget = kb.fittsTargetId;
+        }
+
+        // g. Operator display + telemetry — only refresh on a new camera frame
         //    so that the frequency counter in DisplayHandler measures the true
         //    camera processing rate rather than the raw loop spin rate.
         if (isNewFrame) {

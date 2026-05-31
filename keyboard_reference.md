@@ -10,9 +10,10 @@ System Information panel. The result appears in the **Output** row.
 
 | Command | Result |
 |---------|--------|
-| `cal` | Enter **CALIBRATING** state — shows full ArUco marker grid on touchscreen |
+| `cal`  | Enter **CALIBRATING** state — shows full ArUco marker grid on touchscreen |
+| `cal3` | Enter **CAL3** state — Stage 3 offset calibration (10 finger touches) |
 | `idle` | Return to **IDLE** state — hides the touchscreen grid |
-| `fitts` | Enter **FITTS** task state — shows full grid on touchscreen; use `r` to select a target |
+| `fitts`| Enter **FITTS** task state — shows full grid on touchscreen; use `r` to select a target |
 
 ---
 
@@ -46,6 +47,16 @@ System Information panel. The result appears in the **Output** row.
 
 | State | Touchscreen | Telemetry Colour |
 |-------|-------------|-----------------|
-| `IDLE` | Blank | Gray |
-| `CALIBRATING` | Full 9×5 ArUco grid | Yellow |
-| `FITTS` | Single randomly selected target marker | Green |
+| `IDLE`        | Blank                                   | Gray   |
+| `CALIBRATING` | Full ArUco grid                         | Yellow |
+| `CAL3`        | Full ArUco grid — touch anywhere 10×    | Orange |
+| `FITTS`       | Single randomly selected target marker  | Green  |
+
+## CAL3 Flow
+
+1. Type `cal3` + Enter
+2. Touch fingertip firmly to the touchscreen and **hold ~200 ms**
+3. Release — the telemetry Output row confirms the sample and shows the computed offset
+4. Wait 2 seconds (cooldown), then repeat from step 2
+5. After 10 samples the final averaged `offset_cam_to_fingertip` is printed to the terminal
+6. Type `idle` to return to normal operation

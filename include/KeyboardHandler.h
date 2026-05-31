@@ -27,7 +27,8 @@
 
 enum class SystemState {
     IDLE,         ///< Default — no active task, ArUco grid hidden
-    CALIBRATING,  ///< Calibration in progress — ArUco grid shown on touchscreen
+    CALIBRATING,  ///< General calibration — ArUco grid shown on touchscreen
+    CAL3,         ///< Calibration Stage 3: camera-to-fingertip offset collection
     FITTS         ///< Fitts task running
 };
 
@@ -61,6 +62,13 @@ public:
 
     /** @brief Returns the current state for main.cpp to distribute. */
     const KeyboardState& GetState() const { return state_; }
+
+    /**
+     * @brief Overwrite the output buffer with a message from an external source
+     *        (e.g. Cal3Handler status). Does not affect the input buffer or any
+     *        other state field.
+     */
+    void SetExternalStatus(const std::string& msg) { state_.outputBuffer = msg; }
 
 private:
     void ParseCommand(const std::string& cmd);  // Called on Enter
