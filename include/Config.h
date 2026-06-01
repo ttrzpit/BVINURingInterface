@@ -172,9 +172,8 @@ struct ControllerPanelConfig {
 // ---- Serial (Teensy) --------------------------------------------------------
 
 struct SerialConfig {
-    std::string portSend    = "/dev/ttyACM0";
-    std::string portReceive = "/dev/ttyACM1";
-    int         baudRate    = 115200;
+    std::string port     = "/dev/ttyACM0";   // Single full-duplex USB CDC port
+    int         baudRate = 1000000;           // 1 Mbaud (nominal for USB CDC)
 };
 
 

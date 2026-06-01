@@ -32,6 +32,7 @@
 #include "Config.h"
 #include "DisplayHandler.h"
 #include "KeyboardHandler.h"
+#include "PacketTypes.h"
 #include "SerialHandler.h"
 #include "TouchHandler.h"
 
@@ -95,9 +96,10 @@ int main() {
 
     KeyboardHandler keyboard;
 
-    double lastFrameTimestamp = -1.0;
-    SystemState prevState     = SystemState::IDLE;
-    int    prevFittsTarget    = 0;
+    double           lastFrameTimestamp = -1.0;
+    SystemState      prevState         = SystemState::IDLE;
+    int              prevFittsTarget   = 0;
+    PcToTeensyPacket lastTxPkt         = {};   // Pending TX values updated each frame — sent by TX thread at 200 Hz
 
     // ---- Main loop ----------------------------------------------------------
     while (g_running) {
@@ -109,6 +111,17 @@ int main() {
         keyboard.ProcessKey(key);
         const KeyboardState& kb = keyboard.GetState();
         if (kb.quitRequested) break;
+
+        // Serial connect/disconnect on demand
+        if (kb.pendingSerialAction == SerialAction::CONNECT) {
+            serial.Connect();
+            keyboard.SetExternalStatus(serial.IsConnected() ? "Teensy connected." : "Connect failed — check port.");
+            keyboard.ClearSerialAction();
+        } else if (kb.pendingSerialAction == SerialAction::DISCONNECT) {
+            serial.Disconnect();
+            keyboard.SetExternalStatus("Teensy disconnected.");
+            keyboard.ClearSerialAction();
+        }
 
         // Handle system state transitions
         if (kb.systemState != prevState) {
@@ -161,16 +174,30 @@ int main() {
             prevFittsTarget = kb.fittsTargetId;
         }
 
-        // g. Operator display + telemetry — only refresh on a new camera frame
-        //    so that the frequency counter in DisplayHandler measures the true
-        //    camera processing rate rather than the raw loop spin rate.
+        // g. Serial — update the pending TX packet each new camera frame.
+        //    The TX thread sends it independently at 200 Hz; packet_index is
+        //    managed by the TX thread and does not need to be set here.
+        //    PWM defaults to 2047 (no power) until the controller is implemented.
         if (isNewFrame) {
-            display.Update(frame.undistorted, markers, touchState, kb);
+            lastTxPkt.state = static_cast<uint8_t>(PcState::IDLE);  // TODO: map kb.systemState
+            lastTxPkt.pwm_A = 2047;
+            lastTxPkt.pwm_B = 2047;
+            lastTxPkt.pwm_C = 2047;
+            serial.SetPendingTx(lastTxPkt);
         }
 
-        // f. Serial (stub — uncomment when Teensy is connected)
-        // serial.send("...");
-        // std::string received = serial.getLatestReceived();
+        // Assemble serial state for the display — always up to date even when
+        // the panel only refreshes at 10 Hz.
+        SerialState serialSt;
+        serialSt.isConnected   = serial.IsConnected();
+        serialSt.txFrequencyHz = serial.GetTxFrequency();
+        serialSt.lastTx        = lastTxPkt;
+        serialSt.hasRx         = serial.GetLatestPacket(serialSt.lastRx);
+
+        // h. Operator display + telemetry — only refresh on a new camera frame
+        if (isNewFrame) {
+            display.Update(frame.undistorted, markers, touchState, kb, serialSt);
+        }
     }
 
     // ---- Clean shutdown -----------------------------------------------------

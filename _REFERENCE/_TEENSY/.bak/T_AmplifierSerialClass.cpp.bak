@@ -1,0 +1,207 @@
+// // Call to class header
+// // #include "T_AmplifierSerialClass.h"
+
+// // System data manager
+// #include "T_SharedDataManagerClass.h"
+
+
+// T_AmplifierSerialClass::T_AmplifierSerialClass( SharedDataManager& ctx )
+// 	: dataHandle( ctx )
+// 	, shared( ctx.getData() ) {
+
+
+// 	  };
+
+
+// /**
+//  * @brief Initialize the incoming and outgoing serial ports
+//  * 
+//  */
+// void T_AmplifierSerialClass::Begin() {
+
+        
+//     shared->Serial.debugText = "Serial A ready!" ;
+
+// 	// Establish hardware serial connection to amplifiers
+// 	HWSerialA.begin( 9600 );
+// 	delay( 100 );
+
+//     shared->Serial.debugText = "Serial A ready!" ;
+// }
+
+
+
+
+// void T_AmplifierSerialClass::SendQueryPWM( char amp ) {
+
+// 	switch ( amp ) {
+
+// 		case 'A': {
+
+// 			// Update debug text
+// 			shared->Serial.debugText = String( "Requesting PWM current mode for amp " ) + amp + "...";
+
+// 			// Send request
+// 			HWSerialA.print( asciiSetCurrentMode );
+            
+//             // Reset flag
+//             // shared->Serial.debugText = "" ;
+
+// 			// Read
+// 			ReadQueryPWM( amp );
+
+// 			break;
+// 		}
+// 	}
+// }
+
+// void T_AmplifierSerialClass::ReadQueryPWM( char amp ) {
+
+// 	uint8_t idx = 0;
+// 	uint8_t buffer[32];
+
+// 	switch ( amp ) {
+
+// 		case 'A': {
+
+// 			// Iterate over data
+// 			if ( HWSerialA.available() ) {
+
+// 				// Read byte
+// 				char c = HWSerialA.read();
+//                 shared->Serial.debugText = String(c) ; 
+
+// 				// Look for terminating character
+// 				if ( c == '\n' ) {
+
+// 					// Replace terminator
+// 					buffer[idx] = '\0';
+
+// 					// Replace return if present
+// 					if ( buffer[idx - 1] == '\r' && idx > 0 ) {
+// 						buffer[idx - 1] = '\0';
+// 					}
+
+// 				} else {
+
+// 					// Save to buffer
+// 					buffer[idx++] = c;
+// 				}
+// 			}	 // while
+
+// 			// String response			 = String( ( char* )buffer );
+// 			// shared->Serial.debugText = response;
+//             shared->Serial.debugText = "";
+// 			break;
+            
+// 		}
+// 	}
+// }
+
+// // void T_AmplifierSerialClass::RunQuery( queryStateEnum qState, char amp ) {
+
+// //     // Select query
+// // 	switch ( qState ) {
+
+// // 		case queryStateEnum::SET_PWM: {
+
+
+// // 			break;
+// // 		}
+// // 	}
+// // }
+
+// // void ReadQueryResponse( queryStateEnum qState, char amp );
+
+
+
+// // void T_AmplifierSerialClass::SetPwmMode() {
+
+// // 	// Sent serial command to use PWM current mode
+// // 	HWSerialA.print( asciiSetCurrentMode );
+// // 	delay( 500 );
+// // 	// HWSerialB.print( asciiSetCurrentMode );
+// // 	// delay( 500 );
+// // 	// HWSerialC.print( asciiSetCurrentMode );
+// // 	// delay( 500 );
+// // }
+
+
+
+// // void T_AmplifierSerialClass::Read( queryStateEnum qState, char amp ) { }
+
+
+
+// // void T_AmplifierSerialClass::QueryName( char amp ) {
+
+
+// // 	HWSerialA
+// // }
+
+// // void T_AmplifierSerialClass::ReadName( char amp ) { }
+
+// /** ==================================================
+//  *  ================================================== 
+//  * 
+//  *  UU   UU  PPPPP    DDDDD      AAA    TTTTTT  EEEEEE 
+//  *  UU   UU  PP   PP  DD   DD   AA AA     TT    EE    
+//  *  UU   UU  PP   PP  DD   DD   AA AA     TT    EE  
+//  *  UU   UU  PPPPP    DD   DD  AAAAAAA    TT    EEEEE    
+//  *  UU   UU  PP       DD   DD  AA   AA    TT    EE    
+//  *  UU   UU  PP       DD   DD  AA   AA    TT    EE    
+//  *   UUUUU   PP       DDDDD    AA   AA    TT    EEEEEE 
+//  * 
+//  *  ================================================== 
+//  *  ================================================== 
+// */
+
+
+
+// /** =========================================================== 
+//  *  ===========================================================  
+//  * 
+//  *  RRRRR    EEEEEE    CCCCC  EEEEEE  IIIIII  VV     VV  EEEEEE 
+//  *  RR   RR  EE      CC       EE        II    VV     VV  EE     
+//  *  RR   RR  EE      CC       EE        II     VV   VV   EE   
+//  *  RRRRR    EEEEE   CC       EEEEE     II     VV   VV   EEEEE     
+//  *  RR   RR  EE      CC       EE        II      VV VV    EE     
+//  *  RR   RR  EE      CC       EE        II      VV VV    EE     
+//  *  RR   RR  EEEEEE    CCCCC  EEEEEE  IIIIII     VVV     EEEEEE 
+//  * 
+//  *  ===========================================================  
+//  *  ===========================================================  
+// */
+
+
+
+// /** ==================================================
+//  *  ================================================== 
+//  * 
+//  *  PPPPPP      AAA    RRRRR     SSSS   EEEEEE 
+//  *  PP    PP   AA AA   RR   RR  SS   	EE    
+//  *  PP    PP   AA AA   RR   RR  SS      EE  
+//  *  PPPPPP    AAAAAAA  RRRRR     SSSS   EEEEE    
+//  *  PP        AA   AA  RR   RR      SS  EE    
+//  *  PP        AA   AA  RR   RR      SS  EE    
+//  *  PP        AA   AA  RR   RR   SSSS   EEEEEE 
+//  * 
+//  *  ================================================== 
+//  *  ================================================== 
+//  */
+
+
+
+// /** =============================================== 
+//  *  =============================================== 
+//  * 
+//  *  SSSS   EEEEEE  NN   NN   DDDD  
+//  * SS      EE      NNN  NN   DD  DD 
+//  * SS      EE      NNN  NN   DD  DD 
+//  *  SSSS   EEEE    NN NNNN   DD  DD 
+//  *     SS  EE      NN  NNN   DD  DD 
+//  *     SS  EE      NN   NN   DD  DD 
+//  *  SSSS   EEEEEE  NN   NN   DDDD  
+//  * 
+//  *  =============================================== 
+//  *  =============================================== 
+// */

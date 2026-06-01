@@ -29,6 +29,7 @@
 #include "Colors.h"
 #include "Config.h"
 #include "KeyboardHandler.h" // KeyboardState
+#include "PacketTypes.h"     // SerialState
 #include "TouchHandler.h"    // TouchState
 
 
@@ -49,7 +50,8 @@ public:
 
     /** @brief Refresh all windows. Call once per main loop iteration. */
     void Update(const cv::Mat &frame, const std::vector<DetectedMarker> &markers,
-                const TouchState &touch, const KeyboardState &kb);
+                const TouchState &touch, const KeyboardState &kb,
+                const SerialState &serial);
 
     /** @brief Poll keyboard events. Must be called every loop. Returns raw key or -1. */
     int PollKey();
@@ -122,7 +124,8 @@ private:
 
     // ---- Telemetry grid helpers ---------------------------------------------
     void PopulateTelemetryPanel(const std::vector<DetectedMarker> &markers,
-                                const TouchState &touch, const KeyboardState &kb);
+                                const TouchState &touch, const KeyboardState &kb,
+                                const SerialState &serial);
 
     void DrawTelCell(const std::string &text, const std::string &cellRef,
                      int colSpan, int rowSpan, const std::string &align,

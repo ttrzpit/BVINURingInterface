@@ -163,9 +163,8 @@ bool Config::load(const std::string& filepath) {
     // ---- Serial -------------------------------------------------------------
     cv::FileNode ser = fs["serial"];
     if (!ser.empty()) {
-        ser["port_send"]    >> serial.portSend;
-        ser["port_receive"] >> serial.portReceive;
-        ser["baud_rate"]    >> serial.baudRate;
+        ser["port"]      >> serial.port;
+        ser["baud_rate"] >> serial.baudRate;
     }
 
     fs.release();

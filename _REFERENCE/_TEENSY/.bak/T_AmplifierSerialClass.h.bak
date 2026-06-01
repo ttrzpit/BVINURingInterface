@@ -1,0 +1,55 @@
+// /** Amplifier Serial Class **/
+
+// #pragma once
+
+// // Memory for shared data
+// #include <Arduino.h>
+// #include <memory>
+
+// // Shared data manager
+// #include "T_SharedDataManagerClass.h"
+// class SharedDataManager;
+// struct ManagedData;
+
+// // Packet types
+// #include "T_PacketTypes.h"
+
+
+
+// /** 
+//  * @brief Serial class definition
+//  */
+// class T_AmplifierSerialClass {
+
+// public:
+// 	// Default constructor
+// 	T_AmplifierSerialClass( SharedDataManager& dataHandle );
+
+// 	// Public functions
+// 	void Begin();
+
+// 	// Query functions
+
+// 	void SendQueryPWM( char amp );
+//     void ReadQueryPWM( char amp );
+
+
+
+// private:
+// 	// Data manager handle
+// 	SharedDataManager&			 dataHandle;
+// 	std::shared_ptr<ManagedData> shared;
+
+
+// 	// Private functions
+// 	void QueryName( char amp );
+// 	void ReadName( char amp );
+
+
+// 	// State
+// 	queryStateEnum queryState = queryStateEnum::IDLE;
+
+// 	uint32_t queryTime = 0;
+
+
+// };

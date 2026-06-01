@@ -37,13 +37,21 @@ enum class SystemState {
 /**
  * @brief Keyboard-driven state distributed by main.cpp each loop.
  */
+// ---- Serial connection action -----------------------------------------------
+// Set by "connect" / "disconnect" commands; cleared by main.cpp after acting.
+
+enum class SerialAction { NONE, CONNECT, DISCONNECT };
+
+// ---- Output type ------------------------------------------------------------
+
 struct KeyboardState {
-    int         activeTagId    = 0;                ///< ArUco ID to highlight (0 = none)
-    bool        quitRequested  = false;
-    SystemState systemState    = SystemState::IDLE; ///< Current system operating state
-    int         fittsTargetId  = 0;                ///< Randomly selected Fitts target (0 = none)
-    std::string inputBuffer;                        ///< Command currently being typed
-    std::string outputBuffer;                       ///< Result of the last executed command
+    int          activeTagId         = 0;                  ///< ArUco ID to highlight (0 = none)
+    bool         quitRequested       = false;
+    SystemState  systemState         = SystemState::IDLE;  ///< Current system operating state
+    int          fittsTargetId       = 0;                  ///< Randomly selected Fitts target (0 = none)
+    SerialAction pendingSerialAction = SerialAction::NONE; ///< One-shot connect/disconnect request
+    std::string  inputBuffer;                              ///< Command currently being typed
+    std::string  outputBuffer;                             ///< Result of the last executed command
 };
 
 
@@ -69,6 +77,9 @@ public:
      *        other state field.
      */
     void SetExternalStatus(const std::string& msg) { state_.outputBuffer = msg; }
+
+    /** @brief Clear the serial action after main.cpp has acted on it. */
+    void ClearSerialAction() { state_.pendingSerialAction = SerialAction::NONE; }
 
 private:
     void ParseCommand(const std::string& cmd);  // Called on Enter

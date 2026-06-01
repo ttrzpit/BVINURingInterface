@@ -29,17 +29,7 @@ DisplayHandler::DisplayHandler(const DisplayConfig &cfg,
                                cv::Point2i principalPoint,
                                const TelemetryConfig &telCfg,
                                const ControllerPanelConfig &controllerCfg)
-    : cfg_(cfg)
-    , telCfg_(telCfg)
-    , controllerCfg_(controllerCfg)
-    , principalPoint_(principalPoint)
-    , cellW_(telCfg.width / telCfg.cols)
-    , cellH_(telCfg.height / telCfg.rows)
-    , matTelemetry_(telCfg.height, telCfg.width, CV_8UC3, Colors::Black)
-    , controllerCellW_(controllerCfg.width / controllerCfg.cols)
-    , controllerCellH_(controllerCfg.height / controllerCfg.rows)
-    , matController_(controllerCfg.height, controllerCfg.width, CV_8UC3, Colors::Black)
-{
+    : cfg_(cfg), telCfg_(telCfg), controllerCfg_(controllerCfg), principalPoint_(principalPoint), cellW_(telCfg.width / telCfg.cols), cellH_(telCfg.height / telCfg.rows), matTelemetry_(telCfg.height, telCfg.width, CV_8UC3, Colors::Black), controllerCellW_(controllerCfg.width / controllerCfg.cols), controllerCellH_(controllerCfg.height / controllerCfg.rows), matController_(controllerCfg.height, controllerCfg.width, CV_8UC3, Colors::Black) {
     // ---- Operator display window --------------------------------------------
     cv::namedWindow(WIN_OPERATOR, cv::WINDOW_NORMAL);
     cv::resizeWindow(WIN_OPERATOR, cfg_.width, cfg_.height);
@@ -51,13 +41,15 @@ DisplayHandler::DisplayHandler(const DisplayConfig &cfg,
     cv::moveWindow(WIN_TELEMETRY, telCfg_.xPos, telCfg_.yPos);
 
     // ---- Controller window --------------------------------------------------
-    cv::namedWindow(WIN_CONTROLLER, cv::WINDOW_NORMAL);
-    cv::resizeWindow(WIN_CONTROLLER, controllerCfg_.width, controllerCfg_.height);
+    // WINDOW_AUTOSIZE makes the window conform exactly to the image size, avoiding
+    // the gray-bar pillarboxing that occurs when the WM enforces a minimum window
+    // width larger than the controller panel's configured width.
+    cv::namedWindow(WIN_CONTROLLER, cv::WINDOW_AUTOSIZE);
     cv::moveWindow(WIN_CONTROLLER, controllerCfg_.xPos, controllerCfg_.yPos);
 
-    std::cout << "DisplayHandler: Operator window "   << cfg_.width << "x" << cfg_.height
+    std::cout << "DisplayHandler: Operator window " << cfg_.width << "x" << cfg_.height
               << " at (" << cfg_.xPos << ", " << cfg_.yPos << ")\n";
-    std::cout << "DisplayHandler: Telemetry window "  << telCfg_.width << "x" << telCfg_.height
+    std::cout << "DisplayHandler: Telemetry window " << telCfg_.width << "x" << telCfg_.height
               << " — " << telCfg_.cols << "x" << telCfg_.rows << " cells ("
               << cellW_ << "x" << cellH_ << " px)"
               << " at (" << telCfg_.xPos << ", " << telCfg_.yPos << ")\n";
@@ -73,16 +65,17 @@ DisplayHandler::DisplayHandler(const DisplayConfig &cfg,
 
 void DisplayHandler::Update(const cv::Mat &frame,
                             const std::vector<DetectedMarker> &markers,
-                            const TouchState &touch, const KeyboardState &kb) {
+                            const TouchState &touch, const KeyboardState &kb,
+                            const SerialState &serial) {
     // ---- Loop frequency measurement -----------------------------------------
     // Count every call; once a full second has elapsed, latch the Hz value and
     // reset. Using cv::getTickCount so there are no extra includes needed.
     freqFrameCount_++;
-    double now     = cv::getTickCount() / cv::getTickFrequency();
+    double now = cv::getTickCount() / cv::getTickFrequency();
     double elapsed = now - freqWindowStart_;
     if (elapsed >= 1.0) {
-        measuredFreqHz_  = static_cast<float>(freqFrameCount_ / elapsed);
-        freqFrameCount_  = 0;
+        measuredFreqHz_ = static_cast<float>(freqFrameCount_ / elapsed);
+        freqFrameCount_ = 0;
         freqWindowStart_ = now;
     }
 
@@ -105,7 +98,7 @@ void DisplayHandler::Update(const cv::Mat &frame,
     // Populating these panels involves many draw calls per frame. Limiting to
     // 10 Hz saves ~3-4 ms per iteration without any visible lag for telemetry.
     if (now - lastPanelUpdateTime_ >= 0.1) {
-        PopulateTelemetryPanel(markers, touch, kb);
+        PopulateTelemetryPanel(markers, touch, kb, serial);
         cv::imshow(WIN_TELEMETRY, matTelemetry_);
 
         PopulateControllerPanel(markers, touch, kb);
@@ -168,28 +161,28 @@ void DisplayHandler::AddBorder(const std::string &cellRef, int colSpan,
 void DisplayHandler::ClearController() { matController_.setTo(Colors::Black); }
 
 void DisplayHandler::AddControllerHeadingCell(const std::string &text, const std::string &cellRef,
-                                               int colSpan, int rowSpan, const std::string &align,
-                                               float fontSize, const cv::Scalar &fillColor,
-                                               const cv::Scalar &textColor) {
+                                              int colSpan, int rowSpan, const std::string &align,
+                                              float fontSize, const cv::Scalar &fillColor,
+                                              const cv::Scalar &textColor) {
     DrawControllerCell(text, cellRef, colSpan, rowSpan, align, fontSize, textColor, fillColor, CellStyle::HEADING);
 }
 
 void DisplayHandler::AddControllerSubheadingCell(const std::string &text, const std::string &cellRef,
-                                                  int colSpan, int rowSpan, const std::string &align,
-                                                  float fontSize, const cv::Scalar &fillColor,
-                                                  const cv::Scalar &textColor) {
+                                                 int colSpan, int rowSpan, const std::string &align,
+                                                 float fontSize, const cv::Scalar &fillColor,
+                                                 const cv::Scalar &textColor) {
     DrawControllerCell(text, cellRef, colSpan, rowSpan, align, fontSize, textColor, fillColor, CellStyle::SUBHEADING);
 }
 
 void DisplayHandler::AddControllerBodyCell(const std::string &text, const std::string &cellRef,
-                                            int colSpan, int rowSpan, const std::string &align,
-                                            float fontSize, const cv::Scalar &fillColor,
-                                            const cv::Scalar &textColor) {
+                                           int colSpan, int rowSpan, const std::string &align,
+                                           float fontSize, const cv::Scalar &fillColor,
+                                           const cv::Scalar &textColor) {
     DrawControllerCell(text, cellRef, colSpan, rowSpan, align, fontSize, textColor, fillColor, CellStyle::BODY);
 }
 
 void DisplayHandler::AddControllerBorder(const std::string &cellRef, int colSpan, int rowSpan,
-                                          const cv::Scalar &color, int thickness) {
+                                         const cv::Scalar &color, int thickness) {
     cv::Rect r = ControllerCellRect(cellRef, colSpan, rowSpan);
     cv::rectangle(matController_, r, color, thickness);
 }
@@ -200,7 +193,7 @@ void DisplayHandler::AddControllerBorder(const std::string &cellRef, int colSpan
 
 void DisplayHandler::PopulateTelemetryPanel(
     const std::vector<DetectedMarker> &markers, const TouchState &touch,
-    const KeyboardState &kb) {
+    const KeyboardState &kb, const SerialState &serial) {
     ClearTelemetry();
 
     float headerFontSize = 0.55f;
@@ -208,25 +201,43 @@ void DisplayHandler::PopulateTelemetryPanel(
 
     // ---- System Status -------------------------------------------------------
     AddHeadingCell("System Status", "A1", 5, 1, "center", headerFontSize);
-    AddSubheadingCell("Freq.", "A2", 2, 1, "center", bodyFontSize);
-    AddSubheadingCell("State", "A3", 2, 1, "center", bodyFontSize);
-    AddSubheadingCell("Teensy", "A4", 2, 1, "center", bodyFontSize);
-    AddSubheadingCell("NURing", "A5", 2, 1, "center", bodyFontSize);
-    AddBodyCell(std::to_string(static_cast<int>(measuredFreqHz_)) + " Hz", "C2", 3, 1, "center", bodyFontSize,
+    AddSubheadingCell("Serial", "A2", 2, 1, "center", bodyFontSize);
+    AddSubheadingCell("Camera", "A3", 2, 1, "center", bodyFontSize);
+    AddSubheadingCell("State", "A4", 2, 1, "center", bodyFontSize);
+    AddSubheadingCell("Teensy", "A5", 2, 1, "center", bodyFontSize);
+    AddSubheadingCell("NURing", "A6", 2, 1, "center", bodyFontSize);
+
+
+    AddBodyCell(std::to_string(static_cast<int>(serial.txFrequencyHz)) + " Hz",
+                "C2", 3, 1, "center", bodyFontSize,
+                serial.txFrequencyHz >= 150.0f ? Colors::GreBk : Colors::RedBk);
+    AddBodyCell(std::to_string(static_cast<int>(measuredFreqHz_)) + " Hz", "C3", 3, 1, "center", bodyFontSize,
                 measuredFreqHz_ >= 60.0f ? Colors::GreBk : Colors::RedBk);
     {
         std::string stateStr;
-        cv::Scalar  stateFill;
+        cv::Scalar stateFill;
         switch (kb.systemState) {
-            case SystemState::CALIBRATING: stateStr = "CALIBRATING"; stateFill = Colors::YelBk; break;
-            case SystemState::CAL3:        stateStr = "CAL3";         stateFill = Colors::OraBk; break;
-            case SystemState::FITTS:       stateStr = "FITTS";        stateFill = Colors::GreBk; break;
-            default:                       stateStr = "IDLE";         stateFill = Colors::GraBk; break;
+            case SystemState::CALIBRATING:
+                stateStr = "CALIBRATING";
+                stateFill = Colors::YelBk;
+                break;
+            case SystemState::CAL3:
+                stateStr = "CAL3";
+                stateFill = Colors::OraBk;
+                break;
+            case SystemState::FITTS:
+                stateStr = "FITTS";
+                stateFill = Colors::GreBk;
+                break;
+            default:
+                stateStr = "IDLE";
+                stateFill = Colors::GraBk;
+                break;
         }
-        AddBodyCell(stateStr, "C3", 3, 1, "center", bodyFontSize, stateFill);
+        AddBodyCell(stateStr, "C4", 3, 1, "center", bodyFontSize, stateFill);
     }
-    AddBodyCell("[TEENSY]", "C4", 3, 1, "center", bodyFontSize);
-    AddBodyCell("[NURING]", "C5", 3, 1, "center", bodyFontSize);
+    AddBodyCell("[TEENSY]", "C5", 3, 1, "center", bodyFontSize);
+    AddBodyCell("[NURING]", "C6", 3, 1, "center", bodyFontSize);
     AddBorder("A1", 5, 8, Colors::GraMd, 2);
 
     // ---- Marker visibility -------------------------------------------------------
@@ -320,6 +331,52 @@ void DisplayHandler::PopulateTelemetryPanel(
     }
     AddBorder("O1", 4, 8, Colors::GraMd, 2);
 
+    // ---- Serial connection information ----------------------------------------------
+    AddHeadingCell("Serial Communication", "S1", 29, 1, "center", headerFontSize);
+    AddSubheadingCell("Status", "S2", 3, 1, "center", bodyFontSize);
+    AddSubheadingCell("Teensy State", "V2", 3, 1, "center", bodyFontSize);
+    AddSubheadingCell("Out", "Y2", 1, 1, "center", bodyFontSize);
+
+    AddSubheadingCell("PwmA", "Z2", 2, 1, "center", bodyFontSize);
+    AddSubheadingCell("PwmB", "AB2", 2, 1, "center", bodyFontSize);
+    AddSubheadingCell("PwmC", "AD2", 2, 1, "center", bodyFontSize);
+
+    AddSubheadingCell("In", "AF2", 1, 1, "center", bodyFontSize);
+    AddSubheadingCell("EncA", "AG2", 3, 1, "center", bodyFontSize);
+    AddSubheadingCell("EncB", "AJ2", 3, 1, "center", bodyFontSize);
+    AddSubheadingCell("EncC", "AM2", 3, 1, "center", bodyFontSize);
+    AddSubheadingCell("CurA", "AP2", 2, 1, "center", bodyFontSize);
+    AddSubheadingCell("CurB", "AR2", 2, 1, "center", bodyFontSize);
+    AddSubheadingCell("CurC", "AT2", 2, 1, "center", bodyFontSize);
+
+    // Connection status — coloured background makes it easy to spot at a glance
+    AddBodyCell(serial.isConnected ? "Connected" : "No Teensy",
+                "S3", 3, 1, "center", bodyFontSize,
+                serial.isConnected ? Colors::GreBk : Colors::RedBk);
+
+    // Teensy state byte echoed back (single ASCII char: 'I'=idle, 'D'=drive, etc.)
+    AddBodyCell(serial.hasRx ? std::string(1, static_cast<char>(serial.lastRx.state)) : "--",
+                "V3", 3, 1, "center", bodyFontSize);
+
+    // Outgoing packet index (0–99 rolling)
+    AddBodyCell(std::to_string(serial.lastTx.packet_index), "Y3", 1, 1, "center", bodyFontSize);
+
+    // Commanded PWM values (0 = full power, 2047 = no power)
+    AddBodyCell(std::to_string(serial.lastTx.pwm_A), "Z3", 2, 1, "center", bodyFontSize);
+    AddBodyCell(std::to_string(serial.lastTx.pwm_B), "AB3", 2, 1, "center", bodyFontSize);
+    AddBodyCell(std::to_string(serial.lastTx.pwm_C), "AD3", 2, 1, "center", bodyFontSize);
+
+    // Incoming data — only shown once at least one valid RX packet has arrived
+    const std::string na = "--";
+    AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.packet_index) : na, "AF3", 2, 1, "center", bodyFontSize);
+    AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.encoder_count_A) : na, "AG3", 3, 1, "center", bodyFontSize);
+    AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.encoder_count_B) : na, "AJ3", 3, 1, "center", bodyFontSize);
+    AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.encoder_count_C) : na, "AM3", 3, 1, "center", bodyFontSize);
+    AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.current_raw_A) : na, "AP3", 2, 1, "center", bodyFontSize);
+    AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.current_raw_B) : na, "AR3", 2, 1, "center", bodyFontSize);
+    AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.current_raw_C) : na, "AT3", 2, 1, "center", bodyFontSize);
+    AddBorder("S1", 29, 3, Colors::GraMd, 2);
+
     // ---- Active tag ---------------------------------------------------------
     // AddHeadingCell("Active Tag", "P1", 3, 1, "center", 0.4f);
     // AddBodyCell(kb.activeTagId > 0 ? "ID " + std::to_string(kb.activeTagId) : "--",
@@ -407,23 +464,29 @@ cv::Rect DisplayHandler::CellRect(const std::string &ref, int colSpan,
 // =============================================================================
 
 void DisplayHandler::PopulateControllerPanel(const std::vector<DetectedMarker> &markers,
-                                              const TouchState &touch, const KeyboardState &kb) {
+                                             const TouchState &touch, const KeyboardState &kb) {
     ClearController();
     // Populate controller telemetry cells here as the controller is implemented
 
     float headerFontSize = 0.55f;
     float bodyFontSize = 0.45f;
 
+    cv::Point2i center = cv::Point2i(149, 895);
+    float radius = 135.0f;
+
     AddControllerHeadingCell("Controller Panel", "A1", 10, 1, "center", headerFontSize);
 
-                                                
+    AddControllerHeadingCell("Virtual Fingertip", "A23", 10, 1, "center", headerFontSize);
+    AddControllerBorder("A23", 10, 11, Colors::GraMd, 2);
 
+    cv::circle(matController_, center, radius, Colors::GraDk, 2);
+    cv::circle(matController_, center, 4, Colors::GraDk, -1);
 }
 
 void DisplayHandler::DrawControllerCell(const std::string &text, const std::string &cellRef,
-                                         int colSpan, int rowSpan, const std::string &align,
-                                         float fontSize, const cv::Scalar &textColor,
-                                         const cv::Scalar &fillColor, CellStyle style) {
+                                        int colSpan, int rowSpan, const std::string &align,
+                                        float fontSize, const cv::Scalar &textColor,
+                                        const cv::Scalar &fillColor, CellStyle style) {
     cv::Rect r = ControllerCellRect(cellRef, colSpan, rowSpan);
 
     cv::rectangle(matController_, r, fillColor, cv::FILLED);

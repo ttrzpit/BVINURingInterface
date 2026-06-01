@@ -91,6 +91,18 @@ void KeyboardHandler::ParseCommand(const std::string& cmd) {
         return;
     }
 
+    // Serial connection management
+    if (cmd == "connect") {
+        state_.pendingSerialAction = SerialAction::CONNECT;
+        state_.outputBuffer        = "Connecting to Teensy...";
+        return;
+    }
+    if (cmd == "disconnect") {
+        state_.pendingSerialAction = SerialAction::DISCONNECT;
+        state_.outputBuffer        = "Disconnecting from Teensy...";
+        return;
+    }
+
     // Fitts task — select a new random target marker (only active in FITTS state)
     if (cmd == "r") {
         if (state_.systemState == SystemState::FITTS) {

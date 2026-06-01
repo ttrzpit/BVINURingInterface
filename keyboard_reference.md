@@ -34,6 +34,17 @@ System Information panel. The result appears in the **Output** row.
 
 ---
 
+## Serial (Teensy)
+
+| Command | Result |
+|---------|--------|
+| `connect`    | Open `/dev/ttyACM0` and connect to the Teensy |
+| `disconnect` | Close the serial connection gracefully |
+
+The port is **not** opened at startup — type `connect` when the Teensy is ready. The program runs normally without it.
+
+---
+
 ## System
 
 | Key | Result |

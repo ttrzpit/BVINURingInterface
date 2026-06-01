@@ -131,11 +131,10 @@ controller:
    height: 1056
    cols: 10
    rows: 33
-   x_pos: 1500
+   x_pos: 1524
    y_pos: 0
 
 # ---- Serial (Teensy) --------------------------------------------------------
 serial:
-   port_send: "/dev/ttyACM0"
-   port_receive: "/dev/ttyACM1"
-   baud_rate: 115200
+   port: "/dev/ttyACM0"   # Single full-duplex USB CDC port
+   baud_rate: 1000000     # 1 Mbaud (nominal for USB CDC; actual speed is USB-limited)
