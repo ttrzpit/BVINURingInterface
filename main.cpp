@@ -65,7 +65,7 @@ int main() {
 
     CameraHandler  camera(cfg.camera);
 
-    ArucoHandler   aruco(cfg.arucoDetect,
+    ArucoHandler   aruco(cfg.arucoMarker,
                          cfg.arucoDetector,
                          cfg.arucoDisplay,
                          cfg.touchscreen,
@@ -125,11 +125,17 @@ int main() {
 
         // Handle system state transitions
         if (kb.systemState != prevState) {
-            // Grid is visible in CALIBRATING, CAL3, and FITTS states
-            bool showGrid = (kb.systemState == SystemState::CALIBRATING ||
-                             kb.systemState == SystemState::CAL3         ||
-                             kb.systemState == SystemState::FITTS);
-            aruco.SetGridVisible(showGrid);
+            if (kb.systemState == SystemState::CALIBRATING ||
+                kb.systemState == SystemState::CAL3) {
+                // Show the full marker grid for calibration states
+                aruco.SetGridVisible(true);
+            } else if (kb.systemState == SystemState::FITTS) {
+                // FITTS starts with a blank white screen — first target appears on 'r'
+                aruco.ShowBlankTouchscreen();
+            } else {
+                // IDLE and any other state — close the touchscreen window
+                aruco.SetGridVisible(false);
+            }
 
             if (kb.systemState == SystemState::CAL3) {
                 cal3.Reset();   // Fresh start each time CAL3 is entered
@@ -189,10 +195,11 @@ int main() {
         // Assemble serial state for the display — always up to date even when
         // the panel only refreshes at 10 Hz.
         SerialState serialSt;
-        serialSt.isConnected   = serial.IsConnected();
-        serialSt.txFrequencyHz = serial.GetTxFrequency();
-        serialSt.lastTx        = lastTxPkt;
-        serialSt.hasRx         = serial.GetLatestPacket(serialSt.lastRx);
+        serialSt.isConnected          = serial.IsConnected();
+        serialSt.txFrequencyHz        = serial.GetTxFrequency();
+        serialSt.lastTx               = lastTxPkt;
+        serialSt.lastTx.packet_index  = serial.GetLastSentIndex();  // TX thread owns this — never set by main
+        serialSt.hasRx                = serial.GetLatestPacket(serialSt.lastRx);
 
         // h. Operator display + telemetry — only refresh on a new camera frame
         if (isNewFrame) {

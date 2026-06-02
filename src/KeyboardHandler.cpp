@@ -20,12 +20,10 @@
 // =============================================================================
 
 KeyboardHandler::KeyboardHandler() {
-    std::cout << "KeyboardHandler: Ready.  Commands (type then press Enter):\n"
-              << "  a<NN>   set active ArUco tag  (a00 = clear)\n\n";
+    std::cout << "KeyboardHandler: Ready.\n";
 }
 
 void KeyboardHandler::ProcessKey(int key) {
-
     // cv::pollKey() returns -1 when no key is pending — exit immediately
     if (key < 0) return;
 
@@ -77,13 +75,8 @@ void KeyboardHandler::ProcessKey(int key) {
 // =============================================================================
 
 void KeyboardHandler::ParseCommand(const std::string& cmd) {
-
     // Command: a<NN> — set active ArUco tag
-    if (cmd.size() == 3
-        && cmd[0] == 'a'
-        && std::isdigit(static_cast<unsigned char>(cmd[1]))
-        && std::isdigit(static_cast<unsigned char>(cmd[2])))
-    {
+    if (cmd.size() == 3 && cmd[0] == 'a' && std::isdigit(static_cast<unsigned char>(cmd[1])) && std::isdigit(static_cast<unsigned char>(cmd[2]))) {
         int id = (cmd[1] - '0') * 10 + (cmd[2] - '0');
         state_.activeTagId = id;
         state_.outputBuffer = (id == 0) ? "Active tag cleared"
@@ -91,15 +84,26 @@ void KeyboardHandler::ParseCommand(const std::string& cmd) {
         return;
     }
 
+    // Study commands
+    // Command: u<NNN> — set current userID
+    if (cmd.size() == 4 && cmd[0] == 'u' && std::isdigit(static_cast<unsigned char>(cmd[1])) && std::isdigit(static_cast<unsigned char>(cmd[2])) && std::isdigit(static_cast<unsigned char>(cmd[3]))) {
+        // int id = (cmd[1] - '0') * 10 + (cmd[2] - '0');
+        int userId = ((cmd[1] - '0') * 100) + ((cmd[2] - '0') * 10) + (cmd[3] - '0');
+        state_.activeUserId = userId;
+        state_.outputBuffer = (userId == 0) ? "Active user ID cleared"
+                                        : "Active user ID set to " + std::to_string(userId);
+        return;
+    }
+
     // Serial connection management
     if (cmd == "connect") {
         state_.pendingSerialAction = SerialAction::CONNECT;
-        state_.outputBuffer        = "Connecting to Teensy...";
+        state_.outputBuffer = "Connecting to Teensy...";
         return;
     }
     if (cmd == "disconnect") {
         state_.pendingSerialAction = SerialAction::DISCONNECT;
-        state_.outputBuffer        = "Disconnecting from Teensy...";
+        state_.outputBuffer = "Disconnecting from Teensy...";
         return;
     }
 
@@ -107,11 +111,11 @@ void KeyboardHandler::ParseCommand(const std::string& cmd) {
     if (cmd == "r") {
         if (state_.systemState == SystemState::FITTS) {
             // Uniform distribution over the 45 markers displayed on the grid (1–45)
-            static std::mt19937 rng{ std::random_device{}() };
+            static std::mt19937 rng{std::random_device{}()};
             static std::uniform_int_distribution<int> dist(1, 45);
             state_.fittsTargetId = dist(rng);
-            state_.activeTagId   = state_.fittsTargetId;   // green outline on operator display
-            state_.outputBuffer  = "Target: marker " + std::to_string(state_.fittsTargetId);
+            state_.activeTagId = state_.fittsTargetId;  // green outline on operator display
+            state_.outputBuffer = "Target: marker " + std::to_string(state_.fittsTargetId);
         } else {
             state_.outputBuffer = "'r' is only active in FITTS state";
         }
@@ -120,22 +124,22 @@ void KeyboardHandler::ParseCommand(const std::string& cmd) {
 
     // State commands
     if (cmd == "cal") {
-        state_.systemState  = SystemState::CALIBRATING;
+        state_.systemState = SystemState::CALIBRATING;
         state_.outputBuffer = "State: CALIBRATING";
         return;
     }
     if (cmd == "cal3") {
-        state_.systemState  = SystemState::CAL3;
+        state_.systemState = SystemState::CAL3;
         state_.outputBuffer = "State: CAL3 — touch screen 10 times";
         return;
     }
     if (cmd == "idle") {
-        state_.systemState  = SystemState::IDLE;
+        state_.systemState = SystemState::IDLE;
         state_.outputBuffer = "State: IDLE";
         return;
     }
     if (cmd == "fitts") {
-        state_.systemState  = SystemState::FITTS;
+        state_.systemState = SystemState::FITTS;
         state_.outputBuffer = "State: FITTS";
         return;
     }

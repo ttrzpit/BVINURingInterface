@@ -61,7 +61,7 @@ struct CameraConfig {
 
 // ---- ArUco Detection --------------------------------------------------------
 
-struct ArucoDetectConfig {
+struct ArucoMarkerConfig {
     float markerSizeMm = 18.0f;  // Physical side length of ring markers [mm]
     int   validIdMin   = 0;      // Ignore detected IDs below this
     int   validIdMax   = 20;     // Ignore detected IDs above this
@@ -193,7 +193,7 @@ public:
 
     // Sub-configs — hand these to handlers by const reference
     CameraConfig        camera;
-    ArucoDetectConfig   arucoDetect;
+    ArucoMarkerConfig   arucoMarker;
     ArucoDetectorConfig arucoDetector;  // Algorithm tuning params for the OpenCV detector
     ArucoDisplayConfig  arucoDisplay;
     TouchscreenConfig   touchscreen;

@@ -61,10 +61,25 @@ void SerialHandler::Connect() {
 void SerialHandler::Disconnect() {
     if (fd_ < 0) return;
     running_ = false;
-    // TX thread wakes every 5 ms — joins quickly
+
+    // Join TX thread first — once it exits, no concurrent write() calls remain
+    // and we can safely write the failsafe packet from this thread.
     if (txThread_.joinable()) txThread_.join();
+
+    // Send one final packet with zero force (pwm = 2047) and IDLE state so the
+    // Teensy always returns to a safe condition regardless of why we disconnected.
+    PcToTeensyPacket safe = {};
+    safe.state        = PcState::IDLE;
+    safe.packet_index = lastSentIndex_.load();
+    safe.pwm_A        = 2047;
+    safe.pwm_B        = 2047;
+    safe.pwm_C        = 2047;
+    Send(safe);
+    std::cout << "SerialHandler: Failsafe packet sent (IDLE, pwm=2047).\n";
+
     // RX thread may block up to 1 s on read() timeout before noticing running_=false
     if (receiveThread_.joinable()) receiveThread_.join();
+
     ClosePort();
     txFrequencyHz_ = 0.0f;
     std::cout << "SerialHandler: Disconnected.\n";
@@ -111,6 +126,7 @@ void SerialHandler::TxLoop() {
             pkt = pendingTx_;
         }
         pkt.packet_index = txIndex;
+        lastSentIndex_.store(txIndex);   // Record before incrementing so display matches what was sent
         txIndex = (txIndex + 1) % 100;
 
         Send(pkt);

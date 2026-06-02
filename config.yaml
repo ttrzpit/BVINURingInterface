@@ -8,6 +8,55 @@
 # =============================================================================
 
 
+# === Aruco Detector Parameters ===============================================
+aruco_marker:
+   marker_size_mm: 20.0   # Physical side length of ring markers [mm] — used for pose estimation
+   valid_id_min: 0        # Discard detected markers with ID below this
+   valid_id_max: 46       # Discard detected markers with ID above this
+
+
+# ---- ArUco Detector Algorithm Parameters ------------------------------------
+aruco_detector:
+   adaptive_thresh_constant:     5     # Adaptive threshold: converts grayscale to binary before finding borders.
+   adaptive_thresh_win_size_min: 3
+   adaptive_thresh_win_size_max: 23
+   adaptive_thresh_win_size_step: 10   # Larger win_size_max catches markers farther from the camera (slower).
+
+   # Marker geometry filters: reject detections that are too small/large/imprecise.
+   min_marker_perimeter_rate:      0.01
+   max_marker_perimeter_rate:      4.0
+   polygonal_approx_accuracy_rate: 0.03
+   min_corner_distance_rate:       0.05
+   min_distance_to_border:         3
+
+   # Corner refinement improves 3D pose accuracy at a small speed cost.
+   corner_refinement_method:         1       # 0 = no refinement, 1 = subpixel, 2 = contour-based, 3 = AprilTag-based
+   corner_refinement_max_iterations: 30
+   corner_refinement_min_accuracy:   0.01
+
+   # Detect markers on glossy/reflective surfaces that invert the black/white pattern.
+   detect_inverted_marker: 0
+
+   # Perspective removal — resolution of the internal bit-extraction step.
+   perspective_remove_pixel_per_cell:          8         # Higher pixel_per_cell = more accurate but slower.
+   perspective_remove_ignored_margin_per_cell: 0.13
+
+   # ArUco3 detection — faster and more robust algorithm for small/distant markers.
+   use_aruco3_detection: 0
+
+
+# ---- ArUco Marker Display (on the touchscreen) ------------------------------
+# The C x R grid starts at marker ID 1 and increments left-to-right, top-to-bottom.
+# Spacing between markers is auto-calculated from screen size, padding, and marker size.
+aruco_display:
+   cols: 9                # Number of grid columns
+   rows: 5                # Number of grid rows
+   marker_size_mm: 20.0   # Marker side length [mm] — converted to pixels at runtime
+   padding_mm: 22.0       # Padding on all 4 sides [mm] — converted to pixels at runtime
+
+
+
+
 # ---- Camera -----------------------------------------------------------------
 camera:
    device: "/dev/video0"
@@ -42,57 +91,13 @@ camera:
    zoom: 0
 
 
-# ---- ArUco Marker Detection -------------------------------------------------
-aruco_detect:
-   marker_size_mm: 20.0   # Physical side length of ring markers [mm] — used for pose estimation
-   valid_id_min: 0        # Discard detected markers with ID below this
-   valid_id_max: 46       # Discard detected markers with ID above this
+# ---- Operator Display (main monitor) ----------------------------------------
+display:
+   width: 1600
+   height: 1070
+   x_pos: 1830
+   y_pos: 0
 
-
-# ---- ArUco Detector Algorithm Parameters ------------------------------------
-# These control the internal OpenCV detection pipeline.
-# Change with care — they trade detection speed against recall (missed markers).
-aruco_detector:
-   # Adaptive threshold: converts grayscale to binary before finding borders.
-   # Larger win_size_max catches markers farther from the camera (slower).
-   adaptive_thresh_constant:     5
-   adaptive_thresh_win_size_min: 3
-   adaptive_thresh_win_size_max: 23
-   adaptive_thresh_win_size_step: 10
-
-   # Marker geometry filters: reject detections that are too small/large/imprecise.
-   min_marker_perimeter_rate:      0.01
-   max_marker_perimeter_rate:      4.0
-   polygonal_approx_accuracy_rate: 0.03
-   min_corner_distance_rate:       0.05
-   min_distance_to_border:         3
-
-   # Corner refinement improves 3D pose accuracy at a small speed cost.
-   # method: 0=none  1=subpix  2=contour  3=apriltag
-   corner_refinement_method:         1
-   corner_refinement_max_iterations: 30
-   corner_refinement_min_accuracy:   0.01
-
-   # Detect markers on glossy/reflective surfaces that invert the black/white pattern.
-   detect_inverted_marker: 0
-
-   # Perspective removal — resolution of the internal bit-extraction step.
-   # Higher pixel_per_cell = more accurate but slower.
-   perspective_remove_pixel_per_cell:          8
-   perspective_remove_ignored_margin_per_cell: 0.13
-
-   # ArUco3 detection — faster and more robust algorithm for small/distant markers.
-   use_aruco3_detection: 0
-
-
-# ---- ArUco Marker Display (on the touchscreen) ------------------------------
-# The C x R grid starts at marker ID 1 and increments left-to-right, top-to-bottom.
-# Spacing between markers is auto-calculated from screen size, padding, and marker size.
-aruco_display:
-   cols: 9                # Number of grid columns
-   rows: 5                # Number of grid rows
-   marker_size_mm: 20.0   # Marker side length [mm] — converted to pixels at runtime
-   padding_mm: 22.0       # Padding on all 4 sides [mm] — converted to pixels at runtime
 
 
 # ---- Touchscreen Monitor ----------------------------------------------------
@@ -105,14 +110,6 @@ touchscreen:
    mm_per_pixel:  0.27450 # Inverse conversion — use whichever direction is convenient
    xinput_device_id: 9    # xinput device ID for the touchscreen (run 'xinput list' to find it)
    xinput_output: "HDMI-0" # X output name to map the touchscreen to (run 'xrandr' to find it)
-
-
-# ---- Operator Display (main monitor) ----------------------------------------
-display:
-   width: 1600
-   height: 1070
-   x_pos: 1830
-   y_pos: 0
 
 
 # ---- Telemetry Panel (1600x270, directly below the operator display) ---------

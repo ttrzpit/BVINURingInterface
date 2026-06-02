@@ -20,22 +20,15 @@
 
 static constexpr float RAD2DEG = 57.2958f;
 
-
 // ---- Construction -----------------------------------------------------------
 
-ArucoHandler::ArucoHandler(const ArucoDetectConfig&   detectCfg,
-                             const ArucoDetectorConfig& detectorCfg,
-                             const ArucoDisplayConfig&  displayCfg,
-                             const TouchscreenConfig&   touchCfg,
-                             const cv::Mat&             camMatrix,
-                             const cv::Mat&             distCoeffs)
-    : detectCfg_(detectCfg)
-    , detectorCfg_(detectorCfg)
-    , displayCfg_(displayCfg)
-    , touchCfg_(touchCfg)
-    , camMatrix_(camMatrix.clone())
-    , distCoeffs_(distCoeffs.clone())
-{
+ArucoHandler::ArucoHandler(const ArucoMarkerConfig& markerCfg,
+                           const ArucoDetectorConfig& detectorCfg,
+                           const ArucoDisplayConfig& displayCfg,
+                           const TouchscreenConfig& touchCfg,
+                           const cv::Mat& camMatrix,
+                           const cv::Mat& distCoeffs)
+    : detectCfg_(markerCfg), detectorCfg_(detectorCfg), displayCfg_(displayCfg), touchCfg_(touchCfg), camMatrix_(camMatrix.clone()), distCoeffs_(distCoeffs.clone()) {
     initDetector();
     renderGridImage();
 
@@ -45,9 +38,7 @@ ArucoHandler::ArucoHandler(const ArucoDetectConfig&   detectCfg,
               << detectCfg_.markerSizeMm << " mm\n";
 }
 
-
 ArucoHandler::~ArucoHandler() { Stop(); }
-
 
 // =============================================================================
 // Detection thread — lifecycle and I/O
@@ -55,13 +46,13 @@ ArucoHandler::~ArucoHandler() { Stop(); }
 
 void ArucoHandler::Start() {
     detectRunning_ = true;
-    detectThread_  = std::thread(&ArucoHandler::DetectLoop, this);
+    detectThread_ = std::thread(&ArucoHandler::DetectLoop, this);
     std::cout << "ArucoHandler: Detection thread started.\n";
 }
 
 void ArucoHandler::Stop() {
     detectRunning_ = false;
-    frameCv_.notify_all();   // Wake the thread so it can check the exit flag
+    frameCv_.notify_all();  // Wake the thread so it can check the exit flag
     if (detectThread_.joinable()) detectThread_.join();
     std::cout << "ArucoHandler: Detection thread stopped.\n";
 }
@@ -73,14 +64,14 @@ void ArucoHandler::SubmitFrame(const cv::Mat& grayFrame) {
         // The camera handler allocates a fresh buffer each frame, so the buffer
         // referenced here is safe to read even after the main loop moves on.
         pendingFrame_ = grayFrame;
-        frameReady_   = true;
+        frameReady_ = true;
     }
     frameCv_.notify_one();
 }
 
 std::vector<DetectedMarker> ArucoHandler::GetLatestDetection() {
     std::lock_guard<std::mutex> lock(resultMutex_);
-    return latestResult_;   // ref-counted Mat copies inside, cheap
+    return latestResult_;  // ref-counted Mat copies inside, cheap
 }
 
 void ArucoHandler::DetectLoop() {
@@ -89,13 +80,13 @@ void ArucoHandler::DetectLoop() {
         {
             std::unique_lock<std::mutex> lock(frameMutex_);
             // Sleep until a new frame arrives or Stop() signals exit
-            frameCv_.wait(lock, [this]{ return frameReady_ || !detectRunning_; });
+            frameCv_.wait(lock, [this] { return frameReady_ || !detectRunning_; });
             if (!detectRunning_) break;
 
             // Move the frame into a local variable before releasing the lock so
             // the main loop can submit the next frame immediately — the two
             // threads never touch the same buffer at the same time.
-            frame       = std::move(pendingFrame_);
+            frame = std::move(pendingFrame_);
             frameReady_ = false;
         }
 
@@ -108,15 +99,13 @@ void ArucoHandler::DetectLoop() {
     }
 }
 
-
 // =============================================================================
 // Detection implementation (was detect())
 // =============================================================================
 
 std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame) {
-
-    std::vector<DetectedMarker>           results;
-    std::vector<int>                      detectedIds;
+    std::vector<DetectedMarker> results;
+    std::vector<int> detectedIds;
     std::vector<std::vector<cv::Point2f>> corners;
 
     detector_.detectMarkers(grayFrame, corners, detectedIds);
@@ -131,7 +120,7 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
 
         // Wrap this single marker's corners so estimatePoseSingleMarkers can
         // accept it — the function signature expects a vector-of-corner-vectors
-        std::vector<std::vector<cv::Point2f>> singleCorner = { corners[i] };
+        std::vector<std::vector<cv::Point2f>> singleCorner = {corners[i]};
 
         // Pose estimation — produces one rvec and one tvec for this marker
         std::vector<cv::Vec3d> rvecs, tvecs;
@@ -158,9 +147,9 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
         // Y is negated so that positive Y points upward in world space
         // (OpenCV's camera Y axis points downward by default).
         marker.positionMm = cv::Point3f(
-            static_cast<float>( tvecs[0][0]),
+            static_cast<float>(tvecs[0][0]),
             static_cast<float>(-tvecs[0][1]),
-            static_cast<float>( tvecs[0][2]));
+            static_cast<float>(tvecs[0][2]));
 
         // Rotation about the Y axis (most informative for a ring-worn marker)
         marker.rotationDeg = static_cast<float>(rvecs[0][1]) * RAD2DEG;
@@ -171,13 +160,30 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
     return results;
 }
 
-
 // =============================================================================
 // Touchscreen display
 // =============================================================================
 
+void ArucoHandler::ShowBlankTouchscreen() {
+    if (!gridVisible_) {
+        // Open and position the window using the same fullscreen sequence
+        cv::namedWindow(TOUCHSCREEN_WIN, cv::WINDOW_NORMAL);
+        cv::waitKey(1);
+        cv::moveWindow(TOUCHSCREEN_WIN, touchCfg_.xOffset, touchCfg_.yOffset);
+        cv::waitKey(1);
+        cv::setWindowProperty(TOUCHSCREEN_WIN, cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
+        cv::waitKey(1);
+        gridVisible_ = true;
+    }
+    // Solid white — participant sees a clean screen before the first target is chosen
+    cv::Mat blank(touchCfg_.height, touchCfg_.width, CV_8UC1, cv::Scalar(255));
+    cv::imshow(TOUCHSCREEN_WIN, blank);
+    cv::waitKey(1);
+    std::cout << "ArucoHandler: Touchscreen blank (FITTS ready — press 'r' for first target)\n";
+}
+
 void ArucoHandler::SetGridVisible(bool visible) {
-    if (visible == gridVisible_) return;   // No change — avoid recreating the window
+    if (visible == gridVisible_) return;  // No change — avoid recreating the window
     gridVisible_ = visible;
 
     if (visible) {
@@ -223,37 +229,35 @@ void ArucoHandler::ShowSingleMarker(int id) {
 }
 
 void ArucoHandler::updateGridConfig(int cols, int rows, float markerSizeMm, float paddingMm) {
-    displayCfg_.cols         = cols;
-    displayCfg_.rows         = rows;
+    displayCfg_.cols = cols;
+    displayCfg_.rows = rows;
     displayCfg_.markerSizeMm = markerSizeMm;
-    displayCfg_.paddingMm    = paddingMm;
+    displayCfg_.paddingMm = paddingMm;
     renderGridImage();
     // Re-show only if currently visible (caller is responsible for visibility)
 }
-
 
 // =============================================================================
 // Private
 // =============================================================================
 
 void ArucoHandler::renderGridImage() {
-
     const int screenW = touchCfg_.width;
     const int screenH = touchCfg_.height;
-    const int cols    = displayCfg_.cols;
-    const int rows    = displayCfg_.rows;
+    const int cols = displayCfg_.cols;
+    const int rows = displayCfg_.rows;
 
     // Convert mm values to pixels using the touchscreen's physical pixel density
-    const int sz  = static_cast<int>(std::round(displayCfg_.markerSizeMm * touchCfg_.pixelsPerMm));
-    const int pad = static_cast<int>(std::round(displayCfg_.paddingMm    * touchCfg_.pixelsPerMm));
+    const int sz = static_cast<int>(std::round(displayCfg_.markerSizeMm * touchCfg_.pixelsPerMm));
+    const int pad = static_cast<int>(std::round(displayCfg_.paddingMm * touchCfg_.pixelsPerMm));
 
     // Space markers evenly within the usable area (screen minus equal padding on all 4 sides)
     float spacingX = (cols > 1)
-        ? static_cast<float>(screenW - 2 * pad - cols * sz) / (cols - 1)
-        : 0.0f;
+                         ? static_cast<float>(screenW - 2 * pad - cols * sz) / (cols - 1)
+                         : 0.0f;
     float spacingY = (rows > 1)
-        ? static_cast<float>(screenH - 2 * pad - rows * sz) / (rows - 1)
-        : 0.0f;
+                         ? static_cast<float>(screenH - 2 * pad - rows * sz) / (rows - 1)
+                         : 0.0f;
 
     // White background
     markerGridImage_ = cv::Mat(screenH, screenW, CV_8UC1, cv::Scalar(255));
@@ -273,31 +277,31 @@ void ArucoHandler::renderGridImage() {
     // Derived values for the console report
     float c2cX_mm = (sz + spacingX) * touchCfg_.mmPerPixel;
     float c2cY_mm = (sz + spacingY) * touchCfg_.mmPerPixel;
-    float gapX_mm = spacingX        * touchCfg_.mmPerPixel;
-    float gapY_mm = spacingY        * touchCfg_.mmPerPixel;
+    float gapX_mm = spacingX * touchCfg_.mmPerPixel;
+    float gapY_mm = spacingY * touchCfg_.mmPerPixel;
 
     std::cout << std::fixed << std::setprecision(2)
               << "ArucoHandler: Grid rendered — "
               << cols << " cols x " << rows << " rows = " << (markerID - 1) << " markers\n"
-              << "  Marker size:              " << displayCfg_.markerSizeMm       << " mm  |  " << sz                          << " px\n"
-              << "  H spacing (center-ctr):   " << c2cX_mm                       << " mm  |  " << static_cast<int>(sz + spacingX) << " px\n"
-              << "  H spacing (edge-edge):    " << gapX_mm                        << " mm  |  " << static_cast<int>(spacingX)     << " px\n"
-              << "  V spacing (center-ctr):   " << c2cY_mm                       << " mm  |  " << static_cast<int>(sz + spacingY) << " px\n"
-              << "  V spacing (edge-edge):    " << gapY_mm                        << " mm  |  " << static_cast<int>(spacingY)     << " px\n"
-              << "  Padding (all sides):      " << displayCfg_.paddingMm          << " mm  |  " << pad                           << " px\n"
+              << "  Marker size:              " << displayCfg_.markerSizeMm << " mm  |  " << sz << " px\n"
+              << "  H spacing (center-ctr):   " << c2cX_mm << " mm  |  " << static_cast<int>(sz + spacingX) << " px\n"
+              << "  H spacing (edge-edge):    " << gapX_mm << " mm  |  " << static_cast<int>(spacingX) << " px\n"
+              << "  V spacing (center-ctr):   " << c2cY_mm << " mm  |  " << static_cast<int>(sz + spacingY) << " px\n"
+              << "  V spacing (edge-edge):    " << gapY_mm << " mm  |  " << static_cast<int>(spacingY) << " px\n"
+              << "  Padding (all sides):      " << displayCfg_.paddingMm << " mm  |  " << pad << " px\n"
               << std::defaultfloat;
 }
 
 cv::Point2i ArucoHandler::gridCellOrigin(int col, int row) const {
-    const int sz  = static_cast<int>(std::round(displayCfg_.markerSizeMm * touchCfg_.pixelsPerMm));
-    const int pad = static_cast<int>(std::round(displayCfg_.paddingMm    * touchCfg_.pixelsPerMm));
+    const int sz = static_cast<int>(std::round(displayCfg_.markerSizeMm * touchCfg_.pixelsPerMm));
+    const int pad = static_cast<int>(std::round(displayCfg_.paddingMm * touchCfg_.pixelsPerMm));
 
     float spacingX = (displayCfg_.cols > 1)
-        ? static_cast<float>(touchCfg_.width  - 2 * pad - displayCfg_.cols * sz) / (displayCfg_.cols - 1)
-        : 0.0f;
+                         ? static_cast<float>(touchCfg_.width - 2 * pad - displayCfg_.cols * sz) / (displayCfg_.cols - 1)
+                         : 0.0f;
     float spacingY = (displayCfg_.rows > 1)
-        ? static_cast<float>(touchCfg_.height - 2 * pad - displayCfg_.rows * sz) / (displayCfg_.rows - 1)
-        : 0.0f;
+                         ? static_cast<float>(touchCfg_.height - 2 * pad - displayCfg_.rows * sz) / (displayCfg_.rows - 1)
+                         : 0.0f;
 
     return cv::Point2i(
         static_cast<int>(pad + col * (sz + spacingX)),
@@ -305,36 +309,35 @@ cv::Point2i ArucoHandler::gridCellOrigin(int col, int row) const {
 }
 
 void ArucoHandler::initDetector() {
-
     dictionary_ = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
 
     // All values come from config.yaml [aruco_detector] — edit there, not here.
-    detectorParams_.adaptiveThreshConstant        = detectorCfg_.adaptiveThreshConstant;
-    detectorParams_.adaptiveThreshWinSizeMin      = detectorCfg_.adaptiveThreshWinSizeMin;
-    detectorParams_.adaptiveThreshWinSizeMax      = detectorCfg_.adaptiveThreshWinSizeMax;
-    detectorParams_.adaptiveThreshWinSizeStep     = detectorCfg_.adaptiveThreshWinSizeStep;
-    detectorParams_.minMarkerPerimeterRate        = detectorCfg_.minMarkerPerimeterRate;
-    detectorParams_.maxMarkerPerimeterRate        = detectorCfg_.maxMarkerPerimeterRate;
-    detectorParams_.polygonalApproxAccuracyRate   = detectorCfg_.polygonalApproxAccuracyRate;
-    detectorParams_.minCornerDistanceRate         = detectorCfg_.minCornerDistanceRate;
-    detectorParams_.minDistanceToBorder           = detectorCfg_.minDistanceToBorder;
-    detectorParams_.cornerRefinementMethod        =
+    detectorParams_.adaptiveThreshConstant = detectorCfg_.adaptiveThreshConstant;
+    detectorParams_.adaptiveThreshWinSizeMin = detectorCfg_.adaptiveThreshWinSizeMin;
+    detectorParams_.adaptiveThreshWinSizeMax = detectorCfg_.adaptiveThreshWinSizeMax;
+    detectorParams_.adaptiveThreshWinSizeStep = detectorCfg_.adaptiveThreshWinSizeStep;
+    detectorParams_.minMarkerPerimeterRate = detectorCfg_.minMarkerPerimeterRate;
+    detectorParams_.maxMarkerPerimeterRate = detectorCfg_.maxMarkerPerimeterRate;
+    detectorParams_.polygonalApproxAccuracyRate = detectorCfg_.polygonalApproxAccuracyRate;
+    detectorParams_.minCornerDistanceRate = detectorCfg_.minCornerDistanceRate;
+    detectorParams_.minDistanceToBorder = detectorCfg_.minDistanceToBorder;
+    detectorParams_.cornerRefinementMethod =
         static_cast<cv::aruco::CornerRefineMethod>(detectorCfg_.cornerRefinementMethod);
     detectorParams_.cornerRefinementMaxIterations = detectorCfg_.cornerRefinementMaxIterations;
-    detectorParams_.cornerRefinementMinAccuracy   = detectorCfg_.cornerRefinementMinAccuracy;
-    detectorParams_.detectInvertedMarker                  = detectorCfg_.detectInvertedMarker;
-    detectorParams_.perspectiveRemovePixelPerCell         = detectorCfg_.perspectiveRemovePixelPerCell;
+    detectorParams_.cornerRefinementMinAccuracy = detectorCfg_.cornerRefinementMinAccuracy;
+    detectorParams_.detectInvertedMarker = detectorCfg_.detectInvertedMarker;
+    detectorParams_.perspectiveRemovePixelPerCell = detectorCfg_.perspectiveRemovePixelPerCell;
     detectorParams_.perspectiveRemoveIgnoredMarginPerCell = detectorCfg_.perspectiveRemoveIgnoredMarginPerCell;
-    detectorParams_.useAruco3Detection                    = detectorCfg_.useAruco3Detection;
+    detectorParams_.useAruco3Detection = detectorCfg_.useAruco3Detection;
 
     detector_ = cv::aruco::ArucoDetector(dictionary_, detectorParams_);
 
     // Pre-build the 3D marker corner template in the marker's local frame.
     // Origin is the marker center; corners are at ±half in X and Y.
     float half = detectCfg_.markerSizeMm / 2.0f;
-    markerCorners3D_.ptr<cv::Vec3f>(0)[0] = cv::Vec3f(-half,  half, 0.0f);
-    markerCorners3D_.ptr<cv::Vec3f>(0)[1] = cv::Vec3f( half,  half, 0.0f);
-    markerCorners3D_.ptr<cv::Vec3f>(0)[2] = cv::Vec3f( half, -half, 0.0f);
+    markerCorners3D_.ptr<cv::Vec3f>(0)[0] = cv::Vec3f(-half, half, 0.0f);
+    markerCorners3D_.ptr<cv::Vec3f>(0)[1] = cv::Vec3f(half, half, 0.0f);
+    markerCorners3D_.ptr<cv::Vec3f>(0)[2] = cv::Vec3f(half, -half, 0.0f);
     markerCorners3D_.ptr<cv::Vec3f>(0)[3] = cv::Vec3f(-half, -half, 0.0f);
 
     std::cout << "ArucoHandler: Detector initialized (DICT_4X4_50).\n";

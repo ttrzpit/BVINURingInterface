@@ -1,0 +1,14 @@
+{
+    "folders": [
+        {
+            "path": "BVITeensyFirmware"
+        }
+    ],
+    "settings": {
+        "workbench.colorTheme": "Default Dark Modern",
+        "workbench.colorCustomizations": {
+            "titleBar.activeBackground": "#00382c",
+            "activityBar.background": "#00382c",
+        },
+    }
+}

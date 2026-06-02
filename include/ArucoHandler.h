@@ -53,7 +53,7 @@ struct DetectedMarker {
 
 class ArucoHandler {
 public:
-    ArucoHandler(const ArucoDetectConfig&   detectCfg,
+    ArucoHandler(const ArucoMarkerConfig&   detectCfg,
                  const ArucoDetectorConfig& detectorCfg,
                  const ArucoDisplayConfig&  displayCfg,
                  const TouchscreenConfig&   touchCfg,
@@ -93,6 +93,14 @@ public:
     void SetGridVisible(bool visible);
 
     /**
+     * @brief Open the touchscreen window and show a blank white screen.
+     *        Used for the Fitts task start state — participant sees a clean
+     *        white display until the first target marker is selected via 'r'.
+     *        No-op if the window is already open (just redraws white).
+     */
+    void ShowBlankTouchscreen();
+
+    /**
      * @brief Replace the touchscreen image with a single marker at its grid
      *        position, hiding all others. Used for the Fitts pointing task.
      *        The grid window must already be visible (call SetGridVisible first).
@@ -113,7 +121,7 @@ private:
     cv::Point2i gridCellOrigin(int col, int row) const;
 
     // ---- Configuration ------------------------------------------------------
-    ArucoDetectConfig   detectCfg_;
+    ArucoMarkerConfig   detectCfg_;
     ArucoDetectorConfig detectorCfg_;
     ArucoDisplayConfig  displayCfg_;
     TouchscreenConfig   touchCfg_;

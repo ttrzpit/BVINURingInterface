@@ -46,6 +46,7 @@ enum class SerialAction { NONE, CONNECT, DISCONNECT };
 
 struct KeyboardState {
     int          activeTagId         = 0;                  ///< ArUco ID to highlight (0 = none)
+    int          activeUserId        = -1;                 ///< User ID for study logging (-1 = not set, 000 = non-logging, 001> = valid user)
     bool         quitRequested       = false;
     SystemState  systemState         = SystemState::IDLE;  ///< Current system operating state
     int          fittsTargetId       = 0;                  ///< Randomly selected Fitts target (0 = none)

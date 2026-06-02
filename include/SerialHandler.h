@@ -61,6 +61,9 @@ public:
     /** @brief Measured TX rate in Hz (updated once per second by the TX thread). */
     float GetTxFrequency() const { return txFrequencyHz_.load(); }
 
+    /** @brief The packet_index value stamped on the most recently sent packet. */
+    uint8_t GetLastSentIndex() const { return lastSentIndex_.load(); }
+
     bool IsConnected() const { return fd_ != -1; }
 
     /**
@@ -81,10 +84,11 @@ private:
     int                 fd_ = -1;
 
     // ---- TX -----------------------------------------------------------------
-    std::mutex          txMutex_;
-    PcToTeensyPacket    pendingTx_ = {};       // Written by main, read by TxLoop
-    std::atomic<float>  txFrequencyHz_{ 0.0f };
-    std::thread         txThread_;
+    std::mutex            txMutex_;
+    PcToTeensyPacket      pendingTx_ = {};         // Written by main, read by TxLoop
+    std::atomic<float>    txFrequencyHz_{ 0.0f };
+    std::atomic<uint8_t>  lastSentIndex_{ 0 };     // Index stamped on last sent packet
+    std::thread           txThread_;
 
     // ---- RX -----------------------------------------------------------------
     std::mutex          rxMutex_;

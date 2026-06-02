@@ -205,7 +205,7 @@ void DisplayHandler::PopulateTelemetryPanel(
     AddSubheadingCell("Camera", "A3", 2, 1, "center", bodyFontSize);
     AddSubheadingCell("State", "A4", 2, 1, "center", bodyFontSize);
     AddSubheadingCell("Teensy", "A5", 2, 1, "center", bodyFontSize);
-    AddSubheadingCell("NURing", "A6", 2, 1, "center", bodyFontSize);
+    AddSubheadingCell("User ID", "A6", 2, 1, "center", bodyFontSize);
 
 
     AddBodyCell(std::to_string(static_cast<int>(serial.txFrequencyHz)) + " Hz",
@@ -231,7 +231,7 @@ void DisplayHandler::PopulateTelemetryPanel(
                 break;
             default:
                 stateStr = "IDLE";
-                stateFill = Colors::GraBk;
+                stateFill = Colors::RedBk;
                 break;
         }
         AddBodyCell(stateStr, "C4", 3, 1, "center", bodyFontSize, stateFill);
@@ -368,7 +368,7 @@ void DisplayHandler::PopulateTelemetryPanel(
 
     // Incoming data — only shown once at least one valid RX packet has arrived
     const std::string na = "--";
-    AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.packet_index) : na, "AF3", 2, 1, "center", bodyFontSize);
+    AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.packet_index) : na, "AF3", 1, 1, "center", bodyFontSize);
     AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.encoder_count_A) : na, "AG3", 3, 1, "center", bodyFontSize);
     AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.encoder_count_B) : na, "AJ3", 3, 1, "center", bodyFontSize);
     AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.encoder_count_C) : na, "AM3", 3, 1, "center", bodyFontSize);

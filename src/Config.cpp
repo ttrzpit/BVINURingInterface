@@ -74,9 +74,9 @@ bool Config::load(const std::string& filepath) {
     // ---- ArUco detection ----------------------------------------------------
     cv::FileNode ad = fs["aruco_detect"];
     if (!ad.empty()) {
-        ad["marker_size_mm"] >> arucoDetect.markerSizeMm;
-        ad["valid_id_min"]   >> arucoDetect.validIdMin;
-        ad["valid_id_max"]   >> arucoDetect.validIdMax;
+        ad["marker_size_mm"] >> arucoMarker.markerSizeMm;
+        ad["valid_id_min"]   >> arucoMarker.validIdMin;
+        ad["valid_id_max"]   >> arucoMarker.validIdMax;
     }
 
     // ---- ArUco detector algorithm parameters --------------------------------
@@ -174,8 +174,8 @@ bool Config::load(const std::string& filepath) {
     std::cout << "Config:       Camera " << camera.width << "x" << camera.height
               << " @ " << camera.framerate << " fps\n";
     std::cout << "Config:       ArUco grid " << arucoDisplay.cols << "x"
-              << arucoDisplay.rows << ", IDs [" << arucoDetect.validIdMin
-              << ", " << arucoDetect.validIdMax << "]\n";
+              << arucoDisplay.rows << ", IDs [" << arucoMarker.validIdMin
+              << ", " << arucoMarker.validIdMax << "]\n";
     return true;
 }
 
