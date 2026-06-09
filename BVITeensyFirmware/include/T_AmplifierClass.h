@@ -104,12 +104,15 @@ private:
      *   4. Verify by sending "g r0x90\r" and checking the response
      * @return true if the verification response contained a value near 115200
      */
-    bool UpgradeBaudRate(HardwareSerial& port);
+    bool UpgradeBaudRate(HardwareSerial& port, uint8_t ledPin);
 
     /**
      * @brief Send "s r0x24 3\r" (PWM current mode) and wait for "ok\r".
      */
     void SetPwmMode(HardwareSerial& port);
+
+    /** @brief Blocking delay that blinks ledPin at 10 Hz for durationMs. */
+    void DelayBlink(uint8_t ledPin, uint32_t durationMs);
 
     /**
      * @brief Reset one amplifier: enable pin HIGH→LOW, wait 500 ms, HIGH.

@@ -24,8 +24,8 @@
 #define LED_PIN_AMP_C    32
 
 // ---- HW serial port aliases --------------------------------------------------
-#define HWSerialA Serial5   // Motor A (Copley NES-090-10-Z)
-#define HWSerialB Serial4   // Motor B
+#define HWSerialA Serial4   // Motor A (Copley NES-090-10-Z)
+#define HWSerialB Serial5   // Motor B
 #define HWSerialC Serial3   // Motor C
 
 // ---- Amplifier serial baud rates ---------------------------------------------

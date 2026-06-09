@@ -16,12 +16,13 @@
 //                                a TeensyToPcPacket with fresh telemetry.
 //
 // LED status (pins 30/31/32):
-//   ON  — amplifier A/B/C successfully upgraded to 115200 baud during Begin()
-//   OFF — upgrade failed (amplifier not responding at high baud)
+//   10 Hz blink — baud upgrade in progress (connected at 9600, waiting for 115200)
+//   ON (solid)  — amplifier A/B/C successfully upgraded to 115200 baud
+//   OFF         — upgrade failed (amplifier not responding at high baud)
 //
 // Built-in LED (pin 13):
-//   ON  — USB serial connection active (at least one valid PC packet received)
-//   OFF — waiting for first packet
+//   1 Hz pulse  — powered on, no PC connection
+//  10 Hz pulse  — PC serial connection active
 // =============================================================================
 
 #include <Arduino.h>
@@ -106,6 +107,15 @@ void loop() {
         SerialPort.SendToPC();
     }
 
-    // ---- Built-in LED: connection indicator ---------------------------------
-    digitalWriteFast(LED_BUILTIN, SerialPort.IsConnected() ? HIGH : LOW);
+    // ---- Built-in LED: heartbeat pulse --------------------------------------
+    // 1 Hz when idle, 10 Hz when PC serial is active.
+    static uint32_t ledLastToggle = 0;
+    static bool     ledState      = false;
+    uint32_t halfPeriod = SerialPort.IsConnected() ? 50 : 500;  // ms
+    uint32_t now = millis();
+    if (now - ledLastToggle >= halfPeriod) {
+        ledLastToggle = now;
+        ledState = !ledState;
+        digitalWriteFast(LED_BUILTIN, ledState ? HIGH : LOW);
+    }
 }

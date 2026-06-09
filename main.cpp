@@ -22,6 +22,7 @@
 //   ESC key or SIGINT (Ctrl-C) → sets g_running = false → clean thread join
 // =============================================================================
 
+#include <chrono>
 #include <csignal>
 #include <iostream>
 
@@ -100,6 +101,13 @@ int main() {
     SystemState      prevState         = SystemState::IDLE;
     int              prevFittsTarget   = 0;
     PcToTeensyPacket lastTxPkt         = {};   // Pending TX values updated each frame — sent by TX thread at 200 Hz
+
+    // Motor test state — set by testA/testB/testC commands, cleared after 1 s
+    using Clock = std::chrono::steady_clock;
+    bool     motorTestActive = false;
+    char     motorTestMotor  = 'A';
+    uint16_t motorTestPwm    = 2047;
+    Clock::time_point motorTestStart;
 
     // ---- Main loop ----------------------------------------------------------
     while (g_running) {
@@ -183,12 +191,32 @@ int main() {
         // g. Serial — update the pending TX packet each new camera frame.
         //    The TX thread sends it independently at 200 Hz; packet_index is
         //    managed by the TX thread and does not need to be set here.
-        //    PWM defaults to 2047 (no power) until the controller is implemented.
+        if (kb.pendingMotorTest.active) {
+            motorTestActive = true;
+            motorTestMotor  = kb.pendingMotorTest.motor;
+            motorTestPwm    = kb.pendingMotorTest.pwm;
+            motorTestStart  = Clock::now();
+            keyboard.ClearMotorTest();
+        }
+
         if (isNewFrame) {
-            lastTxPkt.state = static_cast<uint8_t>(PcState::IDLE);  // TODO: map kb.systemState
+            lastTxPkt.state = static_cast<uint8_t>(PcState::IDLE);
             lastTxPkt.pwm_A = 2047;
             lastTxPkt.pwm_B = 2047;
             lastTxPkt.pwm_C = 2047;
+
+            if (motorTestActive) {
+                double elapsed = std::chrono::duration<double>(Clock::now() - motorTestStart).count();
+                if (elapsed < 1.0) {
+                    if      (motorTestMotor == 'A') lastTxPkt.pwm_A = motorTestPwm;
+                    else if (motorTestMotor == 'B') lastTxPkt.pwm_B = motorTestPwm;
+                    else if (motorTestMotor == 'C') lastTxPkt.pwm_C = motorTestPwm;
+                } else {
+                    motorTestActive = false;
+                    keyboard.SetExternalStatus("Motor test done — back to idle.");
+                }
+            }
+
             serial.SetPendingTx(lastTxPkt);
         }
 

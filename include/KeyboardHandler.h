@@ -20,6 +20,7 @@
 //   2. Add an else-if branch in ParseCommand().
 // =============================================================================
 
+#include <cstdint>
 #include <string>
 
 
@@ -42,6 +43,14 @@ enum class SystemState {
 
 enum class SerialAction { NONE, CONNECT, DISCONNECT };
 
+// ---- Motor test request -----------------------------------------------------
+
+struct MotorTestRequest {
+    bool     active = false;
+    char     motor  = 'A';   ///< 'A', 'B', or 'C'
+    uint16_t pwm    = 2047;  ///< PWM value to apply (0=full, 2047=off)
+};
+
 // ---- Output type ------------------------------------------------------------
 
 struct KeyboardState {
@@ -50,9 +59,10 @@ struct KeyboardState {
     bool         quitRequested       = false;
     SystemState  systemState         = SystemState::IDLE;  ///< Current system operating state
     int          fittsTargetId       = 0;                  ///< Randomly selected Fitts target (0 = none)
-    SerialAction pendingSerialAction = SerialAction::NONE; ///< One-shot connect/disconnect request
-    std::string  inputBuffer;                              ///< Command currently being typed
-    std::string  outputBuffer;                             ///< Result of the last executed command
+    SerialAction     pendingSerialAction = SerialAction::NONE; ///< One-shot connect/disconnect request
+    MotorTestRequest pendingMotorTest;                         ///< One-shot motor PWM test request
+    std::string  inputBuffer;                                  ///< Command currently being typed
+    std::string  outputBuffer;                                 ///< Result of the last executed command
 };
 
 
@@ -81,6 +91,9 @@ public:
 
     /** @brief Clear the serial action after main.cpp has acted on it. */
     void ClearSerialAction() { state_.pendingSerialAction = SerialAction::NONE; }
+
+    /** @brief Clear the motor test request after main.cpp has acted on it. */
+    void ClearMotorTest() { state_.pendingMotorTest.active = false; }
 
 private:
     void ParseCommand(const std::string& cmd);  // Called on Enter

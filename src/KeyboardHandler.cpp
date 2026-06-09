@@ -1,5 +1,6 @@
 #include "KeyboardHandler.h"
 
+#include <algorithm>
 #include <cctype>
 #include <iostream>
 #include <random>
@@ -96,12 +97,12 @@ void KeyboardHandler::ParseCommand(const std::string& cmd) {
     }
 
     // Serial connection management
-    if (cmd == "connect") {
+    if (cmd == "connect" || cmd == "con") {
         state_.pendingSerialAction = SerialAction::CONNECT;
         state_.outputBuffer = "Connecting to Teensy...";
         return;
     }
-    if (cmd == "disconnect") {
+    if (cmd == "disconnect" || cmd == "dis") {
         state_.pendingSerialAction = SerialAction::DISCONNECT;
         state_.outputBuffer = "Disconnecting from Teensy...";
         return;
@@ -138,9 +139,31 @@ void KeyboardHandler::ParseCommand(const std::string& cmd) {
         state_.outputBuffer = "State: IDLE";
         return;
     }
-    if (cmd == "fitts") {
+    if (cmd == "fitts" || cmd == "study1") {
         state_.systemState = SystemState::FITTS;
         state_.outputBuffer = "State: FITTS";
+        return;
+    }
+
+    // testA<pwm> / testB<pwm> / testC<pwm> — drive one motor for 1 second then stop
+    // Example: testA1984 → motor A at PWM 1984 for 1 s, then PWM 2047 (off)
+    if (cmd.size() >= 6 && cmd.substr(0, 4) == "test" &&
+        (cmd[4] == 'A' || cmd[4] == 'B' || cmd[4] == 'C')) {
+        std::string numStr = cmd.substr(5);
+        bool allDigits = !numStr.empty() && std::all_of(numStr.begin(), numStr.end(),
+            [](unsigned char c){ return std::isdigit(c); });
+        if (allDigits) {
+            int pwmVal = std::stoi(numStr);
+            if (pwmVal >= 0 && pwmVal <= 2047) {
+                state_.pendingMotorTest.active = true;
+                state_.pendingMotorTest.motor  = cmd[4];
+                state_.pendingMotorTest.pwm    = static_cast<uint16_t>(pwmVal);
+                state_.outputBuffer = "Test motor " + std::string(1, cmd[4]) +
+                                      " PWM=" + numStr + " for 1 s...";
+                return;
+            }
+        }
+        state_.outputBuffer = "Bad test command — use testA<0-2047>";
         return;
     }
 

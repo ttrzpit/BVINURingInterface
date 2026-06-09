@@ -207,7 +207,6 @@ void DisplayHandler::PopulateTelemetryPanel(
     AddSubheadingCell("Teensy", "A5", 2, 1, "center", bodyFontSize);
     AddSubheadingCell("User ID", "A6", 2, 1, "center", bodyFontSize);
 
-
     AddBodyCell(std::to_string(static_cast<int>(serial.txFrequencyHz)) + " Hz",
                 "C2", 3, 1, "center", bodyFontSize,
                 serial.txFrequencyHz >= 150.0f ? Colors::GreBk : Colors::RedBk);
@@ -294,6 +293,13 @@ void DisplayHandler::PopulateTelemetryPanel(
         return ss.str();
     };
 
+    // Format a float to two decimal places (e.g., "12.34")
+    auto fmt2Dec = [](float v) {
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(2) << v;
+        return ss.str();
+    };
+
     AddHeadingCell("Telemetry", "O1", 4, 1, "center", headerFontSize);
     AddSubheadingCell("Active:", "O2", 3, 1, "center", bodyFontSize);
     AddSubheadingCell("x", "O3", 1, 1, "center", bodyFontSize);
@@ -372,9 +378,9 @@ void DisplayHandler::PopulateTelemetryPanel(
     AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.encoder_count_A) : na, "AG3", 3, 1, "center", bodyFontSize);
     AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.encoder_count_B) : na, "AJ3", 3, 1, "center", bodyFontSize);
     AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.encoder_count_C) : na, "AM3", 3, 1, "center", bodyFontSize);
-    AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.current_raw_A) : na, "AP3", 2, 1, "center", bodyFontSize);
-    AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.current_raw_B) : na, "AR3", 2, 1, "center", bodyFontSize);
-    AddBodyCell(serial.hasRx ? std::to_string(serial.lastRx.current_raw_C) : na, "AT3", 2, 1, "center", bodyFontSize);
+    AddBodyCell(serial.hasRx ? fmt2Dec(serial.lastRx.current_raw_A * 0.01) : na, "AP3", 2, 1, "center", bodyFontSize);
+    AddBodyCell(serial.hasRx ? fmt2Dec(serial.lastRx.current_raw_B * 0.01) : na, "AR3", 2, 1, "center", bodyFontSize);
+    AddBodyCell(serial.hasRx ? fmt2Dec(serial.lastRx.current_raw_C * 0.01) : na, "AT3", 2, 1, "center", bodyFontSize);
     AddBorder("S1", 29, 3, Colors::GraMd, 2);
 
     // ---- Active tag ---------------------------------------------------------

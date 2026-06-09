@@ -67,7 +67,9 @@ void T_AmplifierClass::Begin() {
 
     // ---- Start HW serial at 9600 (Copley power-up default) ------------------
     HWSerialA.begin(BAUD_INIT);
+    delay(250) ; // Stagger starts to avoid concurrent port conflicts
     HWSerialB.begin(BAUD_INIT);
+    delay(250) ; // Stagger starts to avoid concurrent port conflicts
     HWSerialC.begin(BAUD_INIT);
     delay(500);  // Allow amplifiers to finish booting after reset
 
@@ -75,13 +77,13 @@ void T_AmplifierClass::Begin() {
     // Each upgrade is done sequentially to avoid concurrent port conflicts.
     // LED lights on success; stays off on failure.
 
-    bool okA = UpgradeBaudRate(HWSerialA);
+    bool okA = UpgradeBaudRate(HWSerialA, LED_PIN_AMP_A);
     digitalWriteFast(LED_PIN_AMP_A, okA ? HIGH : LOW);
 
-    bool okB = UpgradeBaudRate(HWSerialB);
+    bool okB = UpgradeBaudRate(HWSerialB, LED_PIN_AMP_B);
     digitalWriteFast(LED_PIN_AMP_B, okB ? HIGH : LOW);
 
-    bool okC = UpgradeBaudRate(HWSerialC);
+    bool okC = UpgradeBaudRate(HWSerialC, LED_PIN_AMP_C);
     digitalWriteFast(LED_PIN_AMP_C, okC ? HIGH : LOW);
 
     // ---- Set PWM current mode (s r0x24 3\r) on each amplifier ---------------
@@ -91,7 +93,7 @@ void T_AmplifierClass::Begin() {
 
     // ---- Enable amplifiers and zero encoders --------------------------------
     Enable();
-    ZeroEncoders();
+
 }
 
 
@@ -167,7 +169,7 @@ void T_AmplifierClass::ZeroEncoders() {
 // Private — initialization helpers
 // =============================================================================
 
-bool T_AmplifierClass::UpgradeBaudRate(HardwareSerial& port) {
+bool T_AmplifierClass::UpgradeBaudRate(HardwareSerial& port, uint8_t ledPin) {
 
     // Step 1: Send baud change command at 9600.
     // CRITICAL: use .print() not .println() — the extra \n can trigger a break
@@ -176,13 +178,13 @@ bool T_AmplifierClass::UpgradeBaudRate(HardwareSerial& port) {
 
     // Step 2: The amplifier responds "ok\r" at the NEW baud so we cannot read it.
     // Wait the minimum required time for the amplifier to complete the switch.
-    delay(150);
+    DelayBlink(ledPin, 150);
 
     // Step 3: Switch the Teensy port to 115200
     port.begin(BAUD_FAST);
 
     // Step 4: Wait for the port to stabilize
-    delay(50);
+    DelayBlink(ledPin, 50);
 
     // Step 5: Flush any stale bytes from the RX buffer
     while (port.available()) port.read();
@@ -190,12 +192,19 @@ bool T_AmplifierClass::UpgradeBaudRate(HardwareSerial& port) {
     // Step 6: Send verification query
     port.print("g r0x90\r");
 
-    // Step 7: Wait for response with timeout
-    char    verifyBuf[20] = {};
-    uint8_t verifyIdx     = 0;
-    uint32_t startMs      = millis();
+    // Step 7: Wait for response with timeout, blinking the LED throughout
+    char     verifyBuf[20] = {};
+    uint8_t  verifyIdx     = 0;
+    uint32_t startMs       = millis();
+    uint32_t lastToggle    = millis();
+    bool     ledState      = false;
 
     while (millis() - startMs < 150) {
+        if (millis() - lastToggle >= 50) {
+            ledState = !ledState;
+            digitalWriteFast(ledPin, ledState ? HIGH : LOW);
+            lastToggle = millis();
+        }
         if (port.available()) {
             char c = static_cast<char>(port.read());
             if (c == '\r') break;
@@ -216,6 +225,19 @@ bool T_AmplifierClass::UpgradeBaudRate(HardwareSerial& port) {
     }
 
     return false;  // No response or unexpected value at 115200
+}
+
+void T_AmplifierClass::DelayBlink(uint8_t ledPin, uint32_t durationMs) {
+    uint32_t start      = millis();
+    uint32_t lastToggle = millis();
+    bool     state      = false;
+    while (millis() - start < durationMs) {
+        if (millis() - lastToggle >= 50) {
+            state = !state;
+            digitalWriteFast(ledPin, state ? HIGH : LOW);
+            lastToggle = millis();
+        }
+    }
 }
 
 void T_AmplifierClass::SetPwmMode(HardwareSerial& port) {
