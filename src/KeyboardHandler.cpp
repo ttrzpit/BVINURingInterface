@@ -68,6 +68,10 @@ void KeyboardHandler::ProcessKey(int key) {
         state_.inputBuffer = inputBuffer_;
         EchoBuffer();
     }
+
+    else { 
+        std::cout << "Undefined key code: " << key << "\n";
+    }
     // All other key codes (special keys, Fn, arrows, etc.) are silently ignored
 }
 

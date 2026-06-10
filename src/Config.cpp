@@ -107,13 +107,21 @@ bool Config::load(const std::string& filepath) {
         arucoDetector.useAruco3Detection = (a3 != 0);
     }
 
-    // ---- ArUco display ------------------------------------------------------
+    // ---- ArUco display (Fitts grid) -----------------------------------------
     cv::FileNode adisp = fs["aruco_display"];
     if (!adisp.empty()) {
         adisp["cols"]           >> arucoDisplay.cols;
         adisp["rows"]           >> arucoDisplay.rows;
         adisp["marker_size_mm"] >> arucoDisplay.markerSizeMm;
         adisp["padding_mm"]     >> arucoDisplay.paddingMm;
+    }
+
+    // ---- ArUco calibration grid (Cal2 / Cal3) --------------------------------
+    cv::FileNode acal = fs["aruco_calibration_grid"];
+    if (!acal.empty()) {
+        acal["marker_size_mm"]      >> arucoCalGrid.markerSizeMm;
+        acal["marker_pad_mm"]       >> arucoCalGrid.markerPadMm;
+        acal["marker_exclusion_mm"] >> arucoCalGrid.markerExclusionMm;
     }
 
     // ---- Touchscreen --------------------------------------------------------
@@ -165,6 +173,31 @@ bool Config::load(const std::string& filepath) {
     if (!ser.empty()) {
         ser["port"]      >> serial.port;
         ser["baud_rate"] >> serial.baudRate;
+    }
+
+    // ---- Controller gains ---------------------------------------------------
+    cv::FileNode cg = fs["controller_gains"];
+    if (!cg.empty()) {
+        cg["gain_kP"]               >> controllerGains.gain_kP;
+        cg["gain_kD"]               >> controllerGains.gain_kD;
+        cg["gain_kI"]               >> controllerGains.gain_kI;
+        cg["force_max"]             >> controllerGains.force_max;
+        cg["tension_min"]           >> controllerGains.tension_min;
+        cg["tension_max"]           >> controllerGains.tension_max;
+        cg["position_tolerance"]    >> controllerGains.position_tolerance;
+        cg["lowpass_alpha"]         >> controllerGains.lowpass_alpha;
+        cg["tension_solver_iters"]  >> controllerGains.tension_solver_iters;
+        cg["ramp_duration_secs"]    >> controllerGains.ramp_duration_secs;
+        cg["max_current_amps"]      >> controllerGains.max_current_amps;
+        cg["encoder_counts_per_rev"] >> controllerGains.encoder_counts_per_rev;
+    }
+
+    // ---- Cal3 timing --------------------------------------------------------
+    cv::FileNode c3 = fs["cal3"];
+    if (!c3.empty()) {
+        c3["hold_secs"]     >> cal3.holdSecs;
+        c3["cooldown_secs"] >> cal3.cooldownSecs;
+        c3["max_samples"]   >> cal3.maxSamples;
     }
 
     fs.release();

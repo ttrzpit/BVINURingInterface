@@ -32,6 +32,7 @@
 #include "Colors.h"
 #include "Config.h"
 #include "DisplayHandler.h"
+#include "FittsTaskHandler.h"
 #include "KeyboardHandler.h"
 #include "PacketTypes.h"
 #include "SerialHandler.h"
@@ -69,12 +70,14 @@ int main() {
     ArucoHandler   aruco(cfg.arucoMarker,
                          cfg.arucoDetector,
                          cfg.arucoDisplay,
+                         cfg.arucoCalGrid,
                          cfg.touchscreen,
                          cfg.camera.cameraMatrix,
                          cfg.camera.distCoeffs);
 
     TouchHandler   touch(cfg.touchscreen);
-    Cal3Handler    cal3(cfg.touchscreen, cfg.camera, cfg.arucoDisplay);
+    Cal3Handler    cal3(cfg.touchscreen, cfg.camera, cfg.arucoCalGrid, cfg.cal3);
+    FittsTaskHandler fitts(cfg.arucoDisplay, cfg.touchscreen, cfg.camera);
 
     DisplayHandler display(cfg.display,
                            cv::Point2i(static_cast<int>(cfg.camera.cx),
@@ -97,9 +100,10 @@ int main() {
 
     KeyboardHandler keyboard;
 
-    double           lastFrameTimestamp = -1.0;
-    SystemState      prevState         = SystemState::IDLE;
-    int              prevFittsTarget   = 0;
+    double           lastFrameTimestamp    = -1.0;
+    SystemState      prevState            = SystemState::IDLE;
+    int              prevFittsTarget      = 0;
+    bool             cal3CompletionHandled = false;
     PcToTeensyPacket lastTxPkt         = {};   // Pending TX values updated each frame — sent by TX thread at 200 Hz
 
     // Motor test state — set by testA/testB/testC commands, cleared after 1 s
@@ -133,20 +137,31 @@ int main() {
 
         // Handle system state transitions
         if (kb.systemState != prevState) {
-            if (kb.systemState == SystemState::CALIBRATING ||
-                kb.systemState == SystemState::CAL3) {
-                // Show the full marker grid for calibration states
-                aruco.SetGridVisible(true);
-            } else if (kb.systemState == SystemState::FITTS) {
-                // FITTS starts with a blank white screen — first target appears on 'r'
-                aruco.ShowBlankTouchscreen();
+            // Close whichever grid was open in the previous state
+            if (prevState == SystemState::CAL3) {
+                aruco.SetCalibrationGridVisible(false);
+                aruco.SetCalibrationDetection(false);   // Restore DICT_4X4_50
             } else {
-                // IDLE and any other state — close the touchscreen window
                 aruco.SetGridVisible(false);
             }
 
+            if (kb.systemState == SystemState::CALIBRATING) {
+                // General calibration state — Fitts-style marker grid
+                aruco.SetGridVisible(true);
+            } else if (kb.systemState == SystemState::CAL3) {
+                // Cal3: dense calibration grid for camera-to-fingertip offset measurement
+                aruco.SetCalibrationGridVisible(true);
+                aruco.SetCalibrationDetection(true);    // Switch to DICT_4X4_100
+            } else if (kb.systemState == SystemState::FITTS) {
+                // FITTS starts with a blank white screen — first target appears on 'r'
+                aruco.ShowBlankTouchscreen();
+                fitts.Reset();
+            }
+            // IDLE and any other state — window already closed above
+
             if (kb.systemState == SystemState::CAL3) {
-                cal3.Reset();   // Fresh start each time CAL3 is entered
+                cal3.Reset();
+                cal3CompletionHandled = false;
             }
             if (prevState == SystemState::FITTS) prevFittsTarget = 0;
             prevState = kb.systemState;
@@ -179,12 +194,20 @@ int main() {
             double nowSecs = cv::getTickCount() / cv::getTickFrequency();
             cal3.Update(touchState, markers, nowSecs);
             keyboard.SetExternalStatus(cal3.GetStatus());
+
+            if (cal3.IsComplete() && !cal3CompletionHandled) {
+                cal3CompletionHandled = true;
+                display.SetCal3State(true, cal3.GetFinalOffset(), cal3.GetRollRef());
+                aruco.SetCalibrationGridVisible(false);
+                aruco.SetCalibrationDetection(false);
+            }
         }
 
         // In FITTS state, show the selected target marker whenever it changes
         if (kb.systemState == SystemState::FITTS &&
             kb.fittsTargetId != prevFittsTarget && kb.fittsTargetId > 0) {
             aruco.ShowSingleMarker(kb.fittsTargetId);
+            fitts.OnNewTarget(kb.fittsTargetId);
             prevFittsTarget = kb.fittsTargetId;
         }
 
@@ -229,7 +252,22 @@ int main() {
         serialSt.lastTx.packet_index  = serial.GetLastSentIndex();  // TX thread owns this — never set by main
         serialSt.hasRx                = serial.GetLatestPacket(serialSt.lastRx);
 
-        // h. Operator display + telemetry — only refresh on a new camera frame
+        // h. Fitts task — virtual fingertip cursor + touch error overlay,
+        //    updated when in FITTS mode.
+        if (isNewFrame) {
+            if (kb.systemState == SystemState::FITTS) {
+                fitts.Update(markers, touchState, cal3.IsComplete(),
+                             cal3.GetFinalOffset(), cal3.GetRollRef());
+                display.SetVirtualFingertip(fitts.HasVirtualFingertip(), fitts.GetVirtualFingertipPx());
+                aruco.SetFittsOverlay(fitts.HasTouchSample(), fitts.GetTouchScreenPx(),
+                                      fitts.GetErrorLine1(), fitts.GetErrorLine2());
+            } else {
+                display.SetVirtualFingertip(false);
+                aruco.SetFittsOverlay(false, {}, "", "");
+            }
+        }
+
+        // i. Operator display + telemetry — only refresh on a new camera frame
         if (isNewFrame) {
             display.Update(frame.undistorted, markers, touchState, kb, serialSt);
         }

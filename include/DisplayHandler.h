@@ -28,6 +28,7 @@
 #include "ArucoHandler.h"    // DetectedMarker
 #include "Colors.h"
 #include "Config.h"
+#include "Globals.h"
 #include "KeyboardHandler.h" // KeyboardState
 #include "PacketTypes.h"     // SerialState
 #include "TouchHandler.h"    // TouchState
@@ -80,6 +81,22 @@ public:
 
     void AddBorder(const std::string &cellRef, int colSpan, int rowSpan,
                    const cv::Scalar &color, int thickness);
+
+    // ---- Calibration state (call whenever cal state changes) ----------------
+
+    /**
+     * @brief Cache the Cal3 result for display in the controller panel.
+     * @param isComplete  True once all 10 samples have been recorded
+     * @param offset      Final averaged offset vector [mm] (from Cal3Handler::GetFinalOffset)
+     */
+    void SetCal3State(bool isComplete, cv::Point3f offset, float rollRefRad);
+
+    /**
+     * @brief Set the virtual fingertip cursor position for the operator display.
+     *        Call each frame with visible=true and the projected pixel when in
+     *        FITTS mode with Cal3 complete; call with visible=false otherwise.
+     */
+    void SetVirtualFingertip(bool visible, cv::Point2i px = {});
 
     // ---- Controller panel ---------------------------------------------------
 
@@ -150,6 +167,14 @@ private:
     const TelemetryConfig &telCfg_;
     const ControllerPanelConfig &controllerCfg_;
     cv::Point2i principalPoint_;
+
+    // Calibration state (updated via SetCal3State)
+    bool        cal3Complete_  = false;
+    cv::Point3f cal3Offset_    = {};
+    float       cal3RollDeg_   = 0.0f;
+
+    bool        virtualFingertipVisible_ = false;
+    cv::Point2i virtualFingertipPx_      = {};
 
     // Telemetry panel
     int     cellW_;          // width  / cols

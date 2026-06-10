@@ -15,6 +15,16 @@
 //   ArucoHandler  aruco(cfg.arucoDetect, cfg.arucoDisplay, ...);
 // =============================================================================
 
+
+// ========================================
+// !!!   MODIFY VALUES IN CONFIG.YAML   !!!
+// !!!   MODIFY VALUES IN CONFIG.YAML   !!!
+// !!!   MODIFY VALUES IN CONFIG.YAML   !!!
+// !!!   MODIFY VALUES IN CONFIG.YAML   !!!
+// !!!   MODIFY VALUES IN CONFIG.YAML   !!!
+// ========================================
+
+
 #include <array>
 #include <opencv2/core.hpp>  // cv::Mat, cv::FileStorage
 #include <string>
@@ -104,14 +114,25 @@ struct ArucoDetectorConfig {
     bool useAruco3Detection = true;
 };
 
-// ---- ArUco Display (touchscreen grid) ---------------------------------------
+// ---- ArUco Display (touchscreen grid — Fitts / study task) ------------------
+// Markers are distributed evenly across the screen with equal outer padding.
+// Spacing is auto-calculated to fill the usable area.
 
 struct ArucoDisplayConfig {
     int cols = 4;                // Grid columns
     int rows = 2;                // Grid rows
     float markerSizeMm = 20.0f;  // Marker side length [mm] — converted to px at render time
-    float paddingMm = 22.0f;     // Padding on all 4 sides [mm] — converted to px at render time
-    // Spacing between markers is auto-calculated from paddingMm, markerSizeMm, and screen dimensions
+    float paddingMm = 22.0f;     // Outer padding on all 4 sides [mm] — converted to px at render time
+};
+
+// ---- ArUco Calibration Grid (touchscreen grid — Cal2 / Cal3 solvePnP) -------
+// Columns and rows are auto-calculated: pack markers with exactly markerPadMm
+// between them inside the exclusion zone boundary. Uses DICT_4X4_100.
+
+struct ArucoCalibrationGridConfig {
+    float markerSizeMm     = 15.0f;  // Physical side length of each marker [mm]
+    float markerPadMm      = 15.0f;  // Gap between adjacent markers [mm]
+    float markerExclusionMm = 20.0f; // Minimum margin from screen edge to nearest marker [mm]
 };
 
 // ---- Touchscreen Monitor ----------------------------------------------------
@@ -158,11 +179,36 @@ struct ControllerPanelConfig {
     int yPos = 0;     // Window Y position on the desktop
 };
 
+// ---- Calibration Stage 3 ----------------------------------------------------
+
+struct Cal3Config {
+    double holdSecs     = 0.05;  // Required touch hold duration before recording [s]
+    double cooldownSecs = 2.0;   // Minimum gap between successive samples [s]
+    int    maxSamples   = 10;    // Total touches required to complete calibration
+};
+
 // ---- Serial (Teensy) --------------------------------------------------------
 
 struct SerialConfig {
     std::string port = "/dev/ttyACM0";  // Single full-duplex USB CDC port
     int baudRate = 1000000;             // 1 Mbaud (nominal for USB CDC)
+};
+
+// ---- Controller (PID gains and solver parameters) ---------------------------
+
+struct ControllerConfig {
+    float gain_kP             = 1.0f;    // Proportional gain [N/mm]
+    float gain_kD             = 0.0f;    // Derivative gain [N·s/mm]
+    float gain_kI             = 0.0f;    // Integral gain [N/(mm·s)]
+    float force_max           = 5.0f;    // Maximum allowable force magnitude [N]
+    float tension_min         = 0.3f;    // Preload (minimum) tension per motor [N]
+    float tension_max         = 10.0f;   // Maximum tension per motor [N]
+    float position_tolerance  = 1.0f;    // Deadband radius — no force inside [mm]
+    float lowpass_alpha       = 0.15f;   // Velocity low-pass coefficient (0=heavy, 1=none)
+    int   tension_solver_iters = 5;      // Projected gradient descent iterations
+    float ramp_duration_secs  = 1.0f;   // Force ramp-up duration after new target [s]
+    float max_current_amps    = 1.89f;   // Amplifier max current [A]
+    int   encoder_counts_per_rev = 4096; // Encoder ticks per motor revolution
 };
 
 // =============================================================================
@@ -184,11 +230,14 @@ class Config {
     ArucoMarkerConfig arucoMarker;
     ArucoDetectorConfig arucoDetector;  // Algorithm tuning params for the OpenCV detector
     ArucoDisplayConfig arucoDisplay;
+    ArucoCalibrationGridConfig arucoCalGrid;
     TouchscreenConfig touchscreen;
     DisplayConfig display;
     TelemetryConfig telemetry;
     ControllerPanelConfig controllerPanel;
     SerialConfig serial;
+    ControllerConfig controllerGains;
+    Cal3Config cal3;
 
    private:
     // Build cameraMatrix and distCoeffs from the scalar values after loading

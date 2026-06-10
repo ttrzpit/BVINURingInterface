@@ -303,7 +303,7 @@ would be ~11 mm — comparable to the guidance accuracy from prior studies.
 ### Cross-Validation
 The touchscreen contact point can be compared against the camera-predicted
 fingertip position (p_c + offset) to verify the calibration accuracy.
-
+1
 ### Timing
 ~10 touches × ~3-4 seconds each = under 40 seconds total.
 

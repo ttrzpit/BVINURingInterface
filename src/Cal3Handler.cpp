@@ -22,12 +22,17 @@
 // Camera position in world: p_cam_world = -R^T * t
 // =============================================================================
 
-Cal3Handler::Cal3Handler(const TouchscreenConfig&  touchCfg,
-                          const CameraConfig&       camCfg,
-                          const ArucoDisplayConfig& displayCfg)
+Cal3Handler::Cal3Handler(const TouchscreenConfig&          touchCfg,
+                          const CameraConfig&               camCfg,
+                          const ArucoCalibrationGridConfig& calGridCfg,
+                          const Cal3Config&                 cal3Cfg)
     : touchCfg_(touchCfg)
     , camCfg_(camCfg)
-    , displayCfg_(displayCfg)
+    , calGridCfg_(calGridCfg)
+    , cal3Cfg_(cal3Cfg)
+    , holdSecs_(cal3Cfg.holdSecs)
+    , cooldownSecs_(cal3Cfg.cooldownSecs)
+    , maxSamples_(cal3Cfg.maxSamples)
 {}
 
 void Cal3Handler::Reset() {
@@ -40,8 +45,8 @@ void Cal3Handler::Reset() {
     lastOffset_     = {};
     finalOffset_    = {};
     rollReference_  = 0.0f;
-    status_         = "Touch screen (0/" + std::to_string(MAX_SAMPLES) + ")";
-    std::cout << "Cal3: Reset — ready to record " << MAX_SAMPLES << " touches.\n";
+    status_         = "Touch screen (0/" + std::to_string(maxSamples_) + ")";
+    std::cout << "Cal3: Reset — ready to record " << maxSamples_ << " touches.\n";
 }
 
 
@@ -69,8 +74,8 @@ bool Cal3Handler::Update(const TouchState&                  touch,
                 // Lifted before hold duration — reset without penalising
                 phase_  = Phase::WAITING;
                 status_ = "Released too early — try again ("
-                        + std::to_string(sampleCount_) + "/" + std::to_string(MAX_SAMPLES) + ")";
-            } else if (nowSecs - touchStartSecs_ >= HOLD_SECS) {
+                        + std::to_string(sampleCount_) + "/" + std::to_string(maxSamples_) + ")";
+            } else if (nowSecs - touchStartSecs_ >= holdSecs_) {
                 // Stable touch — attempt to record
                 cv::Vec3d   rvec;
                 cv::Point3f camPos;
@@ -102,7 +107,7 @@ bool Cal3Handler::Update(const TouchState&                  touch,
                 sampleCount_++;
 
                 std::cout << std::fixed << std::setprecision(1)
-                          << "Cal3: Sample " << sampleCount_ << "/" << MAX_SAMPLES
+                          << "Cal3: Sample " << sampleCount_ << "/" << maxSamples_
                           << " — d = (" << offset.x << ", " << offset.y
                           << ", " << offset.z << ") mm"
                           << "  touch=(" << touch.position.x << ", " << touch.position.y
@@ -110,11 +115,11 @@ bool Cal3Handler::Update(const TouchState&                  touch,
                           << "  cam_screen=(" << camPos.x << ", " << camPos.y << " mm)\n"
                           << std::defaultfloat;
 
-                if (sampleCount_ >= MAX_SAMPLES) {
+                if (sampleCount_ >= maxSamples_) {
                     // Average all offsets
                     cv::Point3f sum{0, 0, 0};
                     for (const auto& o : offsets_) sum += o;
-                    finalOffset_ = sum * (1.0f / MAX_SAMPLES);
+                    finalOffset_ = sum * (1.0f / maxSamples_);
 
                     float rollSum = std::accumulate(rollSamples_.begin(), rollSamples_.end(), 0.0f);
                     rollReference_ = rollSum / static_cast<float>(rollSamples_.size());
@@ -128,13 +133,13 @@ bool Cal3Handler::Update(const TouchState&                  touch,
                               << finalOffset_.x << ", "
                               << finalOffset_.y << ", "
                               << finalOffset_.z << ") mm\n"
-                              << "Cal3: roll_reference = " << rollReference_ << " rad\n"
+                              << "Cal3: roll_reference = " << ( rollReference_ * RAD_TO_DEG ) << " deg\n"
                               << std::defaultfloat;
                 } else {
-                    cooldownEndSecs_ = nowSecs + COOLDOWN_SECS;
+                    cooldownEndSecs_ = nowSecs + cooldownSecs_;
                     phase_  = Phase::COOLDOWN;
                     status_ = "Sample " + std::to_string(sampleCount_) + "/"
-                            + std::to_string(MAX_SAMPLES)
+                            + std::to_string(maxSamples_)
                             + " — wait 2 s...";
                 }
                 return true;   // New sample recorded this call
@@ -145,7 +150,7 @@ bool Cal3Handler::Update(const TouchState&                  touch,
             if (nowSecs >= cooldownEndSecs_) {
                 phase_  = Phase::WAITING;
                 status_ = "Touch screen ("
-                        + std::to_string(sampleCount_) + "/" + std::to_string(MAX_SAMPLES) + ")";
+                        + std::to_string(sampleCount_) + "/" + std::to_string(maxSamples_) + ")";
             }
             break;
 
@@ -165,27 +170,28 @@ bool Cal3Handler::ComputeCameraPoseInScreen(const std::vector<DetectedMarker>& m
     std::vector<cv::Point3f> objectPoints;
     std::vector<cv::Point2f> imagePoints;
 
-    // Pre-compute spacing (same formula as ArucoHandler::renderGridImage)
-    const float sz_px  = std::round(displayCfg_.markerSizeMm * touchCfg_.pixelsPerMm);
-    const float pad_px = std::round(displayCfg_.paddingMm    * touchCfg_.pixelsPerMm);
-    const float sz_mm  = displayCfg_.markerSizeMm;
+    // Mirror the layout from ArucoHandler::renderCalibrationGridImage exactly:
+    // exclusion zone boundary → fixed gap between markers → 0-based IDs.
+    const float sz_px  = std::round(calGridCfg_.markerSizeMm      * touchCfg_.pixelsPerMm);
+    const float gap_px = std::round(calGridCfg_.markerPadMm       * touchCfg_.pixelsPerMm);
+    const float exc_px = std::round(calGridCfg_.markerExclusionMm * touchCfg_.pixelsPerMm);
+    const float sz_mm  = calGridCfg_.markerSizeMm;
 
-    const float spacingX_px = (displayCfg_.cols > 1)
-        ? (touchCfg_.width  - 2.0f * pad_px - displayCfg_.cols * sz_px) / (displayCfg_.cols - 1)
-        : 0.0f;
-    const float spacingY_px = (displayCfg_.rows > 1)
-        ? (touchCfg_.height - 2.0f * pad_px - displayCfg_.rows * sz_px) / (displayCfg_.rows - 1)
-        : 0.0f;
+    const int availW = touchCfg_.width  - 2 * static_cast<int>(exc_px);
+    const int availH = touchCfg_.height - 2 * static_cast<int>(exc_px);
+    const int cols   = std::max(1, static_cast<int>((availW + gap_px) / (sz_px + gap_px)));
+    const int rows   = std::max(1, static_cast<int>((availH + gap_px) / (sz_px + gap_px)));
 
     for (const auto& m : markers) {
-        if (m.id < 1 || m.id > displayCfg_.cols * displayCfg_.rows) continue;
+        // Calibration grid uses 0-based IDs
+        if (m.id < 0 || m.id >= cols * rows) continue;
 
-        const int col = (m.id - 1) % displayCfg_.cols;
-        const int row = (m.id - 1) / displayCfg_.cols;
+        const int col = m.id % cols;
+        const int row = m.id / cols;
 
         // Top-left of this marker in screen pixels, then convert to mm
-        const float ox_mm = (pad_px + col * (sz_px + spacingX_px)) * touchCfg_.mmPerPixel;
-        const float oy_mm = (pad_px + row * (sz_px + spacingY_px)) * touchCfg_.mmPerPixel;
+        const float ox_mm = (exc_px + col * (sz_px + gap_px)) * touchCfg_.mmPerPixel;
+        const float oy_mm = (exc_px + row * (sz_px + gap_px)) * touchCfg_.mmPerPixel;
 
         // Four corners in world mm (Z = 0, flat screen plane)
         // Order matches OpenCV ArUco: top-left, top-right, bottom-right, bottom-left

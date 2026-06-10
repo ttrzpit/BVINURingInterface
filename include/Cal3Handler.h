@@ -25,14 +25,16 @@
 
 #include "ArucoHandler.h"   // DetectedMarker
 #include "Config.h"
+#include "Globals.h"
 #include "TouchHandler.h"   // TouchState
 
 
 class Cal3Handler {
 public:
-    Cal3Handler(const TouchscreenConfig&  touchCfg,
-                const CameraConfig&       camCfg,
-                const ArucoDisplayConfig& displayCfg);
+    Cal3Handler(const TouchscreenConfig&          touchCfg,
+                const CameraConfig&               camCfg,
+                const ArucoCalibrationGridConfig& calGridCfg,
+                const Cal3Config&                 cal3Cfg);
 
     /** @brief Reset all samples and state — call when entering CAL3. */
     void Reset();
@@ -49,7 +51,7 @@ public:
                 double                             nowSecs);
 
     // ---- Results ------------------------------------------------------------
-    bool        IsComplete()      const { return sampleCount_ >= MAX_SAMPLES; }
+    bool        IsComplete()      const { return sampleCount_ >= maxSamples_; }
     int         GetSampleCount()  const { return sampleCount_; }
     cv::Point3f GetLastOffset()   const { return lastOffset_; }
     cv::Point3f GetFinalOffset()  const { return finalOffset_; }
@@ -71,9 +73,10 @@ private:
                                     cv::Vec3d&   rvecOut,
                                     cv::Point3f& camPosOut) const;
 
-    const TouchscreenConfig&  touchCfg_;
-    const CameraConfig&       camCfg_;
-    const ArucoDisplayConfig& displayCfg_;
+    const TouchscreenConfig&          touchCfg_;
+    const CameraConfig&               camCfg_;
+    const ArucoCalibrationGridConfig& calGridCfg_;
+    Cal3Config                        cal3Cfg_;
 
     // ---- State machine ------------------------------------------------------
     enum class Phase { WAITING, HOLDING, COOLDOWN, DONE };
@@ -81,9 +84,9 @@ private:
     double touchStartSecs_  = 0.0;
     double cooldownEndSecs_ = 0.0;
 
-    static constexpr double HOLD_SECS     = 0.2;   // Required hold before recording
-    static constexpr double COOLDOWN_SECS = 2.0;   // Gap before next touch is accepted
-    static constexpr int    MAX_SAMPLES   = 10;
+    double holdSecs_;
+    double cooldownSecs_;
+    int    maxSamples_;
 
     // ---- Sample storage -----------------------------------------------------
     int                      sampleCount_  = 0;

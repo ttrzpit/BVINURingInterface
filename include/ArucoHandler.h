@@ -53,12 +53,13 @@ struct DetectedMarker {
 
 class ArucoHandler {
 public:
-    ArucoHandler(const ArucoMarkerConfig&   detectCfg,
-                 const ArucoDetectorConfig& detectorCfg,
-                 const ArucoDisplayConfig&  displayCfg,
-                 const TouchscreenConfig&   touchCfg,
-                 const cv::Mat&             camMatrix,
-                 const cv::Mat&             distCoeffs);
+    ArucoHandler(const ArucoMarkerConfig&          detectCfg,
+                 const ArucoDetectorConfig&        detectorCfg,
+                 const ArucoDisplayConfig&         displayCfg,
+                 const ArucoCalibrationGridConfig& calGridCfg,
+                 const TouchscreenConfig&          touchCfg,
+                 const cv::Mat&                    camMatrix,
+                 const cv::Mat&                    distCoeffs);
 
     ~ArucoHandler();
 
@@ -108,7 +109,43 @@ public:
      */
     void ShowSingleMarker(int id);
 
+    /**
+     * @brief Draw (or clear) the Fitts touch-sample overlay on top of the
+     *        current Fitts target image: a red dot at the touch position
+     *        plus two lines of error-readout text in the top-left corner.
+     *        Persists until the next ShowSingleMarker() call (next target).
+     * @param visible  Draw the overlay
+     * @param touchPx  Touch position in touchscreen-local pixels
+     * @param line1    First error readout line
+     * @param line2    Second error readout line
+     */
+    void SetFittsOverlay(bool visible, cv::Point2i touchPx,
+                         const std::string& line1, const std::string& line2);
+
     void updateGridConfig(int cols, int rows, float markerSizeMm, float paddingMm);
+
+    /**
+     * @brief Show or hide the dense calibration grid on the touchscreen.
+     *        Layout is auto-calculated from ArucoCalibrationGridConfig:
+     *        markers are packed with fixed markerPadMm spacing inside the
+     *        markerExclusionMm boundary. Uses DICT_4X4_100 (IDs start at 0).
+     *        Idempotent — safe to call repeatedly with the same value.
+     */
+    void SetCalibrationGridVisible(bool visible);
+
+    /**
+     * @brief Switch the detection dictionary and valid ID range.
+     *        true  → DICT_4X4_100, IDs 0–100 (Cal3 calibration grid)
+     *        false → DICT_4X4_50,  IDs from aruco_marker config (default)
+     *        Thread-safe — takes effect on the next detection cycle.
+     */
+    void SetCalibrationDetection(bool calibration);
+
+    /**
+     * @brief Return the auto-calculated grid dimensions for the calibration grid.
+     *        Useful for building the 3D point array in Cal3Handler solvePnP.
+     */
+    cv::Size GetCalibrationGridSize() const { return calGridSize_; }
 
 private:
     // ---- Detection thread ---------------------------------------------------
@@ -119,24 +156,48 @@ private:
     void        initDetector();
     void        renderGridImage();
     cv::Point2i gridCellOrigin(int col, int row) const;
+    void        renderCalibrationGridImage();
 
     // ---- Configuration ------------------------------------------------------
-    ArucoMarkerConfig   detectCfg_;
-    ArucoDetectorConfig detectorCfg_;
-    ArucoDisplayConfig  displayCfg_;
-    TouchscreenConfig   touchCfg_;
-    cv::Mat             camMatrix_;
-    cv::Mat             distCoeffs_;
+    ArucoMarkerConfig          detectCfg_;
+    ArucoDetectorConfig        detectorCfg_;
+    ArucoDisplayConfig         displayCfg_;
+    ArucoCalibrationGridConfig calGridCfg_;
+    TouchscreenConfig          touchCfg_;
+    cv::Mat                    camMatrix_;
+    cv::Mat                    distCoeffs_;
 
     // ---- OpenCV detector ----------------------------------------------------
-    cv::aruco::Dictionary        dictionary_;
+    cv::aruco::Dictionary         dictionary_;       // DICT_4X4_50  — Fitts / default
     cv::aruco::DetectorParameters detectorParams_;
-    cv::aruco::ArucoDetector     detector_;
-    cv::Mat                      markerCorners3D_{ 4, 1, CV_32FC3 };
+    cv::aruco::ArucoDetector      detector_;         // built from dictionary_
+    cv::aruco::ArucoDetector      calDetector_;      // built from calGridDictionary_ (DICT_4X4_100)
+    cv::Mat                       markerCorners3D_{ 4, 1, CV_32FC3 };
+
+    // Active detection mode — written from main thread, read from detect thread.
+    // Atomics avoid the need for a mutex in the RunDetection() hot path.
+    std::atomic<bool> useCalDetector_{ false };
+    std::atomic<int>  activeValidIdMin_{ 0 };
+    std::atomic<int>  activeValidIdMax_{ 45 };
 
     // ---- Display ------------------------------------------------------------
     cv::Mat markerGridImage_;
-    bool    gridVisible_ = false;   // Tracks open/closed state for idempotent SetGridVisible
+    bool    gridVisible_    = false;   // Fitts grid open/closed state
+    cv::Mat calGridImage_;
+    bool    calGridVisible_ = false;   // Calibration grid open/closed state
+    cv::Size calGridSize_   = {};      // Auto-calculated cols/rows for the calibration grid
+
+    // Fitts touch-sample overlay — drawn on top of singleMarkerImage_
+    cv::Mat     singleMarkerImage_;        // BGR base image for the current Fitts target
+    bool        fittsOverlayVisible_ = false;
+    cv::Point2i fittsTouchPx_        = {};
+    std::string fittsLine1_;
+    std::string fittsLine2_;
+
+    // Calibration grid uses a larger dictionary (DICT_4X4_100) so it can
+    // accommodate more markers than the Fitts grid (DICT_4X4_50).
+    cv::aruco::Dictionary calGridDictionary_;
+
     static constexpr const char* TOUCHSCREEN_WIN = "ArUco Display";
 
     // ---- Thread infrastructure ----------------------------------------------

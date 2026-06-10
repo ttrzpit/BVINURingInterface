@@ -54,7 +54,14 @@ aruco_display:
    marker_size_mm: 20.0   # Marker side length [mm] — converted to pixels at runtime
    padding_mm: 22.0       # Padding on all 4 sides [mm] — converted to pixels at runtime
 
-
+# ---- ArUco Calibration Grid (on the touchscreen) --------------------------------
+# The C x R grid starts at marker ID 1 and increments left-to-right, top-to-bottom.
+# Spacing between markers is auto-calculated from screen size, padding, and marker size.
+# Uses the larger ArUco dictionary 4x4x100
+aruco_calibration_grid:
+   marker_size_mm: 18.0       # Marker side length [mm] — converted to pixels at runtime
+   marker_pad_mm: 15.0        # Padding between markers [mm] — converted to pixels at runtime
+   marker_exclusion_mm: 35.0  # Exclusion zone around the aruco grid to keep markers away from the screen edge
 
 
 # ---- Camera -----------------------------------------------------------------
@@ -124,14 +131,47 @@ telemetry:
    y_pos: 1200
 
 controller:
-   width: 300
-   height: 1056
-   cols: 10
-   rows: 33
-   x_pos: 1524
+   width: 450
+   height: 1344
+   cols: 15
+   rows: 42
+   x_pos: 1372
    y_pos: 0
+
+# ---- Calibration Stage 3 timing ---------------------------------------------
+cal3:
+   hold_secs:     0.05   # Seconds the screen must be held before a sample is recorded
+   cooldown_secs: 1.0    # Seconds to wait between successive samples
+   max_samples:   10     # Number of touches required to complete calibration
 
 # ---- Serial (Teensy) --------------------------------------------------------
 serial:
    port: "/dev/ttyACM0"   # Single full-duplex USB CDC port
    baud_rate: 1000000     # 1 Mbaud (nominal for USB CDC; actual speed is USB-limited)
+
+# ---- Controller gains and solver parameters ----------------------------------
+# gain_kP           : Proportional gain [N/mm]
+# gain_kD           : Derivative gain [N·s/mm]
+# gain_kI           : Integral gain [N/(mm·s)]
+# force_max         : Maximum commanded force magnitude [N]
+# tension_min       : Preload (minimum) tension per motor [N]
+# tension_max       : Maximum tension per motor [N]
+# position_tolerance: Deadband radius — no force applied inside this radius [mm]
+# lowpass_alpha     : Velocity low-pass filter coefficient (0 = heavy, 1 = none)
+# tension_solver_iters : Projected gradient descent iterations per cycle
+# ramp_duration_secs   : Force ramp-up duration when a new target appears [s]
+# max_current_amps     : Amplifier current limit [A]
+# encoder_counts_per_rev : Encoder ticks per full motor revolution
+controller_gains:
+   gain_kP: 1.0
+   gain_kD: 0.0
+   gain_kI: 0.0
+   force_max: 5.0
+   tension_min: 0.3
+   tension_max: 10.0
+   position_tolerance: 1.0
+   lowpass_alpha: 0.15
+   tension_solver_iters: 5
+   ramp_duration_secs: 1.0
+   max_current_amps: 1.89
+   encoder_counts_per_rev: 4096

@@ -89,6 +89,14 @@ void DisplayHandler::Update(const cv::Mat &frame,
 
         DrawCameraElements(canvas);
         DrawMarkerOverlays(canvas, markers, kb.activeTagId);
+
+        if (virtualFingertipVisible_) {
+            const cv::Point2i &p = virtualFingertipPx_;
+            cv::circle(canvas, p, 14, cv::Scalar(255, 0, 255), 2);  // magenta ring
+            cv::circle(canvas, p, 3, cv::Scalar(255, 0, 255), -1);  // filled centre
+            // cv::putText(canvas, "FT", p + cv::Point2i(16, -12), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 0, 255), 1);
+        }
+
         DrawTelemetryBar(canvas, markers, touch, kb);
 
         cv::imshow(WIN_OPERATOR, canvas);
@@ -236,9 +244,20 @@ void DisplayHandler::PopulateTelemetryPanel(
         AddBodyCell(stateStr, "C4", 3, 1, "center", bodyFontSize, stateFill);
     }
     AddBodyCell("[TEENSY]", "C5", 3, 1, "center", bodyFontSize);
-    AddBodyCell("[NURING]", "C6", 3, 1, "center", bodyFontSize);
-    AddBorder("A1", 5, 8, Colors::GraMd, 2);
+    AddBodyCell(kb.activeUserId > 0 ? std::to_string(kb.activeUserId) : "---", "C6", 3, 1, "center", bodyFontSize);
 
+    AddBorder("A1", 5, 6, Colors::GraMd, 2);
+
+    // Mouse
+    AddSubheadingCell("Mouse", "A7", 2, 1, "center", bodyFontSize);
+    AddBodyCell(touch.isTouched ? "CLICK" : "---", "A8", 2, 1, "center", bodyFontSize,
+                touch.isTouched ? Colors::GreBk : Colors::GraBk);
+    AddBodyCell(touch.isTouched ? std::to_string(touch.position.x) : "--", "C7", 3, 1, "center", bodyFontSize);
+    AddBodyCell(touch.isTouched ? std::to_string(touch.position.y) : "--", "C8", 3, 1, "center", bodyFontSize);
+
+    AddBorder("A7", 5, 2, Colors::GraMd, 2);
+
+    // kb.userId > 0 ? std::to_string(kb.userId) : "--",
     // ---- Marker visibility -------------------------------------------------------
     AddHeadingCell("Marker Visibility", "F1", 8, 1, "center", headerFontSize);
     AddHeadingCell(std::to_string(markers.size()), "N1", 1, 1, "center",
@@ -268,11 +287,11 @@ void DisplayHandler::PopulateTelemetryPanel(
     AddBorder("F1", 9, 6, Colors::GraMd, 2);
 
     // ---- Keyboard inputs -------------------
-    AddSubheadingCell("Input", "F7", 2, 1, "center", bodyFontSize);
-    AddSubheadingCell("Output", "F8", 2, 1, "center", bodyFontSize);
-    AddBodyCell(kb.inputBuffer, "H7", 7, 1, "center", bodyFontSize);
-    AddBodyCell(kb.outputBuffer, "H8", 7, 1, "center", bodyFontSize);
-    AddBorder("F7", 9, 2, Colors::GraMd, 2);
+    AddSubheadingCell("Input", "S8", 2, 1, "center", bodyFontSize);
+    AddSubheadingCell("Output", "AB8", 2, 1, "center", bodyFontSize);
+    AddBodyCell(kb.inputBuffer, "U8", 7, 1, "center", bodyFontSize);
+    AddBodyCell(kb.outputBuffer, "AD8", 18, 1, "center", bodyFontSize);
+    AddBorder("S8", 29, 1, Colors::GraMd, 2);
 
     // ---- Active Marker Telemetry (pos_camera from solvePnP) -------------------
     // Find the active marker in this frame's detection results
@@ -469,6 +488,17 @@ cv::Rect DisplayHandler::CellRect(const std::string &ref, int colSpan,
 // Controller panel — private helpers
 // =============================================================================
 
+void DisplayHandler::SetCal3State(bool isComplete, cv::Point3f offset, float rollRefRad) {
+    cal3Complete_ = isComplete;
+    cal3Offset_ = offset;
+    cal3RollDeg_ = rollRefRad * RAD_TO_DEG;
+}
+
+void DisplayHandler::SetVirtualFingertip(bool visible, cv::Point2i px) {
+    virtualFingertipVisible_ = visible;
+    virtualFingertipPx_ = px;
+}
+
 void DisplayHandler::PopulateControllerPanel(const std::vector<DetectedMarker> &markers,
                                              const TouchState &touch, const KeyboardState &kb) {
     ClearController();
@@ -477,16 +507,63 @@ void DisplayHandler::PopulateControllerPanel(const std::vector<DetectedMarker> &
     float headerFontSize = 0.55f;
     float bodyFontSize = 0.45f;
 
-    cv::Point2i center = cv::Point2i(149, 895);
-    float radius = 135.0f;
+    // --- Calibration ----------------------------------------------------------------------------
+    auto fmtMm = [](float v) {
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(1) << v;
+        return ss.str();
+    };
 
-    AddControllerHeadingCell("Controller Panel", "A1", 10, 1, "center", headerFontSize);
+    AddControllerHeadingCell("Calibration", "A1", 15, 1, "center", headerFontSize);
+    AddControllerSubheadingCell("A-RoM", "A2", 3, 1, "center", bodyFontSize);
+    AddControllerSubheadingCell("Stiffness", "D2", 4, 1, "center", bodyFontSize);
+    AddControllerSubheadingCell("Fingertip Offset", "H2", 8, 1, "center", bodyFontSize, (cal3Complete_ ? Colors::GreBk : Colors::GraBk));
 
-    AddControllerHeadingCell("Virtual Fingertip", "A23", 10, 1, "center", headerFontSize);
-    AddControllerBorder("A23", 10, 11, Colors::GraMd, 2);
+    AddControllerBodyCell("[NOT SET]", "A3", 3, 1, "center", bodyFontSize);
+    AddControllerBodyCell("[NOT SET]", "D3", 4, 1, "center", bodyFontSize);
 
+    if (cal3Complete_) {
+        std::ostringstream rollSS;
+        rollSS << std::fixed << std::setprecision(1) << cal3RollDeg_ << "\xc2\xb0";
+        AddControllerBodyCell(fmtMm(cal3Offset_.x), "H3", 2, 1, "center", bodyFontSize);
+        AddControllerBodyCell(fmtMm(cal3Offset_.y), "J3", 2, 1, "center", bodyFontSize);
+        AddControllerBodyCell(fmtMm(cal3Offset_.z), "L3", 2, 1, "center", bodyFontSize);
+        AddControllerBodyCell(rollSS.str(), "N3", 2, 1, "center", bodyFontSize);
+    } else {
+        AddControllerBodyCell("[XX]", "H3", 2, 1, "center", bodyFontSize);
+        AddControllerBodyCell("[YY]", "J3", 2, 1, "center", bodyFontSize);
+        AddControllerBodyCell("[ZZ]", "L3", 2, 1, "center", bodyFontSize);
+        AddControllerBodyCell("[TH]", "N3", 2, 1, "center", bodyFontSize);
+    }
+    AddControllerBorder("A1", 15, 3, Colors::GraMd, 2);
+
+    // --- Virtual XY fingertip -------------------------------------------------------------------
+    AddControllerHeadingCell("Virtual Fingertip Mapping", "A27", 15, 1, "center", headerFontSize);
+    AddControllerSubheadingCell("Virtual Position", "A28", 9, 1, "center", headerFontSize);
+    AddControllerBodyCell("[xxx]", "J28", 3, 1, "center", headerFontSize);
+    AddControllerBodyCell("[yyy]", "M28", 3, 1, "center", headerFontSize);
+
+    // Virtual Mapping Parameters
+    cv::Point2i center = cv::Point2i(225, 1120);
+    int radius = 200;
+
+    // Motor direction lines — use Globals.h unit vectors scaled to radius
+    int dAx = static_cast<int>(CONSTANT_UNIT_VECTOR_A_X * radius);
+    int dAy = static_cast<int>(-CONSTANT_UNIT_VECTOR_A_Y * radius);  // screen y is flipped
+    int dBx = static_cast<int>(CONSTANT_UNIT_VECTOR_B_X * radius);
+    int dBy = static_cast<int>(-CONSTANT_UNIT_VECTOR_B_Y * radius);
+    int dCx = static_cast<int>(CONSTANT_UNIT_VECTOR_C_X * radius);
+    int dCy = static_cast<int>(-CONSTANT_UNIT_VECTOR_C_Y * radius);
+    cv::line(matController_, center, center + cv::Point2i(dAx, dAy), Colors::GraBk, 2);  // Motor A (35°)
+    cv::line(matController_, center, center + cv::Point2i(dBx, dBy), Colors::GraBk, 2);  // Motor B (145°)
+    cv::line(matController_, center, center + cv::Point2i(dCx, dCy), Colors::GraBk, 2);  // Motor C (270°)
+
+    // Fingertip Map Circle elements
     cv::circle(matController_, center, radius, Colors::GraDk, 2);
     cv::circle(matController_, center, 4, Colors::GraDk, -1);
+
+    // Border
+    AddControllerBorder("A27", 15, 18, Colors::GraMd, 2);
 }
 
 void DisplayHandler::DrawControllerCell(const std::string &text, const std::string &cellRef,

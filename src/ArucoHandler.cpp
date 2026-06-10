@@ -25,12 +25,17 @@ static constexpr float RAD2DEG = 57.2958f;
 ArucoHandler::ArucoHandler(const ArucoMarkerConfig& markerCfg,
                            const ArucoDetectorConfig& detectorCfg,
                            const ArucoDisplayConfig& displayCfg,
+                           const ArucoCalibrationGridConfig& calGridCfg,
                            const TouchscreenConfig& touchCfg,
                            const cv::Mat& camMatrix,
                            const cv::Mat& distCoeffs)
-    : detectCfg_(markerCfg), detectorCfg_(detectorCfg), displayCfg_(displayCfg), touchCfg_(touchCfg), camMatrix_(camMatrix.clone()), distCoeffs_(distCoeffs.clone()) {
+    : detectCfg_(markerCfg), detectorCfg_(detectorCfg), displayCfg_(displayCfg),
+      calGridCfg_(calGridCfg), touchCfg_(touchCfg),
+      camMatrix_(camMatrix.clone()), distCoeffs_(distCoeffs.clone()),
+      calGridDictionary_(cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_100)) {
     initDetector();
     renderGridImage();
+    renderCalibrationGridImage();
 
     std::cout << "ArucoHandler: Initialized.\n"
               << "ArucoHandler: Detection range [" << detectCfg_.validIdMin
@@ -108,15 +113,20 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
     std::vector<int> detectedIds;
     std::vector<std::vector<cv::Point2f>> corners;
 
-    detector_.detectMarkers(grayFrame, corners, detectedIds);
+    const cv::aruco::ArucoDetector& det =
+        useCalDetector_.load() ? calDetector_ : detector_;
+    det.detectMarkers(grayFrame, corners, detectedIds);
 
     if (detectedIds.empty()) return results;
+
+    const int idMin = activeValidIdMin_.load();
+    const int idMax = activeValidIdMax_.load();
 
     for (int i = 0; i < static_cast<int>(detectedIds.size()); i++) {
         int id = detectedIds[i];
 
-        // Discard markers outside the configured valid range
-        if (id < detectCfg_.validIdMin || id > detectCfg_.validIdMax) continue;
+        // Discard markers outside the active valid range
+        if (id < idMin || id > idMax) continue;
 
         // Wrap this single marker's corners so estimatePoseSingleMarkers can
         // accept it — the function signature expects a vector-of-corner-vectors
@@ -179,6 +189,15 @@ void ArucoHandler::ShowBlankTouchscreen() {
     cv::Mat blank(touchCfg_.height, touchCfg_.width, CV_8UC1, cv::Scalar(255));
     cv::imshow(TOUCHSCREEN_WIN, blank);
     cv::waitKey(1);
+
+    // Reset the Fitts overlay base image and state — no overlay until a touch
+    // is recorded against the next target.
+    cv::cvtColor(blank, singleMarkerImage_, cv::COLOR_GRAY2BGR);
+    fittsOverlayVisible_ = false;
+    fittsTouchPx_        = {};
+    fittsLine1_.clear();
+    fittsLine2_.clear();
+
     std::cout << "ArucoHandler: Touchscreen blank (FITTS ready — press 'r' for first target)\n";
 }
 
@@ -199,7 +218,13 @@ void ArucoHandler::SetGridVisible(bool visible) {
         std::cout << "ArucoHandler: Grid shown ("
                   << displayCfg_.cols << "x" << displayCfg_.rows << ")\n";
     } else {
+        // Un-fullscreen before destroying — skipping this step causes a heap
+        // corruption crash in cv::Mat::deallocate on Linux/X11 when the window
+        // manager still holds a reference to the fullscreen surface.
+        cv::setWindowProperty(TOUCHSCREEN_WIN, cv::WND_PROP_FULLSCREEN, cv::WINDOW_NORMAL);
+        cv::waitKey(50);
         cv::destroyWindow(TOUCHSCREEN_WIN);
+        cv::waitKey(50);
         std::cout << "ArucoHandler: Grid hidden.\n";
     }
 }
@@ -225,7 +250,42 @@ void ArucoHandler::ShowSingleMarker(int id) {
     cv::imshow(TOUCHSCREEN_WIN, img);
     cv::waitKey(1);
 
+    // New target — reset the Fitts overlay base image and clear any previous
+    // touch sample until the next contact is recorded.
+    cv::cvtColor(img, singleMarkerImage_, cv::COLOR_GRAY2BGR);
+    fittsOverlayVisible_ = false;
+    fittsTouchPx_        = {};
+    fittsLine1_.clear();
+    fittsLine2_.clear();
+
     std::cout << "ArucoHandler: Fitts target → marker " << id << "\n";
+}
+
+void ArucoHandler::SetFittsOverlay(bool visible, cv::Point2i touchPx,
+                                   const std::string& line1, const std::string& line2) {
+    if (visible == fittsOverlayVisible_ && touchPx == fittsTouchPx_ &&
+        line1 == fittsLine1_ && line2 == fittsLine2_) {
+        return;  // No change — avoid redundant redraw
+    }
+
+    fittsOverlayVisible_ = visible;
+    fittsTouchPx_        = touchPx;
+    fittsLine1_          = line1;
+    fittsLine2_          = line2;
+
+    if (singleMarkerImage_.empty()) return;
+
+    cv::Mat img = singleMarkerImage_.clone();
+    if (visible) {
+        cv::circle(img, touchPx, 6, cv::Scalar(0, 0, 255), -1);  // red dot
+        cv::putText(img, line1, cv::Point2i(10, 30), cv::FONT_HERSHEY_SIMPLEX,
+                    0.8, cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
+        cv::putText(img, line2, cv::Point2i(10, 65), cv::FONT_HERSHEY_SIMPLEX,
+                    0.8, cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
+    }
+
+    cv::imshow(TOUCHSCREEN_WIN, img);
+    cv::waitKey(1);
 }
 
 void ArucoHandler::updateGridConfig(int cols, int rows, float markerSizeMm, float paddingMm) {
@@ -237,9 +297,98 @@ void ArucoHandler::updateGridConfig(int cols, int rows, float markerSizeMm, floa
     // Re-show only if currently visible (caller is responsible for visibility)
 }
 
+void ArucoHandler::SetCalibrationGridVisible(bool visible) {
+    if (visible == calGridVisible_) return;
+    calGridVisible_ = visible;
+
+    if (visible) {
+        // Fullscreen sequence — must match SetGridVisible order exactly.
+        // create → show → waitKey → move → waitKey → fullscreen → waitKey
+        cv::namedWindow(TOUCHSCREEN_WIN, cv::WINDOW_NORMAL);
+        cv::imshow(TOUCHSCREEN_WIN, calGridImage_);
+        cv::waitKey(1);
+        cv::moveWindow(TOUCHSCREEN_WIN, touchCfg_.xOffset, touchCfg_.yOffset);
+        cv::waitKey(1);
+        cv::setWindowProperty(TOUCHSCREEN_WIN, cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
+        cv::waitKey(1);
+        std::cout << "ArucoHandler: Calibration grid shown ("
+                  << calGridSize_.width << "x" << calGridSize_.height << " markers)\n";
+    } else {
+        cv::setWindowProperty(TOUCHSCREEN_WIN, cv::WND_PROP_FULLSCREEN, cv::WINDOW_NORMAL);
+        cv::waitKey(50);
+        cv::destroyWindow(TOUCHSCREEN_WIN);
+        cv::waitKey(50);
+        std::cout << "ArucoHandler: Calibration grid hidden\n";
+    }
+}
+
+void ArucoHandler::SetCalibrationDetection(bool calibration) {
+    if (calibration) {
+        activeValidIdMin_.store(0);
+        activeValidIdMax_.store(100);
+        useCalDetector_.store(true);
+        std::cout << "ArucoHandler: Detection → DICT_4X4_100 (IDs 0–100)\n";
+    } else {
+        useCalDetector_.store(false);
+        activeValidIdMin_.store(detectCfg_.validIdMin);
+        activeValidIdMax_.store(detectCfg_.validIdMax);
+        std::cout << "ArucoHandler: Detection → DICT_4X4_50 (IDs "
+                  << detectCfg_.validIdMin << "–" << detectCfg_.validIdMax << ")\n";
+    }
+}
+
 // =============================================================================
 // Private
 // =============================================================================
+
+void ArucoHandler::renderCalibrationGridImage() {
+    const int screenW    = touchCfg_.width;
+    const int screenH    = touchCfg_.height;
+
+    // Convert mm config values to pixels
+    const int sz  = static_cast<int>(std::round(calGridCfg_.markerSizeMm      * touchCfg_.pixelsPerMm));
+    const int gap = static_cast<int>(std::round(calGridCfg_.markerPadMm       * touchCfg_.pixelsPerMm));
+    const int exc = static_cast<int>(std::round(calGridCfg_.markerExclusionMm * touchCfg_.pixelsPerMm));
+
+    // Available area inside the exclusion boundary
+    const int availW = screenW - 2 * exc;
+    const int availH = screenH - 2 * exc;
+
+    // Auto-calculate cols/rows: pack markers with fixed gap between them
+    // n markers need: n*sz + (n-1)*gap <= avail  →  n <= (avail + gap) / (sz + gap)
+    const int cols = std::max(1, (availW + gap) / (sz + gap));
+    const int rows = std::max(1, (availH + gap) / (sz + gap));
+    calGridSize_ = cv::Size(cols, rows);
+
+    // White background
+    calGridImage_ = cv::Mat(screenH, screenW, CV_8UC1, cv::Scalar(255));
+
+    // Place markers: origin of marker (c,r) is at (exc + c*(sz+gap), exc + r*(sz+gap))
+    int markerID = 0;
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+            int originX = exc + c * (sz + gap);
+            int originY = exc + r * (sz + gap);
+            cv::Mat markerImg;
+            cv::aruco::generateImageMarker(calGridDictionary_, markerID, sz, markerImg, 1);
+            markerImg.copyTo(calGridImage_(cv::Rect(originX, originY, sz, sz)));
+            markerID++;
+        }
+    }
+
+    // Derived values for the console report
+    float szMm  = calGridCfg_.markerSizeMm;
+    float gapMm = calGridCfg_.markerPadMm;
+    float excMm = calGridCfg_.markerExclusionMm;
+
+    std::cout << std::fixed << std::setprecision(1)
+              << "ArucoHandler: Calibration grid rendered (DICT_4X4_100) — "
+              << cols << " cols x " << rows << " rows = " << markerID << " markers\n"
+              << "  Marker size:     " << szMm  << " mm  |  " << sz  << " px\n"
+              << "  Marker gap:      " << gapMm << " mm  |  " << gap << " px\n"
+              << "  Exclusion zone:  " << excMm << " mm  |  " << exc << " px\n"
+              << std::defaultfloat;
+}
 
 void ArucoHandler::renderGridImage() {
     const int screenW = touchCfg_.width;
@@ -330,7 +479,12 @@ void ArucoHandler::initDetector() {
     detectorParams_.perspectiveRemoveIgnoredMarginPerCell = detectorCfg_.perspectiveRemoveIgnoredMarginPerCell;
     detectorParams_.useAruco3Detection = detectorCfg_.useAruco3Detection;
 
-    detector_ = cv::aruco::ArucoDetector(dictionary_, detectorParams_);
+    detector_    = cv::aruco::ArucoDetector(dictionary_,       detectorParams_);
+    calDetector_ = cv::aruco::ArucoDetector(calGridDictionary_, detectorParams_);
+
+    // Seed the active ID range from config — matches the Fitts/default mode
+    activeValidIdMin_.store(detectCfg_.validIdMin);
+    activeValidIdMax_.store(detectCfg_.validIdMax);
 
     // Pre-build the 3D marker corner template in the marker's local frame.
     // Origin is the marker center; corners are at ±half in X and Y.
@@ -340,5 +494,5 @@ void ArucoHandler::initDetector() {
     markerCorners3D_.ptr<cv::Vec3f>(0)[2] = cv::Vec3f(half, -half, 0.0f);
     markerCorners3D_.ptr<cv::Vec3f>(0)[3] = cv::Vec3f(-half, -half, 0.0f);
 
-    std::cout << "ArucoHandler: Detector initialized (DICT_4X4_50).\n";
+    std::cout << "ArucoHandler: Detector initialized (DICT_4X4_50 + DICT_4X4_100).\n";
 }
