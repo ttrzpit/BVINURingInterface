@@ -37,6 +37,23 @@
 #include "PacketTypes.h"
 
 
+// ---- Telemetry snapshot for display -----------------------------------------
+// Assembled by GetTelemetry() and handed to DisplayHandler::SetControllerTelemetry().
+
+struct ControllerTelemetry {
+    cv::Point2f pos_virtual;   ///< Virtual fingertip deflection from home [mm]
+    cv::Point3f q_abs;         ///< Absolute motor angles [rad]
+    cv::Point3f q_home;        ///< Home motor angles [rad]
+    cv::Point3f r_eff;         ///< Spool-corrected effective radii [m]
+    cv::Point3f dL;            ///< Tendon length changes from home [m]
+    cv::Point3f tension;       ///< Commanded tensions [N]
+    cv::Point3f current;       ///< Commanded currents [A]
+    cv::Point3f pwm;           ///< Commanded PWM values (as float for display)
+    bool        homeSet;       ///< True once SetHomePosition() has been called
+    bool        outputEnabled; ///< True when PWM is actually sent to the Teensy
+};
+
+
 class ControllerHandler {
 public:
     explicit ControllerHandler(const ControllerConfig& cfg);
@@ -69,6 +86,41 @@ public:
     /** @brief Restart the force ramp-up (call when a new target is presented). */
     void ResetRamp(double nowSecs);
 
+    // ---- Output gating --------------------------------------------------------
+    // The pipeline always computes PWM values every cycle; main.cpp only forwards
+    // them to the Teensy when output is enabled (otherwise it sends 2047 / off).
+    void SetOutputEnabled(bool enabled) { outputEnabled_ = enabled; }
+    bool IsOutputEnabled() const { return outputEnabled_; }
+
+    // ---- Manual tension override (pretensioning step 3/4) --------------------
+    // When enabled, Stage 2 (tension solver) is bypassed; tension_A/B/C come
+    // from AdjustManualTension()/SetManualTension() instead. Enabling seeds
+    // all three to cfg_.tension_min. Stages 3/4 (tension->current->PWM) still
+    // run on whatever tension_A/B/C currently holds.
+    void SetManualTensionMode(bool enabled);
+    bool IsManualTensionMode() const { return manualTensionMode_; }
+
+    /** @brief Nudge one motor's manual tension setpoint by deltaN [N], clamped
+     *         to [tension_min, tension_max]. motor: 'A','B','C', or 'D' (all three). */
+    void AdjustManualTension(char motor, float deltaN);
+
+    /** @brief Set one motor's manual tension setpoint to valueN [N], clamped.
+     *         motor: 'A','B','C', or 'D' (all three). */
+    void SetManualTension(char motor, float valueN);
+
+    /**
+     * @brief Capture the current tension_A/B/C as the preload tensions held
+     *        by SolveTensions() at zero commanded force. Call once when
+     *        pretensioning completes (step 3/4 -> 4/4), before
+     *        SetHomePosition() resets tension_A/B/C.
+     */
+    void SetPreloadTensions();
+
+    /** @brief Per-motor preload tensions [N] held at zero commanded force —
+     *         defaults to cfg_.tension_min on all three until
+     *         SetPreloadTensions() is called. */
+    cv::Point3f GetPreloadTensions() const { return { preload_A_, preload_B_, preload_C_ }; }
+
     // ---- PWM outputs (write into PcToTeensyPacket before sending) -----------
     uint16_t GetPwmA() const { return pwm_A_; }
     uint16_t GetPwmB() const { return pwm_B_; }
@@ -76,12 +128,19 @@ public:
 
     // ---- Telemetry getters --------------------------------------------------
     cv::Point2f GetVirtualPosition()    const { return pos_virtual_; }
+    cv::Point2f GetVirtualVelocity()    const { return vel_filtered_; }
+    cv::Point3f GetAbsoluteAngles()     const { return { q_abs_A_, q_abs_B_, q_abs_C_ }; }
+    cv::Point3f GetHomeAngles()         const { return { q_home_A_, q_home_B_, q_home_C_ }; }
     cv::Point3f GetEffectiveRadii()     const { return { r_eff_A_, r_eff_B_, r_eff_C_ }; }
+    cv::Point3f GetTendonLengthChanges() const { return { dL_A_, dL_B_, dL_C_ }; }
     cv::Point3f GetTensions()           const { return { tension_A_, tension_B_, tension_C_ }; }
     cv::Point3f GetCurrentCommanded()   const { return { current_A_, current_B_, current_C_ }; }
     cv::Point2f GetForce()              const { return { force_x_, force_y_ }; }
     float       GetRampValue()          const { return rampValue_; }
     bool        IsHomeSet()             const { return homeSet_; }
+
+    /** @brief Assemble a telemetry snapshot for DisplayHandler. */
+    ControllerTelemetry GetTelemetry() const;
 
 private:
     // ---- Stage 0 helpers ----------------------------------------------------
@@ -113,6 +172,7 @@ private:
     float r_eff_A_ = CONSTANT_MOTOR_PULLEY_RADIUS;
     float r_eff_B_ = CONSTANT_MOTOR_PULLEY_RADIUS;
     float r_eff_C_ = CONSTANT_MOTOR_PULLEY_RADIUS;
+    float dL_A_ = 0.0f, dL_B_ = 0.0f, dL_C_ = 0.0f;
 
     // ---- Virtual position and filtered velocity [mm] ------------------------
     cv::Point2f pos_virtual_  = {};
@@ -129,6 +189,9 @@ private:
     float tension_A_ = 0.0f, tension_B_ = 0.0f, tension_C_ = 0.0f;
     bool  solverFirstCycle_ = true;
 
+    // ---- Preload tensions, held at zero commanded force ----------------------
+    float preload_A_, preload_B_, preload_C_;  ///< Set in ctor to cfg_.tension_min
+
     // ---- Commanded current [A] (for telemetry) ------------------------------
     float current_A_ = 0.0f, current_B_ = 0.0f, current_C_ = 0.0f;
 
@@ -139,4 +202,10 @@ private:
     uint16_t pwm_A_ = static_cast<uint16_t>(CONSTANT_PWM_OFF);
     uint16_t pwm_B_ = static_cast<uint16_t>(CONSTANT_PWM_OFF);
     uint16_t pwm_C_ = static_cast<uint16_t>(CONSTANT_PWM_OFF);
+
+    // ---- Output gating --------------------------------------------------------
+    bool outputEnabled_ = false;
+
+    // ---- Manual tension override (pretensioning step 3/4) --------------------
+    bool manualTensionMode_ = false;
 };

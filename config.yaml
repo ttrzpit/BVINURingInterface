@@ -144,6 +144,44 @@ cal3:
    cooldown_secs: 1.0    # Seconds to wait between successive samples
    max_samples:   10     # Number of touches required to complete calibration
 
+# ---- Calibration Stage 1 timing (AROM) ---------------------------------------
+cal1:
+   record_secs: 10.0     # Duration of the AROM circle-tracing recording [s]
+
+# ---- Gesture detection (flick up/down + confirm circle, RobotState::READY only) ----
+# velocity_thresh_mm_s : |vel_filtered_.y| must exceed this to arm a flick [mm/s]
+# arm_samples          : Consecutive over-threshold samples required to arm a flick
+# min_displacement_mm  : Net |dy| required within max_window_secs to confirm a flick [mm]
+# max_window_secs      : Max time after arming to confirm flick displacement [s]
+# cooldown_secs        : Min gap between raw flicks; also the on-screen arrow duration [s]
+# double_flick_window_secs : Max time between two same-direction raw flicks for them to
+#                             register as a single FLICK_UP/FLICK_DOWN [s]
+#
+# rest_speed_thresh_mm_s : |vel_filtered_| below this counts as "at rest" [mm/s]
+# flick_max_motion_secs  : Max continuous time spent moving (since last at rest) for a
+#                          velocity spike to still count as a flick [s] — sustained motion
+#                          (a circle) exceeds this and blocks flick arming
+# circle_confirm_rad     : Cumulative rotation to confirm a "draw a circle" gesture [rad] (~300 deg)
+# circle_max_window_secs : Rolling time window for rotation accumulation [s]
+# circle_min_radius_mm   : Min path radius from centroid — rejects jitter loops [mm]
+# circle_max_radius_mm   : Max path radius from centroid — rejects large sweeps [mm]
+# circle_cooldown_secs   : Min gap between confirms; also the on-screen indicator duration [s]
+gesture:
+   velocity_thresh_mm_s: 80.0
+   arm_samples: 2
+   min_displacement_mm: 3.0
+   max_window_secs: 0.25
+   cooldown_secs: 0.4
+   double_flick_window_secs: 1.5
+
+   rest_speed_thresh_mm_s: 8.0
+   flick_max_motion_secs: 0.3
+   circle_confirm_rad: 4.19
+   circle_max_window_secs: 1.5
+   circle_min_radius_mm: 3.0
+   circle_max_radius_mm: 50.0
+   circle_cooldown_secs: 0.6
+
 # ---- Serial (Teensy) --------------------------------------------------------
 serial:
    port: "/dev/ttyACM0"   # Single full-duplex USB CDC port
@@ -167,8 +205,8 @@ controller_gains:
    gain_kD: 0.0
    gain_kI: 0.0
    force_max: 5.0
-   tension_min: 0.3
-   tension_max: 10.0
+   tension_min: 0.1
+   tension_max: 5.0
    position_tolerance: 1.0
    lowpass_alpha: 0.15
    tension_solver_iters: 5

@@ -200,6 +200,31 @@ bool Config::load(const std::string& filepath) {
         c3["max_samples"]   >> cal3.maxSamples;
     }
 
+    // ---- Cal1 timing (AROM) --------------------------------------------------
+    cv::FileNode c1 = fs["cal1"];
+    if (!c1.empty()) {
+        c1["record_secs"] >> cal1.recordSecs;
+    }
+
+    // ---- Gesture detection (flick up/down) -----------------------------------
+    cv::FileNode ges = fs["gesture"];
+    if (!ges.empty()) {
+        ges["velocity_thresh_mm_s"] >> gesture.velocityThreshMmS;
+        ges["arm_samples"]          >> gesture.armSamples;
+        ges["min_displacement_mm"]  >> gesture.minDisplacementMm;
+        ges["max_window_secs"]      >> gesture.maxWindowSecs;
+        ges["cooldown_secs"]        >> gesture.cooldownSecs;
+        ges["double_flick_window_secs"] >> gesture.doubleFlickWindowSecs;
+
+        ges["rest_speed_thresh_mm_s"] >> gesture.restSpeedThreshMmS;
+        ges["flick_max_motion_secs"]  >> gesture.flickMaxMotionSecs;
+        ges["circle_confirm_rad"]     >> gesture.circleConfirmRad;
+        ges["circle_max_window_secs"] >> gesture.circleMaxWindowSecs;
+        ges["circle_min_radius_mm"]   >> gesture.circleMinRadiusMm;
+        ges["circle_max_radius_mm"]   >> gesture.circleMaxRadiusMm;
+        ges["circle_cooldown_secs"]   >> gesture.circleCooldownSecs;
+    }
+
     fs.release();
     buildDerivedCameraValues();
 

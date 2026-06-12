@@ -1,55 +1,107 @@
 #pragma once
 
 // =============================================================================
-// KeyboardHandler.h — Keyboard command buffer with Enter-to-execute
+// KeyboardHandler.h — Single-keypress, table-driven input state machine
 //
-// Keystrokes from cv::pollKey() are accumulated into a string buffer that is
-// echoed to the console in real-time. Pressing Enter executes the command.
-// Backspace removes the last character. ESC clears the buffer and quits.
+// Every keystroke from cv::pollKey() is processed immediately against the
+// current InputState (see KeyCommandTable.h for the full key -> transition
+// table, mirroring keyboard_reference.md). Numeric entries (nnn/nnnn/nn/n.n)
+// are buffered and require Enter to confirm; everything else is instant.
 //
-// The current buffer and any executed state are exposed in KeyboardState, which
-// main.cpp reads each loop and passes to whichever handlers need it.
-//
-// Current commands (type the string then press Enter):
-//   a<NN>  — set the active ArUco tag to ID NN (two digits, 00–49)
-//             a00  →  clear active tag (no overlay)
-//             a01  →  highlight marker ID 1 with a green outline
+// The current state and any executed actions are exposed in KeyboardState,
+// which main.cpp reads each loop and passes to whichever handlers need it.
 //
 // Adding a new command:
-//   1. Add output fields to KeyboardState as needed.
-//   2. Add an else-if branch in ParseCommand().
+//   1. Add a row to kKeyCommandTable (or kNumericEntryTable) in
+//      KeyCommandTable.h.
+//   2. If it needs a side effect, add a KeyAction value and handle it in
+//      KeyboardHandler::ExecuteAction().
 // =============================================================================
 
 #include <cstdint>
 #include <string>
 
 
-// ---- System state -----------------------------------------------------------
+// ---- Input state --------------------------------------------------------------
+// Flat state machine driving single-keypress dispatch. ANY/SAME/QUIT are
+// sentinels used only in KeyCommandTable rows — never assigned to
+// KeyboardState::inputState.
 
-enum class SystemState {
-    IDLE,         ///< Default — no active task, ArUco grid hidden
-    CALIBRATING,  ///< General calibration — ArUco grid shown on touchscreen
-    CAL3,         ///< Calibration Stage 3: camera-to-fingertip offset collection
-    FITTS         ///< Fitts task running
+enum class InputState {
+    IDLE, CAL_SEL, CAL_ROM, CAL_STI, CAL_OFF,
+    TEN_MENU,
+    PRE_TENSION,
+    LOG, LOG_UID,
+    MOT_PWM, MOT_PWM_A, MOT_PWM_B, MOT_PWM_C, MOT_PWM_ALL,
+    FIT_SEL, FIT_RUN, FIT_ACT,
+    TEN_SEL_ALL, TEN_SEL_A, TEN_SEL_B, TEN_SEL_C,
+    TEN_ADJ_ALL, TEN_ADJ_A, TEN_ADJ_B, TEN_ADJ_C,
+    // Sentinels — only valid in KeyCommand::requiredState / newState
+    ANY, SAME, QUIT
 };
 
-// ---- Output type ------------------------------------------------------------
+// ---- System state -----------------------------------------------------------
+// Coarse view of InputState, derived via DeriveSystemState(). Used by
+// main.cpp and DisplayHandler to decide which grid/handler is active.
 
-/**
- * @brief Keyboard-driven state distributed by main.cpp each loop.
- */
+enum class SystemState {
+    IDLE,           ///< Default — no active task, ArUco grid hidden
+    CALIBRATING,    ///< General calibration — ArUco grid shown on touchscreen
+    CAL3,           ///< Calibration Stage 3: camera-to-fingertip offset collection
+    FITTS,          ///< Fitts task running
+    PRETENSION,     ///< Guided pretensioning / encoder-zeroing / home-recording sequence
+    TENSION_ADJUST  ///< Standalone tension adjustment (manual tension mode, no guided sequence)
+};
+
+/** @brief Map an InputState to its coarse SystemState for grid/handler dispatch. */
+SystemState DeriveSystemState(InputState state);
+
 // ---- Serial connection action -----------------------------------------------
-// Set by "connect" / "disconnect" commands; cleared by main.cpp after acting.
+// Set by the 'S' (toggle) key; cleared by main.cpp after acting.
 
-enum class SerialAction { NONE, CONNECT, DISCONNECT };
+enum class SerialAction { NONE, TOGGLE };
+
+// ---- Key action --------------------------------------------------------------
+// One-shot side effects triggered by KeyCommandTable rows / numeric entries.
+// See KeyboardHandler::ExecuteAction().
+
+enum class KeyAction {
+    NONE,
+    TOGGLE_SERIAL,
+    SET_USER_ID,
+    SET_MOTOR_PWM,
+    RANDOM_FITTS_TARGET,
+    SET_FITTS_TARGET,
+    PRETENSION_ADVANCE,
+    ADJUST_TENSION_INC,
+    ADJUST_TENSION_DEC,
+    SET_TENSION,
+    SET_ROBOT_IDLE,
+    SET_ROBOT_READY,
+};
 
 // ---- Motor test request -----------------------------------------------------
 
 struct MotorTestRequest {
     bool     active = false;
-    char     motor  = 'A';   ///< 'A', 'B', or 'C'
+    char     motor  = 'A';   ///< 'A', 'B', 'C', or 'D' (all motors)
     uint16_t pwm    = 2047;  ///< PWM value to apply (0=full, 2047=off)
 };
+
+// ---- Tension adjustment request (pretensioning step 3/4) --------------------
+
+struct TensionAdjustRequest {
+    bool  active     = false;
+    char  motor      = 'A';   ///< 'A', 'B', 'C', or 'D' (all motors)
+    bool  isAbsolute = false; ///< true: set to valueN; false: nudge by deltaN
+    float deltaN     = 0.0f;  ///< +/- step [N], used when !isAbsolute
+    float valueN     = 0.0f;  ///< Absolute setpoint [N], used when isAbsolute
+};
+
+// ---- RobotState ladder request -----------------------------------------------
+// Set by the global 'e'/'E' keys; cleared by main.cpp after acting.
+
+enum class RobotStateRequest { NONE, GO_IDLE, GO_READY };
 
 // ---- Output type ------------------------------------------------------------
 
@@ -57,12 +109,17 @@ struct KeyboardState {
     int          activeTagId         = 0;                  ///< ArUco ID to highlight (0 = none)
     int          activeUserId        = -1;                 ///< User ID for study logging (-1 = not set, 000 = non-logging, 001> = valid user)
     bool         quitRequested       = false;
-    SystemState  systemState         = SystemState::IDLE;  ///< Current system operating state
+    InputState   inputState          = InputState::IDLE;   ///< Current single-key input state
+    SystemState  systemState         = SystemState::IDLE;  ///< Coarse state, derived from inputState
     int          fittsTargetId       = 0;                  ///< Randomly selected Fitts target (0 = none)
-    SerialAction     pendingSerialAction = SerialAction::NONE; ///< One-shot connect/disconnect request
+    int          lastInputKey        = -1;                 ///< Raw key code of the last processed input (-1 = none yet)
+    SerialAction     pendingSerialAction = SerialAction::NONE; ///< One-shot serial toggle request
     MotorTestRequest pendingMotorTest;                         ///< One-shot motor PWM test request
-    std::string  inputBuffer;                                  ///< Command currently being typed
-    std::string  outputBuffer;                                 ///< Result of the last executed command
+    bool         pendingPretensionAdvance = false;             ///< One-shot: Enter pressed during PRETENSION
+    TensionAdjustRequest pendingTensionAdjust;                 ///< One-shot: tension setpoint adjustment (PRETENSION step 3/4)
+    RobotStateRequest pendingRobotStateRequest = RobotStateRequest::NONE; ///< One-shot: 'e'/'E' pressed
+    std::string  inputBuffer;                                  ///< Numeric value currently being typed
+    std::string  outputBuffer;                                 ///< Display text for the last executed command
 };
 
 
@@ -95,10 +152,52 @@ public:
     /** @brief Clear the motor test request after main.cpp has acted on it. */
     void ClearMotorTest() { state_.pendingMotorTest.active = false; }
 
+    /** @brief Clear the pretension-advance request after main.cpp has acted on it. */
+    void ClearPretensionAdvance() { state_.pendingPretensionAdvance = false; }
+
+    /** @brief Clear the tension-adjust request after main.cpp has acted on it. */
+    void ClearTensionAdjust() { state_.pendingTensionAdjust.active = false; }
+
+    /** @brief Clear the robot-state request after main.cpp has acted on it. */
+    void ClearRobotStateRequest() { state_.pendingRobotStateRequest = RobotStateRequest::NONE; }
+
+    /** @brief Set the active Fitts target ID directly (e.g. from a flick
+     *         gesture during FITTS), clamped to [1, 45]. Mirrors SET_FITTS_TARGET. */
+    void SetFittsTargetId(int id) {
+        if (id < 1)  id = 1;
+        if (id > 45) id = 45;
+        state_.fittsTargetId = id;
+        state_.activeTagId   = id;
+    }
+
 private:
-    void ParseCommand(const std::string& cmd);  // Called on Enter
-    void EchoBuffer() const;                    // Redraws the current buffer on one console line
+    /** @brief Route digit/decimal/Backspace/Enter keys while inputState expects
+     *         a numeric entry. Returns true if the key was consumed. */
+    bool ProcessNumericEntry(int key);
+
+    /** @brief Look up `key` against kKeyCommandTable for the current
+     *         inputState (or ANY) and apply the matching transition. */
+    void DispatchTableCommand(int key);
+
+    /** @brief Apply the one-shot side effect (if any) for `action`. */
+    void ExecuteAction(KeyAction action, int value = -1);
+
+    /** @brief Substitute [MARKER_ID]/[VAL]/[MOTOR] placeholders in a display
+     *         text template. `contextState` is the inputState *before* any
+     *         transition, used to resolve [MOTOR]. */
+    std::string FormatDisplayText(const std::string& tmpl, int value,
+                                   bool isDecimal, InputState contextState) const;
+
+    /** @brief Format a raw numeric value as text, inserting a decimal point
+     *         before the last digit if `isDecimal` (e.g. 25 -> "2.5"). */
+    std::string FormatNumericValue(int value, bool isDecimal) const;
+
+    /** @brief 'A'/'B'/'C'/'D' (D = all motors) for a MOT_PWM_* state. */
+    char MotorLetterFromState(InputState state) const;
+
+    /** @brief Human-readable motor label ("A", "A, B, C", "All", ...) for [MOTOR]. */
+    std::string MotorLabelFromState(InputState state) const;
 
     KeyboardState state_;
-    std::string   inputBuffer_;   // In-progress command (mirrors state_.inputBuffer)
+    std::string   inputBuffer_;   // In-progress numeric entry (mirrors state_.inputBuffer)
 };

@@ -13,6 +13,12 @@
 },
 {
   "directory": "/home/tom/Code/BVINURingInterface/build",
+  "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/Cal1Handler.cpp.o -c /home/tom/Code/BVINURingInterface/src/Cal1Handler.cpp",
+  "file": "/home/tom/Code/BVINURingInterface/src/Cal1Handler.cpp",
+  "output": "CMakeFiles/BVINURingInterface.dir/src/Cal1Handler.cpp.o"
+},
+{
+  "directory": "/home/tom/Code/BVINURingInterface/build",
   "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/Cal3Handler.cpp.o -c /home/tom/Code/BVINURingInterface/src/Cal3Handler.cpp",
   "file": "/home/tom/Code/BVINURingInterface/src/Cal3Handler.cpp",
   "output": "CMakeFiles/BVINURingInterface.dir/src/Cal3Handler.cpp.o"
@@ -31,6 +37,12 @@
 },
 {
   "directory": "/home/tom/Code/BVINURingInterface/build",
+  "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/ControllerHandler.cpp.o -c /home/tom/Code/BVINURingInterface/src/ControllerHandler.cpp",
+  "file": "/home/tom/Code/BVINURingInterface/src/ControllerHandler.cpp",
+  "output": "CMakeFiles/BVINURingInterface.dir/src/ControllerHandler.cpp.o"
+},
+{
+  "directory": "/home/tom/Code/BVINURingInterface/build",
   "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/DisplayHandler.cpp.o -c /home/tom/Code/BVINURingInterface/src/DisplayHandler.cpp",
   "file": "/home/tom/Code/BVINURingInterface/src/DisplayHandler.cpp",
   "output": "CMakeFiles/BVINURingInterface.dir/src/DisplayHandler.cpp.o"
@@ -43,9 +55,21 @@
 },
 {
   "directory": "/home/tom/Code/BVINURingInterface/build",
+  "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/GestureHandler.cpp.o -c /home/tom/Code/BVINURingInterface/src/GestureHandler.cpp",
+  "file": "/home/tom/Code/BVINURingInterface/src/GestureHandler.cpp",
+  "output": "CMakeFiles/BVINURingInterface.dir/src/GestureHandler.cpp.o"
+},
+{
+  "directory": "/home/tom/Code/BVINURingInterface/build",
   "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/KeyboardHandler.cpp.o -c /home/tom/Code/BVINURingInterface/src/KeyboardHandler.cpp",
   "file": "/home/tom/Code/BVINURingInterface/src/KeyboardHandler.cpp",
   "output": "CMakeFiles/BVINURingInterface.dir/src/KeyboardHandler.cpp.o"
+},
+{
+  "directory": "/home/tom/Code/BVINURingInterface/build",
+  "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/PretensionHandler.cpp.o -c /home/tom/Code/BVINURingInterface/src/PretensionHandler.cpp",
+  "file": "/home/tom/Code/BVINURingInterface/src/PretensionHandler.cpp",
+  "output": "CMakeFiles/BVINURingInterface.dir/src/PretensionHandler.cpp.o"
 },
 {
   "directory": "/home/tom/Code/BVINURingInterface/build",

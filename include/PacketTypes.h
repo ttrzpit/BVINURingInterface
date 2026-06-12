@@ -30,7 +30,20 @@ namespace PcState {
     static constexpr uint8_t CAL2        = '3';
     static constexpr uint8_t CAL3        = '3';
     static constexpr uint8_t FITTS       = 'F';
+    static constexpr uint8_t ZERO_ENC    = 'Z';  ///< One-shot: zero motor encoders (pretensioning)
+    static constexpr uint8_t READY       = 'R';  ///< RobotState::READY/GUIDING — preload tension held
 }
+
+// ---- Robot state ladder -----------------------------------------------------
+// Coarse view of serial connection + tensioning + (future) guidance, derived
+// each loop in main.cpp and used to drive PWM output policy and the
+// telemetry display.
+enum class RobotState {
+    DISCONNECTED,  ///< No serial connection — no PWM values sent
+    IDLE,          ///< Connected, PWM = 2047 (no output)
+    READY,         ///< Connected, preload tension held (tensioning component only)
+    GUIDING        ///< Guidance enabled — full controller output [NOT YET IMPLEMENTED]
+};
 
 // ---- PC → Teensy (8 bytes payload) ------------------------------------------
 #pragma pack(push, 1)
@@ -69,4 +82,5 @@ struct SerialState {
     PcToTeensyPacket lastTx        = {};      ///< Last pending TX values (packet_index is TX-thread-managed)
     TeensyToPcPacket lastRx        = {};      ///< Last valid packet received from Teensy
     bool             hasRx         = false;   ///< True once at least one RX packet has arrived
+    RobotState       robotState    = RobotState::DISCONNECTED;  ///< DISCONNECTED/IDLE/READY/GUIDING ladder
 };

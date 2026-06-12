@@ -21,6 +21,40 @@
 //   Origin:  top-left corner of the telemetry canvas
 // =============================================================================
 
+namespace {
+
+/** @brief Format a raw key code for the [LAST_INPUT] telemetry cell. */
+std::string FormatLastInputKey(int key) {
+    switch (key) {
+        case -1:
+            return "--";
+        case 27:
+            return "ESC";
+        case 32:
+            return "SPACE";
+        case 96:
+            return "`";
+        case 13:
+        case 10:
+            return "ENTER";
+        case 8:
+        case 127:
+            return "BKSP";
+        case 174:
+            return ".";  // numpad decimal
+        case 171:
+            return "+";  // numpad add
+        case 173:
+            return "-";  // numpad subtract
+        default:
+            if (key >= 176 && key <= 185) return std::string(1, static_cast<char>('0' + (key - 176)));  // numpad digits
+            if (key >= 33 && key <= 126) return std::string(1, static_cast<char>(key));
+            return std::to_string(key);
+    }
+}
+
+}  // namespace
+
 // =============================================================================
 // Construction
 // =============================================================================
@@ -243,7 +277,17 @@ void DisplayHandler::PopulateTelemetryPanel(
         }
         AddBodyCell(stateStr, "C4", 3, 1, "center", bodyFontSize, stateFill);
     }
-    AddBodyCell("[TEENSY]", "C5", 3, 1, "center", bodyFontSize);
+    {
+        std::string robotStr;
+        cv::Scalar robotFill;
+        switch (serial.robotState) {
+            case RobotState::IDLE:    robotStr = "IDLE";    robotFill = Colors::GraBk; break;
+            case RobotState::READY:   robotStr = "READY";   robotFill = Colors::GreBk; break;
+            case RobotState::GUIDING: robotStr = "GUIDING"; robotFill = Colors::OraBk; break;
+            default:                  robotStr = "DISCONN"; robotFill = Colors::RedBk; break;
+        }
+        AddBodyCell(robotStr, "C5", 3, 1, "center", bodyFontSize, robotFill);
+    }
     AddBodyCell(kb.activeUserId > 0 ? std::to_string(kb.activeUserId) : "---", "C6", 3, 1, "center", bodyFontSize);
 
     AddBorder("A1", 5, 6, Colors::GraMd, 2);
@@ -287,11 +331,15 @@ void DisplayHandler::PopulateTelemetryPanel(
     AddBorder("F1", 9, 6, Colors::GraMd, 2);
 
     // ---- Keyboard inputs -------------------
+    // Row 8 spans 29 columns (S..AU, cols 18-46) to match the heading at S7.
+    // Layout: "Input"(2) + inputBuffer(5) + outputBuffer(15) + "Last"(2) + lastInputKey(5) = 29
+    AddHeadingCell("Keyboard Input Monitor", "S7", 29, 1, "center", bodyFontSize);
     AddSubheadingCell("Input", "S8", 2, 1, "center", bodyFontSize);
-    AddSubheadingCell("Output", "AB8", 2, 1, "center", bodyFontSize);
-    AddBodyCell(kb.inputBuffer, "U8", 7, 1, "center", bodyFontSize);
-    AddBodyCell(kb.outputBuffer, "AD8", 18, 1, "center", bodyFontSize);
-    AddBorder("S8", 29, 1, Colors::GraMd, 2);
+    AddBodyCell(kb.inputBuffer, "U8", 2, 1, "center", bodyFontSize);
+    AddBodyCell(kb.outputBuffer, "W8", 21, 1, "center", bodyFontSize);
+    AddSubheadingCell("Last", "AR8", 2, 1, "center", bodyFontSize);
+    AddBodyCell(FormatLastInputKey(kb.lastInputKey), "AT8", 2, 1, "center", bodyFontSize);  // Last keyboard entry
+    AddBorder("S7", 29, 2, Colors::GraMd, 2);
 
     // ---- Active Marker Telemetry (pos_camera from solvePnP) -------------------
     // Find the active marker in this frame's detection results
@@ -499,6 +547,22 @@ void DisplayHandler::SetVirtualFingertip(bool visible, cv::Point2i px) {
     virtualFingertipPx_ = px;
 }
 
+void DisplayHandler::SetControllerTelemetry(const ControllerTelemetry &tele) {
+    controllerTele_ = tele;
+}
+
+void DisplayHandler::SetCal1State(bool recording, const std::vector<cv::Point2f> &samples,
+                                  const AromBoundary &boundary) {
+    cal1Recording_ = recording;
+    cal1Samples_ = samples;
+    cal1Boundary_ = boundary;
+}
+
+void DisplayHandler::SetGestureIndicator(bool active, GestureEvent event) {
+    gestureIndicatorActive_ = active;
+    gestureEvent_ = event;
+}
+
 void DisplayHandler::PopulateControllerPanel(const std::vector<DetectedMarker> &markers,
                                              const TouchState &touch, const KeyboardState &kb) {
     ClearController();
@@ -537,11 +601,68 @@ void DisplayHandler::PopulateControllerPanel(const std::vector<DetectedMarker> &
     }
     AddControllerBorder("A1", 15, 3, Colors::GraMd, 2);
 
+    // --- Tendon / Motor State --------------------------------------------------------------------
+    auto fmtRad = [](float v) {
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(2) << v;
+        return ss.str();
+    };
+    auto fmtMm3 = [](float v) {
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(3) << v;
+        return ss.str();
+    };
+    auto fmtNum2 = [](float v) {
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(2) << v;
+        return ss.str();
+    };
+
+    float tableFontSize = 0.4f;
+
+    AddControllerHeadingCell("Tendon / Motor State", "A4", 15, 1, "center", headerFontSize);
+    AddControllerSubheadingCell("Motor",   "A5", 1, 1, "center", tableFontSize);
+    AddControllerSubheadingCell("q_abs",   "B5", 2, 1, "center", tableFontSize);
+    AddControllerSubheadingCell("q_home",  "D5", 2, 1, "center", tableFontSize);
+    AddControllerSubheadingCell("r_eff",   "F5", 2, 1, "center", tableFontSize);
+    AddControllerSubheadingCell("dL",      "H5", 2, 1, "center", tableFontSize);
+    AddControllerSubheadingCell("Tension", "J5", 2, 1, "center", tableFontSize);
+    AddControllerSubheadingCell("Current", "L5", 2, 1, "center", tableFontSize);
+    AddControllerSubheadingCell("PWM",     "N5", 2, 1, "center", tableFontSize);
+
+    const char *motorRows[3]  = { "A", "B", "C" };
+    const float q_abs[3]  = { controllerTele_.q_abs.x,  controllerTele_.q_abs.y,  controllerTele_.q_abs.z };
+    const float q_home[3] = { controllerTele_.q_home.x, controllerTele_.q_home.y, controllerTele_.q_home.z };
+    const float r_eff[3]  = { controllerTele_.r_eff.x,  controllerTele_.r_eff.y,  controllerTele_.r_eff.z };
+    const float dL[3]     = { controllerTele_.dL.x,     controllerTele_.dL.y,     controllerTele_.dL.z };
+    const float tension[3] = { controllerTele_.tension.x, controllerTele_.tension.y, controllerTele_.tension.z };
+    const float current[3] = { controllerTele_.current.x, controllerTele_.current.y, controllerTele_.current.z };
+    const float pwm[3]     = { controllerTele_.pwm.x,     controllerTele_.pwm.y,     controllerTele_.pwm.z };
+
+    for (int i = 0; i < 3; i++) {
+        std::string row = std::to_string(6 + i);
+        AddControllerBodyCell(motorRows[i],              "A" + row, 1, 1, "center", tableFontSize);
+        AddControllerBodyCell(fmtRad(q_abs[i]),          "B" + row, 2, 1, "center", tableFontSize);
+        AddControllerBodyCell(fmtRad(q_home[i]),         "D" + row, 2, 1, "center", tableFontSize);
+        AddControllerBodyCell(fmtMm3(r_eff[i] * 1000.0f), "F" + row, 2, 1, "center", tableFontSize);
+        AddControllerBodyCell(fmtNum2(dL[i] * 1000.0f),  "H" + row, 2, 1, "center", tableFontSize);
+        AddControllerBodyCell(fmtNum2(tension[i]),       "J" + row, 2, 1, "center", tableFontSize);
+        AddControllerBodyCell(fmtNum2(current[i]),       "L" + row, 2, 1, "center", tableFontSize);
+        AddControllerBodyCell(std::to_string(static_cast<int>(pwm[i])), "N" + row, 2, 1, "center", tableFontSize);
+    }
+
+    AddControllerSubheadingCell("Home Position Set", "A9", 7, 1, "center", bodyFontSize,
+                                (controllerTele_.homeSet ? Colors::GreBk : Colors::GraBk));
+    AddControllerSubheadingCell("Output Enabled", "H9", 8, 1, "center", bodyFontSize,
+                                (controllerTele_.outputEnabled ? Colors::GreBk : Colors::GraBk));
+
+    AddControllerBorder("A4", 15, 6, Colors::GraMd, 2);
+
     // --- Virtual XY fingertip -------------------------------------------------------------------
     AddControllerHeadingCell("Virtual Fingertip Mapping", "A27", 15, 1, "center", headerFontSize);
     AddControllerSubheadingCell("Virtual Position", "A28", 9, 1, "center", headerFontSize);
-    AddControllerBodyCell("[xxx]", "J28", 3, 1, "center", headerFontSize);
-    AddControllerBodyCell("[yyy]", "M28", 3, 1, "center", headerFontSize);
+    AddControllerBodyCell(fmtMm(controllerTele_.pos_virtual.x), "J28", 3, 1, "center", headerFontSize);
+    AddControllerBodyCell(fmtMm(controllerTele_.pos_virtual.y), "M28", 3, 1, "center", headerFontSize);
 
     // Virtual Mapping Parameters
     cv::Point2i center = cv::Point2i(225, 1120);
@@ -561,6 +682,53 @@ void DisplayHandler::PopulateControllerPanel(const std::vector<DetectedMarker> &
     // Fingertip Map Circle elements
     cv::circle(matController_, center, radius, Colors::GraDk, 2);
     cv::circle(matController_, center, 4, Colors::GraDk, -1);
+
+    // Virtual fingertip position — pos_virtual is in mm, screen y is flipped
+    constexpr float kVirtualPlotPxPerMm = 10.0f;
+    cv::Point2i posPx = center + cv::Point2i(
+        static_cast<int>(controllerTele_.pos_virtual.x * kVirtualPlotPxPerMm),
+        static_cast<int>(-controllerTele_.pos_virtual.y * kVirtualPlotPxPerMm));
+    cv::circle(matController_, posPx, 6, Colors::CyaMd, -1);
+
+    // AROM samples — drawn live while Cal1Handler is recording
+    if (cal1Recording_) {
+        for (const cv::Point2f &s : cal1Samples_) {
+            cv::Point2i samplePx = center + cv::Point2i(
+                static_cast<int>(s.x * kVirtualPlotPxPerMm),
+                static_cast<int>(-s.y * kVirtualPlotPxPerMm));
+            cv::circle(matController_, samplePx, 2, Colors::YelMd, -1);
+        }
+    }
+
+    // AROM boundary polygon — drawn once Cal1Handler has computed it
+    if (cal1Boundary_.valid) {
+        constexpr int kBoundaryPlotPoints = 72;
+        std::vector<cv::Point> boundaryPts;
+        boundaryPts.reserve(kBoundaryPlotPoints);
+        for (int i = 0; i < kBoundaryPlotPoints; i++) {
+            float theta = (CONSTANT_TWO_PI * i) / kBoundaryPlotPoints;
+            float r = cal1Boundary_.RadiusAtAngle(theta);
+            boundaryPts.emplace_back(center + cv::Point2i(
+                static_cast<int>(r * std::cos(theta) * kVirtualPlotPxPerMm),
+                static_cast<int>(-r * std::sin(theta) * kVirtualPlotPxPerMm)));
+        }
+        cv::polylines(matController_, boundaryPts, true, Colors::OraMd, 2);
+    }
+
+    // Gesture indicator — green arrow (flick) or ring (confirm circle),
+    // disappears after cooldownSecs / circleCooldownSecs
+    if (gestureIndicatorActive_) {
+        constexpr int kArrowHalfLen = 80;
+        cv::Point2i top    = center + cv::Point2i(0, -kArrowHalfLen);
+        cv::Point2i bottom = center + cv::Point2i(0, kArrowHalfLen);
+        if (gestureEvent_ == GestureEvent::FLICK_UP) {
+            cv::arrowedLine(matController_, bottom, top, Colors::GreMd, 4, cv::LINE_AA, 0, 0.3);
+        } else if (gestureEvent_ == GestureEvent::FLICK_DOWN) {
+            cv::arrowedLine(matController_, top, bottom, Colors::GreMd, 4, cv::LINE_AA, 0, 0.3);
+        } else if (gestureEvent_ == GestureEvent::CONFIRM) {
+            cv::circle(matController_, center, 60, Colors::GreMd, 4, cv::LINE_AA);
+        }
+    }
 
     // Border
     AddControllerBorder("A27", 15, 18, Colors::GraMd, 2);

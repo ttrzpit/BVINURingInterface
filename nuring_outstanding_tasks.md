@@ -6,9 +6,18 @@ Use this document as a reference to tasks that need to still be completed. If th
 ---
 
 
-## Overall list of outstanding tasks
-**PC Side**
-    Class           Info
+## List of outstanding PC-side tasks
+
+
+### Controller
+-   Enable tension using newton input
+    - t/T   Toggle tension setting
+    - 
+    - t
+
+
+
+
 -   [CALIBRATION1]  Implement calibration 1 handler (finger active range of motion)
 -   [CALIBRATION1]  Show virtual points being captured on the little virtualXY window
 -   [CALIBRATION2]  Implement calibration 2 handler (finger deflection stiffness)

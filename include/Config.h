@@ -187,6 +187,32 @@ struct Cal3Config {
     int    maxSamples   = 10;    // Total touches required to complete calibration
 };
 
+// ---- Calibration Stage 1: Finger Active Range of Motion (AROM) --------------
+
+struct Cal1Config {
+    double recordSecs = 10.0;  // Duration of the circle-tracing recording [s]
+};
+
+// ---- Gesture Detection (flick up/down, RobotState::READY only) -------------
+
+struct GestureConfig {
+    float  velocityThreshMmS = 80.0f;  // |vel_filtered_.y| trigger threshold [mm/s]
+    int    armSamples        = 2;      // Consecutive over-threshold samples required to arm
+    float  minDisplacementMm = 3.0f;   // Net |dy| required within maxWindowSecs to confirm [mm]
+    double maxWindowSecs     = 0.25;   // Max time after arming to confirm displacement [s]
+    double cooldownSecs      = 0.4;    // Min gap between raw flicks; also on-screen arrow duration [s]
+    double doubleFlickWindowSecs = 1.5; // Max time between two same-direction raw flicks for them to register as a single FLICK_UP/FLICK_DOWN [s]
+
+    // ---- Confirm gesture (circle) + flick false-positive rejection ---------
+    float  restSpeedThreshMmS  = 15.0f;  // |vel_filtered_| below this counts as "at rest" [mm/s]
+    double flickMaxMotionSecs  = 0.3;    // Max continuous time spent moving (since last at rest) for a velocity spike to still count as a flick [s] — sustained motion (a circle) exceeds this and blocks flick arming
+    float  circleConfirmRad    = 5.236f; // Cumulative rotation to confirm a circle [rad] (~300 deg)
+    double circleMaxWindowSecs = 1.5;    // Rolling time window for rotation accumulation [s]
+    float  circleMinRadiusMm   = 5.0f;   // Min path radius from centroid — rejects jitter [mm]
+    float  circleMaxRadiusMm   = 50.0f;  // Max path radius from centroid — rejects large sweeps [mm]
+    double circleCooldownSecs  = 0.6;    // Min gap between confirms; also on-screen indicator duration [s]
+};
+
 // ---- Serial (Teensy) --------------------------------------------------------
 
 struct SerialConfig {
@@ -238,6 +264,8 @@ class Config {
     SerialConfig serial;
     ControllerConfig controllerGains;
     Cal3Config cal3;
+    Cal1Config cal1;
+    GestureConfig gesture;
 
    private:
     // Build cameraMatrix and distCoeffs from the scalar values after loading

@@ -27,14 +27,18 @@
 #include <iostream>
 
 #include "ArucoHandler.h"
+#include "Cal1Handler.h"
 #include "Cal3Handler.h"
 #include "CameraHandler.h"
 #include "Colors.h"
 #include "Config.h"
+#include "ControllerHandler.h"
 #include "DisplayHandler.h"
 #include "FittsTaskHandler.h"
+#include "GestureHandler.h"
 #include "KeyboardHandler.h"
 #include "PacketTypes.h"
+#include "PretensionHandler.h"
 #include "SerialHandler.h"
 #include "TouchHandler.h"
 
@@ -79,6 +83,11 @@ int main() {
     Cal3Handler    cal3(cfg.touchscreen, cfg.camera, cfg.arucoCalGrid, cfg.cal3);
     FittsTaskHandler fitts(cfg.arucoDisplay, cfg.touchscreen, cfg.camera);
 
+    ControllerHandler controller(cfg.controllerGains);
+    PretensionHandler pretension(controller);
+    Cal1Handler       cal1(controller, cfg.cal1);
+    GestureHandler    gesture(controller, cfg.gesture);
+
     DisplayHandler display(cfg.display,
                            cv::Point2i(static_cast<int>(cfg.camera.cx),
                                        static_cast<int>(cfg.camera.cy)),
@@ -96,15 +105,21 @@ int main() {
     // constructor) but the window is NOT shown until the system enters CALIBRATING.
 
     std::cout << "\nMain: Running. Press ESC to quit.\n";
-    std::cout << "Main: Commands — 'cal' = calibrate, 'idle' = idle, 'fitts' = Fitts\n\n";
+    std::cout << "Main: See keyboard_reference.md for the full key command reference.\n\n";
 
     KeyboardHandler keyboard;
 
     double           lastFrameTimestamp    = -1.0;
     SystemState      prevState            = SystemState::IDLE;
+    InputState       prevInputState       = InputState::IDLE;
     int              prevFittsTarget      = 0;
     bool             cal3CompletionHandled = false;
+    bool             readyRequested        = false;  ///< RobotState ladder: 'E' sets true, 'e' clears it
+    bool             prevPretensionComplete = false;  ///< Detects pretension.IsComplete() false->true
     PcToTeensyPacket lastTxPkt         = {};   // Pending TX values updated each frame — sent by TX thread at 200 Hz
+
+    // Controller — dt is measured between loop iterations, independent of camera frame rate
+    double lastControllerSecs = cv::getTickCount() / cv::getTickFrequency();
 
     // Motor test state — set by testA/testB/testC commands, cleared after 1 s
     using Clock = std::chrono::steady_clock;
@@ -124,15 +139,33 @@ int main() {
         const KeyboardState& kb = keyboard.GetState();
         if (kb.quitRequested) break;
 
-        // Serial connect/disconnect on demand
-        if (kb.pendingSerialAction == SerialAction::CONNECT) {
-            serial.Connect();
-            keyboard.SetExternalStatus(serial.IsConnected() ? "Teensy connected." : "Connect failed — check port.");
+        // Serial connect/disconnect toggle ('S' key)
+        if (kb.pendingSerialAction == SerialAction::TOGGLE) {
+            if (serial.IsConnected()) {
+                serial.Disconnect();
+                keyboard.SetExternalStatus("PC-->Teensy connection disabled.");
+            } else {
+                serial.Connect();
+                keyboard.SetExternalStatus(serial.IsConnected()
+                    ? "PC-->Teensy connection established."
+                    : "Connect failed, check port.");
+            }
             keyboard.ClearSerialAction();
-        } else if (kb.pendingSerialAction == SerialAction::DISCONNECT) {
-            serial.Disconnect();
-            keyboard.SetExternalStatus("Teensy disconnected.");
-            keyboard.ClearSerialAction();
+        }
+
+        // RobotState ladder — global 'e'/'E' keys (work regardless of menu state)
+        if (kb.pendingRobotStateRequest == RobotStateRequest::GO_IDLE) {
+            readyRequested = false;
+            keyboard.SetExternalStatus("Returning to IDLE — guidance/ready disabled.");
+            keyboard.ClearRobotStateRequest();
+        } else if (kb.pendingRobotStateRequest == RobotStateRequest::GO_READY) {
+            if (pretension.IsComplete()) {
+                readyRequested = true;
+                keyboard.SetExternalStatus("READY enabled — preload tension active.");
+            } else {
+                keyboard.SetExternalStatus("Cannot enter READY: pretensioning not complete.");
+            }
+            keyboard.ClearRobotStateRequest();
         }
 
         // Handle system state transitions
@@ -163,9 +196,49 @@ int main() {
                 cal3.Reset();
                 cal3CompletionHandled = false;
             }
+            if (kb.systemState == SystemState::PRETENSION) {
+                pretension.Reset();
+            }
+            // TENSION_ADJUST — standalone tension adjustment (no guided
+            // sequence): enable output + manual tension mode directly.
+            if (kb.systemState == SystemState::TENSION_ADJUST) {
+                controller.SetOutputEnabled(true);
+                controller.SetManualTensionMode(true);
+            }
+            // Safety net: if PRETENSION is aborted before completion (e.g.
+            // 'grave', or 'T' back to the menu), make sure PWM output and
+            // manual tension mode are disabled again. If pretensioning
+            // completed normally, leave output enabled — the RobotState
+            // ladder below takes over and holds preload tension (READY).
+            if (prevState == SystemState::PRETENSION && kb.systemState != SystemState::PRETENSION
+                && !pretension.IsComplete()) {
+                controller.SetOutputEnabled(false);
+                controller.SetManualTensionMode(false);
+            }
+            if (prevState == SystemState::TENSION_ADJUST && kb.systemState != SystemState::TENSION_ADJUST) {
+                controller.SetOutputEnabled(false);
+                controller.SetManualTensionMode(false);
+            }
             if (prevState == SystemState::FITTS) prevFittsTarget = 0;
             prevState = kb.systemState;
         }
+
+        // CAL_ROM (AROM calibration) entry/exit — a sub-state of CALIBRATING,
+        // so it isn't seen by the systemState transition block above.
+        if (kb.inputState != prevInputState) {
+            if (kb.inputState == InputState::CAL_ROM) {
+                cal1.Reset();
+                controller.SetOutputEnabled(true);
+                controller.SetManualTensionMode(false);
+            }
+            if (prevInputState == InputState::CAL_ROM && kb.inputState != InputState::CAL_ROM) {
+                controller.SetOutputEnabled(false);
+            }
+            prevInputState = kb.inputState;
+        }
+
+        // Current time, shared by CAL3, the controller, and pretensioning
+        double nowSecs = cv::getTickCount() / cv::getTickFrequency();
 
         // b. Camera frame — check if the camera thread has produced a NEW frame
         //    by comparing timestamps. Without this, the non-blocking getLatestFrame()
@@ -191,7 +264,6 @@ int main() {
         // e. CAL3 — update touch-collection state machine now that both
         //    markers and touchState are available
         if (kb.systemState == SystemState::CAL3) {
-            double nowSecs = cv::getTickCount() / cv::getTickFrequency();
             cal3.Update(touchState, markers, nowSecs);
             keyboard.SetExternalStatus(cal3.GetStatus());
 
@@ -203,12 +275,131 @@ int main() {
             }
         }
 
+        // CAL_ROM — AROM calibration: record the virtual fingertip position
+        // while preload tension is held (see CAL_ROM entry handling above).
+        if (kb.inputState == InputState::CAL_ROM) {
+            cal1.Update(nowSecs);
+            keyboard.SetExternalStatus(cal1.GetStatus());
+        }
+
         // In FITTS state, show the selected target marker whenever it changes
         if (kb.systemState == SystemState::FITTS &&
             kb.fittsTargetId != prevFittsTarget && kb.fittsTargetId > 0) {
             aruco.ShowSingleMarker(kb.fittsTargetId);
             fitts.OnNewTarget(kb.fittsTargetId);
             prevFittsTarget = kb.fittsTargetId;
+        }
+
+        // f. Controller — runs every loop iteration so dt tracks wall-clock
+        //    time, independent of camera frame rate. Phase 1 has no active
+        //    task target, so the pipeline decays toward preload tension (or
+        //    zero output if home hasn't been set yet).
+        float dt = static_cast<float>(nowSecs - lastControllerSecs);
+        lastControllerSecs = nowSecs;
+
+        TeensyToPcPacket rxPkt = {};
+        bool hasRxPkt = serial.GetLatestPacket(rxPkt);
+        if (hasRxPkt) {
+            controller.Update(rxPkt, {0.0f, 0.0f}, false, nowSecs, dt);
+        }
+
+        // Pretensioning — guided state machine (see PretensionHandler.h)
+        if (kb.systemState == SystemState::PRETENSION) {
+            pretension.Update(nowSecs);
+
+            // Step 3/4 — live tension adjustments from the Tension interface,
+            // applied only while ControllerHandler is in manual tension mode.
+            if (kb.pendingTensionAdjust.active) {
+                if (controller.IsManualTensionMode()) {
+                    if (kb.pendingTensionAdjust.isAbsolute) {
+                        controller.SetManualTension(kb.pendingTensionAdjust.motor,
+                                                     kb.pendingTensionAdjust.valueN);
+                    } else {
+                        controller.AdjustManualTension(kb.pendingTensionAdjust.motor,
+                                                        kb.pendingTensionAdjust.deltaN);
+                    }
+                }
+                keyboard.ClearTensionAdjust();
+            }
+
+            if (kb.pendingPretensionAdvance) {
+                pretension.Advance(rxPkt, nowSecs);
+                keyboard.ClearPretensionAdvance();
+            }
+            keyboard.SetExternalStatus(pretension.GetStatus());
+        }
+
+        // Standalone tension adjustment — manual tension mode only, no
+        // guided unspool/zero/home-recording steps (see TENSION_ADJUST entry
+        // handling above).
+        if (kb.systemState == SystemState::TENSION_ADJUST) {
+            if (kb.pendingTensionAdjust.active) {
+                if (kb.pendingTensionAdjust.isAbsolute) {
+                    controller.SetManualTension(kb.pendingTensionAdjust.motor,
+                                                 kb.pendingTensionAdjust.valueN);
+                } else {
+                    controller.AdjustManualTension(kb.pendingTensionAdjust.motor,
+                                                    kb.pendingTensionAdjust.deltaN);
+                }
+                keyboard.ClearTensionAdjust();
+            }
+            keyboard.SetExternalStatus(pretension.GetTensionAdjustStatus());
+        }
+
+        // Auto-request READY the moment the guided pretensioning sequence
+        // finishes, so tension is held without needing 'E' pressed.
+        bool pretensionComplete = pretension.IsComplete();
+        if (pretensionComplete && !prevPretensionComplete) {
+            readyRequested = true;
+        }
+        prevPretensionComplete = pretensionComplete;
+
+        // RobotState ladder — derive PWM-output policy from serial
+        // connection + tensioning completeness + (future) guidance enable.
+        // Independent of PRETENSION/TENSION_ADJUST/CAL_ROM, which manage
+        // controller output/manual-tension mode directly while active.
+        bool guidanceEnabled = false;  // placeholder — guidance [NOT YET IMPLEMENTED]
+
+        bool inOverrideMode = (kb.systemState == SystemState::PRETENSION ||
+                                kb.systemState == SystemState::TENSION_ADJUST ||
+                                kb.inputState  == InputState::CAL_ROM);
+
+        RobotState robotState;
+        if (!serial.IsConnected()) {
+            robotState = RobotState::DISCONNECTED;
+        } else if (guidanceEnabled) {
+            robotState = RobotState::GUIDING;
+        } else if (readyRequested && pretension.IsComplete()) {
+            robotState = RobotState::READY;
+        } else {
+            robotState = RobotState::IDLE;
+        }
+
+        if (!inOverrideMode) {
+            bool holdPreload = (robotState == RobotState::READY || robotState == RobotState::GUIDING);
+            controller.SetOutputEnabled(holdPreload);
+            controller.SetManualTensionMode(false);
+        }
+
+        // Flick/confirm gesture detection — armed only while READY (not
+        // GUIDING/IDLE/etc); Reset() clears the state machine on every other
+        // RobotState so stale velocity history can't fire a gesture right
+        // after entering READY.
+        if (robotState == RobotState::READY) {
+            GestureEvent gestureEvent = gesture.Update(nowSecs);
+
+            // In FITTS, a flick steps the active target marker up/down,
+            // clamped to [1, 45] (45-marker grid). CONFIRM (circle) is
+            // detected and shown but not yet bound to an action.
+            if (kb.systemState == SystemState::FITTS) {
+                if (gestureEvent == GestureEvent::FLICK_UP) {
+                    keyboard.SetFittsTargetId(kb.fittsTargetId + 1);
+                } else if (gestureEvent == GestureEvent::FLICK_DOWN) {
+                    keyboard.SetFittsTargetId(kb.fittsTargetId - 1);
+                }
+            }
+        } else {
+            gesture.Reset();
         }
 
         // g. Serial — update the pending TX packet each new camera frame.
@@ -223,10 +414,22 @@ int main() {
         }
 
         if (isNewFrame) {
-            lastTxPkt.state = static_cast<uint8_t>(PcState::IDLE);
+            // Reflect the RobotState ladder to the Teensy: READY/GUIDING hold
+            // preload (or full) tension, everything else is plain IDLE.
+            lastTxPkt.state = (robotState == RobotState::READY || robotState == RobotState::GUIDING)
+                                   ? static_cast<uint8_t>(PcState::READY)
+                                   : static_cast<uint8_t>(PcState::IDLE);
             lastTxPkt.pwm_A = 2047;
             lastTxPkt.pwm_B = 2047;
             lastTxPkt.pwm_C = 2047;
+
+            // Controller output — only forwarded once PretensionHandler has
+            // enabled it (TENSION step); otherwise PWM stays at 2047 (off).
+            if (controller.IsOutputEnabled()) {
+                lastTxPkt.pwm_A = controller.GetPwmA();
+                lastTxPkt.pwm_B = controller.GetPwmB();
+                lastTxPkt.pwm_C = controller.GetPwmC();
+            }
 
             if (motorTestActive) {
                 double elapsed = std::chrono::duration<double>(Clock::now() - motorTestStart).count();
@@ -234,10 +437,20 @@ int main() {
                     if      (motorTestMotor == 'A') lastTxPkt.pwm_A = motorTestPwm;
                     else if (motorTestMotor == 'B') lastTxPkt.pwm_B = motorTestPwm;
                     else if (motorTestMotor == 'C') lastTxPkt.pwm_C = motorTestPwm;
+                    else if (motorTestMotor == 'D') {
+                        lastTxPkt.pwm_A = motorTestPwm;
+                        lastTxPkt.pwm_B = motorTestPwm;
+                        lastTxPkt.pwm_C = motorTestPwm;
+                    }
                 } else {
                     motorTestActive = false;
                     keyboard.SetExternalStatus("Motor test done — back to idle.");
                 }
+            }
+
+            // Pretensioning — one-shot zero-encoder command (ZERO step)
+            if (pretension.ShouldSendZeroCommand()) {
+                lastTxPkt.state = static_cast<uint8_t>(PcState::ZERO_ENC);
             }
 
             serial.SetPendingTx(lastTxPkt);
@@ -251,6 +464,7 @@ int main() {
         serialSt.lastTx               = lastTxPkt;
         serialSt.lastTx.packet_index  = serial.GetLastSentIndex();  // TX thread owns this — never set by main
         serialSt.hasRx                = serial.GetLatestPacket(serialSt.lastRx);
+        serialSt.robotState           = robotState;
 
         // h. Fitts task — virtual fingertip cursor + touch error overlay,
         //    updated when in FITTS mode.
@@ -269,6 +483,10 @@ int main() {
 
         // i. Operator display + telemetry — only refresh on a new camera frame
         if (isNewFrame) {
+            display.SetControllerTelemetry(controller.GetTelemetry());
+            display.SetCal1State(kb.inputState == InputState::CAL_ROM && !cal1.IsComplete(),
+                                  cal1.GetSamples(), cal1.GetBoundary());
+            display.SetGestureIndicator(gesture.IsIndicatorActive(nowSecs), gesture.GetLastGesture());
             display.Update(frame.undistorted, markers, touchState, kb, serialSt);
         }
     }

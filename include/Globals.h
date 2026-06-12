@@ -54,6 +54,13 @@ static constexpr float CONSTANT_MAX_CURRENT_AMPS      = 1.89f;
 // Encoder ticks per full motor revolution (4096 counts/rev)
 static constexpr int   CONSTANT_ENCODER_COUNTS_PER_REV = 4096;
 
+// Encoder sign convention — flips q_abs if a motor's encoder counts up when the
+// tendon unspools (vs. spools in). Placeholder +1 for all three; verify against
+// hardware once encoders are wired (see nuring_calibration_implementation_guide.md).
+static constexpr float CONSTANT_ENCODER_SIGN_A = 1.0f;  // [NOT YET VERIFIED]
+static constexpr float CONSTANT_ENCODER_SIGN_B = 1.0f;  // [NOT YET VERIFIED]
+static constexpr float CONSTANT_ENCODER_SIGN_C = 1.0f;  // [NOT YET VERIFIED]
+
 // ---- PWM mapping (inverted scale) -------------------------------------------
 // I = 0       →  PWM = 2047  (off, no torque)
 // I = I_max   →  PWM = 24    (full torque)

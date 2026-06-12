@@ -95,6 +95,12 @@ void loop() {
     // ReadFromPC() updates commandedPwm and packetIndex in shared data.
     SerialPort.ReadFromPC();
 
+    // ---- One-shot: zero motor encoders (requested during pretensioning) -----
+    if (dataHandle.getData()->System.zeroEncoderRequested) {
+        Amplifier.ZeroEncoders();
+        dataHandle.getData()->System.zeroEncoderRequested = false;
+    }
+
     // ---- 500 Hz: run the parallel amplifier state machines ------------------
     if (flagPollHWSerial) {
         flagPollHWSerial = false;

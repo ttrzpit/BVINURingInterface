@@ -49,6 +49,10 @@ struct AmplifierData {
 struct SystemData {
     uint8_t teensyState = TeensyState::WAITING;
     uint8_t packetIndex = 0;   ///< Echoed from the most recent valid PC packet
+
+    // One-shot request, set by T_SerialClass::ReadFromPC() on PcState::ZERO_ENC,
+    // consumed (and cleared) by loop() to call Amplifier.ZeroEncoders().
+    bool zeroEncoderRequested = false;
 };
 
 

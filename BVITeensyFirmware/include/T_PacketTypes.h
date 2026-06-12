@@ -28,6 +28,8 @@ namespace PcState {
     static constexpr uint8_t IDLE        = 'I';
     static constexpr uint8_t CALIBRATING = 'C';
     static constexpr uint8_t FITTS       = 'F';
+    static constexpr uint8_t ZERO_ENC    = 'Z';  ///< One-shot: zero motor encoders (pretensioning)
+    static constexpr uint8_t READY       = 'R';  ///< RobotState::READY/GUIDING — preload tension held
 }
 
 // ---- State bytes sent from Teensy to PC -------------------------------------
@@ -36,6 +38,7 @@ namespace TeensyState {
     static constexpr uint8_t WAITING = 'W';   // No PC connection yet
     static constexpr uint8_t IDLE    = 'I';   // Connected, not driving
     static constexpr uint8_t DRIVING = 'D';   // Actively driving motors
+    static constexpr uint8_t READY   = 'R';   // Connected, preload tension held (PcState::READY)
 }
 
 // ---- PC → Teensy (8 bytes payload) ------------------------------------------

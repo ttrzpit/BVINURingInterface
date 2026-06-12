@@ -1,78 +1,132 @@
-# NURing Keyboard Command Reference
+# === NURing Keyboard Command Reference =====================================================================
+## All commands are typed into the **operator display window**, with each command processed immediately. This  
+## means that "Enter" does not have to be pressed on they keyboard to confirm input, with the exception of 
+## numerical inputs, such as those formatted as `n.n` or `nn` or `nnnnn` below. Those need "Enter" pressed 
+## to confirm the numerical input. The "Keyboard Inputs" in the DisplayHandler should display the inputs in 
+## the following manner: 
+## - Text being typed before being processed (essentially the buffer) should be displayed in [INPUT_BUFFER] 
+## - The last input should be displayed in the [LAST_INPUT] box
+## - The "Display Text" from below should be displayed in the [DISPLAY_TEXT] box 
 
-All commands are typed into the **operator display window** (click it to give it focus),
-then confirmed with **Enter**. The current input is shown in the **Input** row of the
-System Information panel. The result appears in the **Output** row.
-
-
-
-## STATE COMMANDS
- Command             | Required State          | New State               | Result                                                     
----------------------|-------------------------|-------------------------|------------------------------------------------------------
- `ESC`               | ANY                     | NONE                    | Quit the program cleanly
- `Backspace`         | ANY					   | PREVIOUS                | Returns back to previous state
- `~` / `apostrophe`  | ANY                     | IDLE                    | Enter / return to IDLE state, stopping all other logging and tasks
- `c`                 | IDLE                    | CALIBRATE_SELECT        | Enter CALIBRATE_SELECT mode for calibration 
- `g`                 | IDLE                    | GUIDANCE_TASK_SELECT    | Enter GUIDANCE_TASK_SELECT mode for study tasks
-` m`                 | IDLE                    | MOTOR_SELECT            | Enter MOTOR_SELECT mode
- `s`                 | ANY                     | SERIAL_SELECT           | Enter SERIAL_SELECT mode
- `t`                 | IDLE                    | TENSION_SELECT          | Enter TENSION_SELECT mode
-
- 
-
-## CALIBRATION INPUTS
- Command             | Required State          | New State               | Result                                                     
----------------------|-------------------------|-------------------------|------------------------------------------------------------
- `c`                 | IDLE                    | CALIBRATE_SELECT        | Enter calibration select mode
- `1`                 | CALIBRATE_SELECT		   | CAL_1_ROM		  	     | Enter cal1, active range of motion capture                    
- `2`                 | CALIBRATE_SELECT		   | CAL_2_STIFFNESS		 | Enter cal2, stiffness measurement
- `3`                 | CALIBRATE_SELECT		   | CAL_3_OFFSET			 | Enter cal3, fingertip to camera offset calibration
+### Description of input table elements
+Command                 Keyboard input command
+KeyID                   ASCII-based DEC value corresponding to keyboard input
+Description             Text-based input description 
+Required Input State    Required previous input state for valid keyboard input
+New Input State         New input state for next input command
+Display Text            Text to display after command entered
 
 
-## GUIDANCE TASK INPUTS
- Command             | Required State          | New State               | Result                                                     
----------------------|-------------------------|-------------------------|------------------------------------------------------------
- `g`                 | IDLE                    | TASK_SELECT             | Enter guidance task select mode
- `1`                 | TASK_SELECT             | TASK_1_FITTS            | Enter fitts task 
- `r`                 | TASK_1_FITTS            | TASK_1_FITTS            | Randomly select a new target marker (1–45) — only show that marker
- `a`                 | TASK_1_FITTS            | TASK_1_FITTS_SELECT     | Enter state to select new target marker, only show that marker
- `00`                | TASK_1_FITTS_SELECT     | TASK_1_FITTS            | Selects active target to 00
-
-
-## MOTOR INPUTS
- Command             | Required State          | New State               | Result                                                     
----------------------|-------------------------|-------------------------|------------------------------------------------------------
- `m`                 | IDLE                    | MOTOR_SELECT_ALL        | Enter motor all select mode
- `YYYY`              | MOTOR_SELECT_ALL		   | MOTOR_SELECT_ALL        | Send PWM value of YYYY to all motors for 1 second
- `a` / `b` / `c`     | MOTOR_SELECT_ALL        | MOTOR_SELECT_X          | Enter motor X select mode
- `YYYY`              | MOTOR_SELECT_X		   | MOTOR_SELECT_X          | Send PWM value of YYYY to motor X for 1 second
- 
- 
-## SERIAL INPUTS
- Command             | Required State          | New State               | Result                                                     
----------------------|-------------------------|-------------------------|------------------------------------------------------------
- `s`                 | ANY                     | SERIAL_COMMAND          | Enter SERIAL_COMMAND mode
- `c`       		     | SERIAL_COMMAND          | IDLE			         | Open `/dev/ttyACM0` and connect to the Teensy
- `d`       		     | SERIAL_COMMAND          | IDLE			         | Close the serial connection gracefully
- 
-
-## TENSION INPUTS
- Command             | Required State          | New State               | Result                                                     
----------------------|-------------------------|-------------------------|------------------------------------------------------------
- `t`                 | ANY                     | TENSION_SELECT_ALL      | Enter tension select mode
- `+` / `-`           | TENSION_SELECT_ALL	   | TENSION_SELECT_ALL      | Increase / decrease tension to all motors
- `a` / `b` / `c`     | TENSION_SELECT_ALL      | TENSION_SELECT_X        | Select motor X for tension adjustment
- `+` / `-`           | TENSION_SELECT_X	       | TENSION_SELECT_X        | Increase / decrease tension to motor X
-
-
-### KEYPAD MAPPING
- Raw Input  | Mapped Key | Result                                                     
-------------|------------|------------------------------------------------------------------------------------------------------------
- 185        | `k9`       | Selects motor A (same as 'a')
- 183        | `k7`       | Selects motor B (same as 'b')
- 178        | `k2`       | Selects motor C (same as 'd')
- 181        | `k5`       | Deselects motors (goes back to MOTOR_SELECT_ALL from MOTOR_SELECT_X or goes back to TENSION_SELECT ALL from TENSION_SELECT_X)
+## SYSTEM TOP-LEVEL INPUTS ["SYSTEM"]
+ Command   | KeyID    | Description                             | Required Input State       | New Input State         | Display Text            
+-----------|----------|-----------------------------------------|----------------------------|-------------------------|-------------------------------------------------------------------------------
+ `ESC`     | 27       | "Quit the program cleanly"              | ANY                        | NONE                    | "Exiting.""
+ `SPACE`   | 32       | "Clear / cancel input"                  | ANY                        | IDLE                    | "Input cleared."
+ `grave`   | 96       | "Exit task, return system to idle"      | ANY                        | IDLE                    | "System cleared, returning to IDLE state."
+ `e`       | 101      | "Disable READY/GUIDING, return to IDLE" | ANY                        | (same as previous)      | "Returning to IDLE — guidance/ready disabled."
+ `E`       | 69       | "Enable READY (if tensioning complete)" | ANY                        | (same as previous)      | "READY enabled — preload tension active." or "Cannot enter READY: pretensioning not complete."
+**Note1** They command `grave` refers to the "grave" character on the "tilde" key
+**Note2** `e`/`E` control the RobotState ladder (DISCONNECTED/IDLE/READY/GUIDING, shown in the telemetry panel's "Teensy" status cell) and do not change the InputState/menu — they work the same regardless of what else is on screen. While READY/GUIDING, the PC sends `PcState::READY` ('R') to the Teensy, which echoes back `TeensyState::READY` ('R') in the "Teensy State" telemetry cell; while DISCONNECTED/IDLE it sends `PcState::IDLE` ('I').
 
 
 
+## CALIBRATION INPUTS ["CALIBRATION"]
+ Command   | KeyID    | Description                             | Required Input State       | New Input State         | Display Text
+-----------|----------|-----------------------------------------|----------------------------|-------------------------|-------------------------------------------------------------------------------
+ `C`       | 67       | "Enter calibration mode"                | IDLE                       | CAL_SEL                 | "Select calibration mode: [a] ARoM, [s] Stiffness, [o] Offset..."
+ `a`       | 97       | "Start ARoM calibration"                | CAL_SEL   	               | CAL_ROM		 	           | (see Note1 — status text comes from Cal1Handler)
+ `s`       | 115      | "Start stiffness calibration"           | CAL_SEL		                 | CAL_STI               	 | "Running stiffness calibration."
+ `o`       | 111      | "Start fingertip offset calibration"    | CAL_SEL		                 | CAL_OFF		   	         | "Running fingertip offset calibration."
+ `grave`   | 96       | "Exit ARoM calibration, return to IDLE" | CAL_ROM                    | IDLE                    | "System cleared, returning to IDLE state."
+**Note1** While in CAL_ROM, ControllerHandler PWM output is enabled (preload tension held, no active target) and `Cal1Handler` records the virtual fingertip position for 10 s while the participant traces circles at the edge of comfortable reach. The [DISPLAY_TEXT] box shows `Cal1Handler::GetStatus()`: a countdown ("AROM: Trace circles with your finger -- N.Ns remaining.") followed by "AROM calibration complete (<N> samples)." once the 95th-percentile/periodic-cubic-spline boundary has been computed. Output is disabled again on exiting CAL_ROM.
 
+
+
+## PRETENSIONING / TENSION INPUTS ["PRETENSION" / "TENSION_ADJUST"]
+ Command   | KeyID    | Description                                  | Required Input State       | New Input State         | Display Text            
+-----------|----------|-----------------------------------------------|----------------------------|-------------------------|-------------------------------------------------------------------------------
+ `T`       | 84       | "Open tensioning menu"                         | ANY                        | TEN_MENU                | "Tensioning: [p] guided pretensioning sequence, or [a/b/c/d] adjust tension directly."
+
+### Guided pretensioning sequence (TEN_MENU -> PRE_TENSION -> ... -> DONE)
+ `p`       | 112      | "Start guided pretensioning sequence"          | TEN_MENU                   | PRE_TENSION             | (see Note1 — status text comes from PretensionHandler)
+ `Enter`   | 13, 10   | "Advance the guided pretension step"           | PRE_TENSION                | (same as previous)      | (see Note1)
+ `a`       | 97, 185  | "Select motor A to adjust preload tension"     | PRE_TENSION or TEN_SEL_[B/C/ALL] | TEN_SEL_A          | (see Note1)
+ `b`       | 98, 183  | "Select motor B to adjust preload tension"     | PRE_TENSION or TEN_SEL_[A/C/ALL] | TEN_SEL_B          | (see Note1)
+ `c`       | 99, 178  | "Select motor C to adjust preload tension"     | PRE_TENSION or TEN_SEL_[A/B/ALL] | TEN_SEL_C          | (see Note1)
+ `d`       | 100, 181 | "Select all motors to adjust preload tension"  | PRE_TENSION or TEN_SEL_[A/B/C]   | TEN_SEL_ALL        | (see Note1)
+ `+`       | 61, 171  | "Increase [MOTOR] preload tension by 0.1 N"    | TEN_SEL_[MOTOR]            | (same as previous)      | (see Note1)
+ `-`       | 45, 173  | "Decrease [MOTOR] preload tension by 0.1 N"    | TEN_SEL_[MOTOR]            | (same as previous)      | (see Note1)
+ `n.n`     | [NUM]    | "Buffer an absolute preload tension value"     | TEN_SEL_[MOTOR]            | (same as previous)      | (see Note2)
+ `Enter`   | 13, 10   | "Confirm buffered n.n -> [MOTOR] tension [N]"  | TEN_SEL_[MOTOR], buffer full | (same as previous)    | (see Note1)
+ `Enter`   | 13, 10   | "Advance step 3/4 -> 4/4 (record home pose)"   | TEN_SEL_[MOTOR], buffer empty | (same as previous)   | (see Note1)
+
+### Standalone tension adjustment (TEN_MENU -> TEN_ADJ_*, no guided sequence)
+ `a`       | 97, 185  | "Adjust motor A tension directly"              | TEN_MENU or TEN_ADJ_[B/C/ALL]    | TEN_ADJ_A          | (see Note6)
+ `b`       | 98, 183  | "Adjust motor B tension directly"              | TEN_MENU or TEN_ADJ_[A/C/ALL]    | TEN_ADJ_B          | (see Note6)
+ `c`       | 99, 178  | "Adjust motor C tension directly"              | TEN_MENU or TEN_ADJ_[A/B/ALL]    | TEN_ADJ_C          | (see Note6)
+ `d`       | 100, 181 | "Adjust all motors' tension directly"          | TEN_MENU or TEN_ADJ_[A/B/C]      | TEN_ADJ_ALL        | (see Note6)
+ `+`       | 61, 171  | "Increase [MOTOR] tension by 0.1 N"            | TEN_ADJ_[MOTOR]            | (same as previous)      | (see Note6)
+ `-`       | 45, 173  | "Decrease [MOTOR] tension by 0.1 N"            | TEN_ADJ_[MOTOR]            | (same as previous)      | (see Note6)
+ `n.n`     | [NUM]    | "Buffer an absolute tension value"             | TEN_ADJ_[MOTOR]            | (same as previous)      | (see Note2)
+ `Enter`   | 13, 10   | "Confirm buffered n.n -> [MOTOR] tension [N]"  | TEN_ADJ_[MOTOR], buffer full | (same as previous)    | (see Note6)
+ `grave`   | 96       | "Exit tension adjustment, return to IDLE"      | TEN_ADJ_[MOTOR]            | IDLE                    | "System cleared, returning to IDLE state."
+ `T`       | 84       | "Exit tension adjustment, reopen tensioning menu" | TEN_ADJ_[MOTOR]         | TEN_MENU                | "Tensioning: [p] guided pretensioning sequence, or [a/b/c/d] adjust tension directly."
+
+**Note1** The [DISPLAY_TEXT] box shows PretensionHandler::GetStatus(), which steps through 4 phases:
+  - 1/4 "Tension 1/4: Unspool all tendons fully, then press Enter."
+  - 2/4 "Tension 2/4: Zeroing motor encoders..."
+  - 3/4 "Tension 3/4: Select motor [a,b,c,d], [+/-], [n.n]; press Enter to save." (shown while ControllerHandler is in manual tension mode)
+  - 4/4 "Tension 4/4: Home position recorded."
+**Note2** For command `n.n`, this represents a value from 0.0 N to 10.0 N, always entered with one digit, a period, and one digit (e.g., 0.3, 1.0, 7.5). Digits are buffered in [INPUT_BUFFER] until `Enter` confirms.
+**Note3** Steps 1/4 -> 2/4 are advanced by pressing `Enter`; step 2/4 -> 3/4 happens automatically after a short settle delay (`Enter` is ignored during step 2/4). During step 3/4, `[a]/[b]/[c]/[d]` select which motor(s) the `+`/`-`/`n.n` commands act on ('d' = all three motors together); a "bare" `Enter` (nothing typed) advances 3/4 -> 4/4.
+**Note4** During step 2/4 the PC sends `PcState::ZERO_ENC` so the Teensy zeroes its motor encoders. During step 3/4, ControllerHandler PWM output is enabled and put into manual tension mode: tension setpoints [N] come directly from the `[a]/[b]/[c]/[d]` + `+`/`-`/`n.n` commands above (seeded to `tension_min` on entry) and are converted to PWM via the normal tension->current->PWM pipeline, visible live in the controller display's Tendon/Motor State table. On entering step 4/4, those per-motor tensions are captured as the new preload (`ControllerHandler::SetPreloadTensions()`), manual tension mode is turned off, and PWM output stays enabled — the RobotState ladder automatically requests READY (as if `E` were pressed), so the captured preload tensions continue to be held once PRETENSION is exited (e.g. via `SPACE`). If `grave` aborts the sequence before step 4/4, output and manual tension mode are disabled immediately and no READY request is made (preload remains whatever it was previously).
+**Note5** For commands with multiple KeyIDs, either key ID is a valid option for that command. The keyID [NUM] means any acceptable value entered via keyboard number row or numpad.
+**Note6** While in TEN_ADJ_[MOTOR], the [DISPLAY_TEXT] box shows PretensionHandler::GetTensionAdjustStatus(), updated live every frame: "Tension adjust: A=x.xxN  B=x.xxN  C=x.xxN -- [a/b/c/d] select motor, +/- = +/-0.1N, n.n+Enter = set value. Press [grave] or [T] to exit." On first entering TEN_ADJ_* from TEN_MENU, ControllerHandler PWM output is enabled and put into manual tension mode (seeded to `tension_min` on all three motors); both are disabled again on exit — independent of the guided pretensioning sequence above (no unspool/zero/home-recording steps).
+
+
+
+## LOGGING INPUTS ["LOGGING"]
+ Command   | KeyID    | Description                             | Required Input State       | New Input State         | Display Text            
+-----------|----------|-----------------------------------------|----------------------------|-------------------------|-------------------------------------------------------------------------------
+ `L`       | 76       | "Enter logging mode"                    | ANY                        | LOG                     | "Select logging option: [u] Set User ID..."
+ `u`       | 117      | "Set user ID"                           | LOG                        | LOG_UID                 | "Enter ID for user (000-999)..."
+ `nnn`     | [NUM]    | "Set user ID value (000-999)"           | LOG_UID 	                  | LOG                 | "User ID set to [VAL]."
+**Note1** For command `nnn`, this represents a 3-digit value from 000 to 999, always entered with three digits (e.g., 001, 104, 204)
+
+
+
+## MOTOR PWM TEST INPUTS ["PWM_TEST"]
+ Command   | KeyID    | Description                             | Required Input State       | New Input State         | Display Text            
+-----------|----------|-----------------------------------------|----------------------------|-------------------------|-------------------------------------------------------------------------------
+ `M`       | 77       | "Enter motor test mode"                 | ANY                        | MOT_PWM                 | "Select motor to test: [a] Motor A, [b] Motor B, [c] Motor C, [d] All Motors..."
+ `a`       | 97, 185  | "Send PWM value to motor A for 1s"      | MOT_PWM                    | MOT_PWM_A               | "Enter PWM for Motor A (0-2047)..."
+ `b`       | 98, 183  | "Send PWM value to motor B for 1s"      | MOT_PWM                    | MOT_PWM_B               | "Enter PWM for Motor B (0-2047)..."
+ `c`       | 99, 178  | "Send PWM value to motor C for 1s"      | MOT_PWM                    | MOT_PWM_C               | "Enter PWM for Motor C (0-2047)..."
+ `d`       | 100, 181 | "Send PWM value to all motors for 1s"   | MOT_PWM                    | MOT_PWM_ALL             | "Enter PWM for Motor A, B, C (0-2047)..."
+ `nnnn`    | [NUM]    | "Set PWM value (0 to 2047) to [MOTOR]"  | MOT_PWM_[MOTOR]	         | MOT_PWM                 | "Sending test pulse to motor [MOTOR]."
+**Note1** For command `nnnn`, this represents a 4-digit value from 0000 to 2047, always entered with four digits (e.g., 0001, 0104, 2040)
+**Note2** The index [MOTOR] refers to motor A, B, C, or all motors, depending on previous "Required State"
+**Note2** The keyID [NUM] means any acceptable value entered via keyboard number row or numpad
+**Note4** For commands with multiple KeyIDs, either key ID is a valid option for that command
+
+
+
+## SERIAL INPUTS ["SERIAL"]
+ Command   | KeyID    | Description                             | Required Input State       | New Input State         | Display Text            
+-----------|----------|-----------------------------------------|----------------------------|-------------------------|-------------------------------------------------------------------------------
+ `S`       | 83       | "Toggle teensy serial connection"       | ANY                        | (same as previous)      | "PC-->Teensy connection established." or "PC-->Teensy connection disabled."
+**Note1** This key can be entered at any time, toggling the Serial connection on or off; does not change state
+**Note2** If serial is being toggled off, PC must send a "disable output" packet and wait for confirmation from the Teensy 
+**Note3** Display text will depend on whether Teensy successfully acknowledges connection made
+
+
+
+## TASK 1 - FITTS-STYLE ACCURACY TASK INPUTS ["ACCURACY"]
+ Command   | KeyID    | Description                             | Required Input State       | New Input State         | Display Text            
+-----------|----------|-----------------------------------------|----------------------------|-------------------------|-------------------------------------------------------------------------------
+ `F`       | 70       | "Enter guidance accuracy mode"          | IDLE                       | FIT_SEL                 | "Select marker mode: [r] Random, [m] Manual..."
+ `m`       | 109      | "Manually set active marker (1 to 45)"  | FIT_SEL or FIT_RUN         | FIT_ACT                 | "Which marker (1-45)..."
+ `r`       | 114      | "Randomly set active marker (1 to 45)"  | FIT_SEL                    | FIT_RUN                 | "Active marker set to [MARKER_ID]."
+ `nn`      | [NUM]    | NONE                                    | FIT_ACT                    | FIT_RUN                 | "Active marker set to [MARKER_ID]."
+**Note1** For command `nn`, this represents a 2-digit value from 00 to 45, always entered with two digits (e.g., 01, 04, 45) 
+**Note2** The keyID [NUM] means any acceptable value entered via keyboard number row or numpad

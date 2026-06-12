@@ -25,13 +25,16 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
-#include "ArucoHandler.h"    // DetectedMarker
+#include "ArucoHandler.h"     // DetectedMarker
+#include "Cal1Handler.h"      // AromBoundary
 #include "Colors.h"
 #include "Config.h"
+#include "ControllerHandler.h" // ControllerTelemetry
+#include "GestureHandler.h"   // GestureEvent
 #include "Globals.h"
-#include "KeyboardHandler.h" // KeyboardState
-#include "PacketTypes.h"     // SerialState
-#include "TouchHandler.h"    // TouchState
+#include "KeyboardHandler.h"  // KeyboardState
+#include "PacketTypes.h"      // SerialState
+#include "TouchHandler.h"     // TouchState
 
 
 class DisplayHandler {
@@ -92,11 +95,34 @@ public:
     void SetCal3State(bool isComplete, cv::Point3f offset, float rollRefRad);
 
     /**
+     * @brief Cache the Cal1 (AROM) recording/result for the Virtual Fingertip
+     *        Mapping plot in the controller panel.
+     * @param recording  True while CAL_ROM is actively recording samples
+     * @param samples    Recorded virtual positions [mm] so far (Cal1Handler::GetSamples)
+     * @param boundary   AROM boundary (valid once Cal1Handler::IsComplete())
+     */
+    void SetCal1State(bool recording, const std::vector<cv::Point2f> &samples,
+                      const AromBoundary &boundary);
+
+    /**
+     * @brief Show/hide the gesture indicator on the Virtual Fingertip Mapping
+     *        plot — a green arrow for FLICK_UP/FLICK_DOWN, a green ring for
+     *        CONFIRM. Call every frame with GestureHandler::IsIndicatorActive()
+     *        and GestureHandler::GetLastGesture() — the indicator disappears
+     *        once active goes false (cooldownSecs / circleCooldownSecs after
+     *        the gesture fired).
+     */
+    void SetGestureIndicator(bool active, GestureEvent event);
+
+    /**
      * @brief Set the virtual fingertip cursor position for the operator display.
      *        Call each frame with visible=true and the projected pixel when in
      *        FITTS mode with Cal3 complete; call with visible=false otherwise.
      */
     void SetVirtualFingertip(bool visible, cv::Point2i px = {});
+
+    /** @brief Cache the latest controller telemetry for the controller panel. */
+    void SetControllerTelemetry(const ControllerTelemetry &tele);
 
     // ---- Controller panel ---------------------------------------------------
 
@@ -175,6 +201,18 @@ private:
 
     bool        virtualFingertipVisible_ = false;
     cv::Point2i virtualFingertipPx_      = {};
+
+    // Cal1 (AROM) state (updated via SetCal1State)
+    bool                      cal1Recording_ = false;
+    std::vector<cv::Point2f> cal1Samples_    = {};
+    AromBoundary              cal1Boundary_  = {};
+
+    // Flick gesture indicator (updated via SetGestureIndicator)
+    bool         gestureIndicatorActive_ = false;
+    GestureEvent gestureEvent_           = GestureEvent::NONE;
+
+    // Controller telemetry (updated via SetControllerTelemetry)
+    ControllerTelemetry controllerTele_ = {};
 
     // Telemetry panel
     int     cellW_;          // width  / cols

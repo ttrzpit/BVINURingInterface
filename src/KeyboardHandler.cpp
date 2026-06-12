@@ -1,23 +1,22 @@
 #include "KeyboardHandler.h"
+#include "KeyCommandTable.h"
 
 #include <algorithm>
-#include <cctype>
 #include <iostream>
 #include <random>
 
 // =============================================================================
 // KeyboardHandler.cpp
 //
-// Key handling rules:
-//   Printable ASCII (32–126) → append to buffer, echo to console
-//   Enter (13 or 10)         → parse buffer, clear buffer
-//   Backspace (8 or 127)     → remove last character, re-echo
-//   ESC (27)                 → clear buffer, set quitRequested
-//   Everything else          → ignored
-//
-// Console echo: each keystroke overwrites the same console line using \r so
-// the user can see what they have typed without scrolling the terminal output.
-// When Enter is pressed the result is printed on a new line.
+// Every keystroke is processed immediately:
+//   1. ESC / SPACE / grave (27/32/96) always apply, even mid numeric-entry —
+//      they quit / clear-to-IDLE / reset-to-IDLE respectively.
+//   2. If the current inputState expects a numeric entry (kNumericEntryTable),
+//      digit/decimal/Backspace/Enter keys are buffered until Enter confirms.
+//   3. Otherwise, kKeyCommandTable is scanned for a row matching (key,
+//      inputState) or (key, ANY); the first match fires its action and
+//      transition.
+//   4. No match — state is left unchanged.
 // =============================================================================
 
 KeyboardHandler::KeyboardHandler() {
@@ -33,149 +32,305 @@ void KeyboardHandler::ProcessKey(int key) {
     // (-1) & 0xFF == 255 which is not -1 and would slip through the guard.
     key = key & 0xFF;
 
-    // ---- ESC ----------------------------------------------------------------
-    if (key == 27) {
-        inputBuffer_.clear();
-        state_.inputBuffer.clear();
-        state_.quitRequested = true;
-        std::cout << "\n";
+    // For debugging
+    std::cout << "Key code: " << key << "\n";
+
+    // ---- Global escape hatches — always take priority -----------------------
+    if (key == 27 || key == 32 || key == 96) {
+        DispatchTableCommand(key);
         return;
     }
 
-    // ---- Enter (carriage return or line feed) --------------------------------
-    if (key == 13 || key == 10) {
-        if (!inputBuffer_.empty()) {
-            ParseCommand(inputBuffer_);
-            inputBuffer_.clear();
-            state_.inputBuffer.clear();
-        }
-        return;
-    }
+    // ---- Numeric entry (nnn/nnnn/nn/n.n) -------------------------------------
+    if (ProcessNumericEntry(key)) return;
 
-    // ---- Backspace or Delete -------------------------------------------------
-    if (key == 8 || key == 127) {
-        if (!inputBuffer_.empty()) {
-            inputBuffer_.pop_back();
-            state_.inputBuffer = inputBuffer_;
-            EchoBuffer();
-        }
-        return;
-    }
-
-    // ---- Printable character ------------------------------------------------
-    if (key >= 32 && key < 127) {
-        inputBuffer_ += static_cast<char>(key);
-        state_.inputBuffer = inputBuffer_;
-        EchoBuffer();
-    }
-
-    else { 
-        std::cout << "Undefined key code: " << key << "\n";
-    }
-    // All other key codes (special keys, Fn, arrows, etc.) are silently ignored
+    // ---- Single-key table dispatch -------------------------------------------
+    DispatchTableCommand(key);
 }
 
 // =============================================================================
 // Private
 // =============================================================================
 
-void KeyboardHandler::ParseCommand(const std::string& cmd) {
-    // Command: a<NN> — set active ArUco tag
-    if (cmd.size() == 3 && cmd[0] == 'a' && std::isdigit(static_cast<unsigned char>(cmd[1])) && std::isdigit(static_cast<unsigned char>(cmd[2]))) {
-        int id = (cmd[1] - '0') * 10 + (cmd[2] - '0');
-        state_.activeTagId = id;
-        state_.outputBuffer = (id == 0) ? "Active tag cleared"
-                                        : "Active tag: ID " + std::to_string(id);
-        return;
+bool KeyboardHandler::ProcessNumericEntry(int key) {
+    const NumericEntryFormat* fmt = nullptr;
+    for (const auto& f : kNumericEntryTable) {
+        if (f.state == state_.inputState) {
+            fmt = &f;
+            break;
+        }
+    }
+    if (!fmt) return false;  // current state isn't a numeric-entry state
+
+    // Backspace / Delete
+    if (key == 8 || key == 127) {
+        if (!inputBuffer_.empty()) {
+            inputBuffer_.pop_back();
+            state_.inputBuffer = inputBuffer_;
+        }
+        return true;
     }
 
-    // Study commands
-    // Command: u<NNN> — set current userID
-    if (cmd.size() == 4 && cmd[0] == 'u' && std::isdigit(static_cast<unsigned char>(cmd[1])) && std::isdigit(static_cast<unsigned char>(cmd[2])) && std::isdigit(static_cast<unsigned char>(cmd[3]))) {
-        // int id = (cmd[1] - '0') * 10 + (cmd[2] - '0');
-        int userId = ((cmd[1] - '0') * 100) + ((cmd[2] - '0') * 10) + (cmd[3] - '0');
-        state_.activeUserId = userId;
-        state_.outputBuffer = (userId == 0) ? "Active user ID cleared"
-                                        : "Active user ID set to " + std::to_string(userId);
-        return;
+    // Enter — validate and commit
+    if (key == 13 || key == 10) {
+        // A "bare" Enter (nothing typed yet) isn't a numeric confirmation —
+        // let it fall through to DispatchTableCommand (e.g. PRETENSION_ADVANCE
+        // while a TEN_SEL_* motor is selected).
+        if (inputBuffer_.empty()) return false;
+        if (static_cast<int>(inputBuffer_.size()) != fmt->totalLength) return true;
+        if (fmt->hasDecimal && inputBuffer_[1] != '.') return true;
+
+        std::string digits;
+        for (char c : inputBuffer_) {
+            if (c != '.') digits += c;
+        }
+        int rawValue = std::stoi(digits);  // for n.n, this is value*10 (e.g. "2.5" -> 25)
+
+        if (rawValue < fmt->minValue || rawValue > fmt->maxValue) {
+            state_.outputBuffer = "Invalid value — must be " +
+                                   FormatNumericValue(fmt->minValue, fmt->hasDecimal) + " to " +
+                                   FormatNumericValue(fmt->maxValue, fmt->hasDecimal) + ".";
+            state_.lastInputKey = key;
+            inputBuffer_.clear();
+            state_.inputBuffer.clear();
+            return true;
+        }
+
+        InputState oldState = state_.inputState;
+        ExecuteAction(fmt->action, rawValue);
+
+        if (fmt->newState != InputState::SAME) {
+            state_.inputState  = fmt->newState;
+            state_.systemState = DeriveSystemState(state_.inputState);
+        }
+        state_.outputBuffer = FormatDisplayText(fmt->displayText, rawValue, fmt->hasDecimal, oldState);
+        state_.lastInputKey = key;
+
+        inputBuffer_.clear();
+        state_.inputBuffer.clear();
+        return true;
     }
 
-    // Serial connection management
-    if (cmd == "connect" || cmd == "con") {
-        state_.pendingSerialAction = SerialAction::CONNECT;
-        state_.outputBuffer = "Connecting to Teensy...";
-        return;
-    }
-    if (cmd == "disconnect" || cmd == "dis") {
-        state_.pendingSerialAction = SerialAction::DISCONNECT;
-        state_.outputBuffer = "Disconnecting from Teensy...";
-        return;
+    // Digit — number row (48-57) or numpad (176-185)
+    char ch = '\0';
+    if (key >= '0' && key <= '9') {
+        ch = static_cast<char>(key);
+    } else if (key >= 176 && key <= 185) {
+        ch = static_cast<char>('0' + (key - 176));
+    } else if (fmt->hasDecimal && (key == '.' || key == 174)) {
+        ch = '.';
     }
 
-    // Fitts task — select a new random target marker (only active in FITTS state)
-    if (cmd == "r") {
-        if (state_.systemState == SystemState::FITTS) {
-            // Uniform distribution over the 45 markers displayed on the grid (1–45)
+    if (ch != '\0' && static_cast<int>(inputBuffer_.size()) < fmt->totalLength) {
+        inputBuffer_ += ch;
+        state_.inputBuffer = inputBuffer_;
+    }
+
+    // TEN_SEL_* (pretensioning step 3/4) and TEN_ADJ_* (standalone tension
+    // adjust) also bind a/b/c/d (reselect motor) and +/- (nudge by 0.1 N) via
+    // kKeyCommandTable. Don't swallow those here — let any key that isn't a
+    // digit/decimal fall through to DispatchTableCommand.
+    switch (state_.inputState) {
+        case InputState::TEN_SEL_A:
+        case InputState::TEN_SEL_B:
+        case InputState::TEN_SEL_C:
+        case InputState::TEN_SEL_ALL:
+        case InputState::TEN_ADJ_A:
+        case InputState::TEN_ADJ_B:
+        case InputState::TEN_ADJ_C:
+        case InputState::TEN_ADJ_ALL:
+            if (ch == '\0') return false;
+            break;
+        default:
+            break;
+    }
+
+    return true;  // numeric-entry state consumes (or ignores) all other keys
+}
+
+void KeyboardHandler::DispatchTableCommand(int key) {
+    for (const auto& row : kKeyCommandTable) {
+        bool keyMatches = std::find(row.keys.begin(), row.keys.end(), key) != row.keys.end();
+        if (!keyMatches) continue;
+        if (row.requiredState != InputState::ANY && row.requiredState != state_.inputState) continue;
+
+        InputState oldState = state_.inputState;
+        ExecuteAction(row.action);
+
+        if (row.newState == InputState::QUIT) {
+            state_.quitRequested = true;
+        } else if (row.newState != InputState::SAME) {
+            state_.inputState  = row.newState;
+            state_.systemState = DeriveSystemState(state_.inputState);
+        }
+
+        state_.outputBuffer = FormatDisplayText(row.displayText, -1, false, oldState);
+        state_.lastInputKey = key;
+        return;
+    }
+    // No match — leave state unchanged (don't clobber e.g. Cal3's live status)
+}
+
+void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
+    switch (action) {
+        case KeyAction::TOGGLE_SERIAL:
+            state_.pendingSerialAction = SerialAction::TOGGLE;
+            break;
+
+        case KeyAction::SET_USER_ID:
+            state_.activeUserId = value;
+            break;
+
+        case KeyAction::SET_MOTOR_PWM:
+            state_.pendingMotorTest.active = true;
+            state_.pendingMotorTest.motor  = MotorLetterFromState(state_.inputState);
+            state_.pendingMotorTest.pwm    = static_cast<uint16_t>(value);
+            break;
+
+        case KeyAction::RANDOM_FITTS_TARGET: {
             static std::mt19937 rng{std::random_device{}()};
             static std::uniform_int_distribution<int> dist(1, 45);
             state_.fittsTargetId = dist(rng);
-            state_.activeTagId = state_.fittsTargetId;  // green outline on operator display
-            state_.outputBuffer = "Target: marker " + std::to_string(state_.fittsTargetId);
-        } else {
-            state_.outputBuffer = "'r' is only active in FITTS state";
+            state_.activeTagId   = state_.fittsTargetId;
+            break;
         }
-        return;
-    }
 
-    // State commands
-    if (cmd == "cal") {
-        state_.systemState = SystemState::CALIBRATING;
-        state_.outputBuffer = "State: CALIBRATING";
-        return;
-    }
-    if (cmd == "cal3") {
-        state_.systemState = SystemState::CAL3;
-        state_.outputBuffer = "State: CAL3 — touch screen 10 times";
-        return;
-    }
-    if (cmd == "idle") {
-        state_.systemState = SystemState::IDLE;
-        state_.outputBuffer = "State: IDLE";
-        return;
-    }
-    if (cmd == "fitts" || cmd == "study1") {
-        state_.systemState = SystemState::FITTS;
-        state_.outputBuffer = "State: FITTS";
-        return;
-    }
+        case KeyAction::SET_FITTS_TARGET:
+            state_.fittsTargetId = value;
+            state_.activeTagId   = value;
+            break;
 
-    // testA<pwm> / testB<pwm> / testC<pwm> — drive one motor for 1 second then stop
-    // Example: testA1984 → motor A at PWM 1984 for 1 s, then PWM 2047 (off)
-    if (cmd.size() >= 6 && cmd.substr(0, 4) == "test" &&
-        (cmd[4] == 'A' || cmd[4] == 'B' || cmd[4] == 'C')) {
-        std::string numStr = cmd.substr(5);
-        bool allDigits = !numStr.empty() && std::all_of(numStr.begin(), numStr.end(),
-            [](unsigned char c){ return std::isdigit(c); });
-        if (allDigits) {
-            int pwmVal = std::stoi(numStr);
-            if (pwmVal >= 0 && pwmVal <= 2047) {
-                state_.pendingMotorTest.active = true;
-                state_.pendingMotorTest.motor  = cmd[4];
-                state_.pendingMotorTest.pwm    = static_cast<uint16_t>(pwmVal);
-                state_.outputBuffer = "Test motor " + std::string(1, cmd[4]) +
-                                      " PWM=" + numStr + " for 1 s...";
-                return;
-            }
-        }
-        state_.outputBuffer = "Bad test command — use testA<0-2047>";
-        return;
+        case KeyAction::PRETENSION_ADVANCE:
+            state_.pendingPretensionAdvance = true;
+            break;
+
+        case KeyAction::ADJUST_TENSION_INC:
+            state_.pendingTensionAdjust.active     = true;
+            state_.pendingTensionAdjust.motor      = MotorLetterFromState(state_.inputState);
+            state_.pendingTensionAdjust.isAbsolute = false;
+            state_.pendingTensionAdjust.deltaN     = 0.1f;
+            break;
+
+        case KeyAction::ADJUST_TENSION_DEC:
+            state_.pendingTensionAdjust.active     = true;
+            state_.pendingTensionAdjust.motor      = MotorLetterFromState(state_.inputState);
+            state_.pendingTensionAdjust.isAbsolute = false;
+            state_.pendingTensionAdjust.deltaN     = -0.1f;
+            break;
+
+        case KeyAction::SET_TENSION:
+            state_.pendingTensionAdjust.active     = true;
+            state_.pendingTensionAdjust.motor      = MotorLetterFromState(state_.inputState);
+            state_.pendingTensionAdjust.isAbsolute = true;
+            state_.pendingTensionAdjust.valueN     = static_cast<float>(value) / 10.0f;
+            break;
+
+        case KeyAction::SET_ROBOT_IDLE:
+            state_.pendingRobotStateRequest = RobotStateRequest::GO_IDLE;
+            break;
+
+        case KeyAction::SET_ROBOT_READY:
+            state_.pendingRobotStateRequest = RobotStateRequest::GO_READY;
+            break;
+
+        case KeyAction::NONE:
+        default:
+            break;
     }
-
-    // Add more commands here with additional else-if branches
-
-    state_.outputBuffer = "Unknown: '" + cmd + "'";
 }
 
-void KeyboardHandler::EchoBuffer() const {
-    // Input is now shown in the telemetry panel — no console echo needed
+std::string KeyboardHandler::FormatDisplayText(const std::string& tmpl, int value,
+                                                bool isDecimal, InputState contextState) const {
+    std::string text = tmpl;
+
+    auto replace = [&text](const std::string& token, const std::string& val) {
+        size_t pos = text.find(token);
+        if (pos != std::string::npos) text.replace(pos, token.size(), val);
+    };
+
+    replace("[MARKER_ID]", std::to_string(state_.fittsTargetId));
+
+    if (value >= 0) {
+        replace("[VAL]", FormatNumericValue(value, isDecimal));
+    }
+
+    replace("[MOTOR]", MotorLabelFromState(contextState));
+
+    return text;
+}
+
+std::string KeyboardHandler::FormatNumericValue(int value, bool isDecimal) const {
+    return isDecimal
+        ? (std::to_string(value / 10) + "." + std::to_string(value % 10))
+        : std::to_string(value);
+}
+
+char KeyboardHandler::MotorLetterFromState(InputState state) const {
+    switch (state) {
+        case InputState::MOT_PWM_A:
+        case InputState::TEN_SEL_A:
+        case InputState::TEN_ADJ_A: return 'A';
+        case InputState::MOT_PWM_B:
+        case InputState::TEN_SEL_B:
+        case InputState::TEN_ADJ_B: return 'B';
+        case InputState::MOT_PWM_C:
+        case InputState::TEN_SEL_C:
+        case InputState::TEN_ADJ_C: return 'C';
+        case InputState::MOT_PWM_ALL:
+        case InputState::TEN_SEL_ALL:
+        case InputState::TEN_ADJ_ALL: return 'D';
+        default: return 'A';
+    }
+}
+
+std::string KeyboardHandler::MotorLabelFromState(InputState state) const {
+    switch (state) {
+        case InputState::MOT_PWM_A:
+        case InputState::TEN_SEL_A:
+        case InputState::TEN_ADJ_A:
+            return "A";
+        case InputState::MOT_PWM_B:
+        case InputState::TEN_SEL_B:
+        case InputState::TEN_ADJ_B:
+            return "B";
+        case InputState::MOT_PWM_C:
+        case InputState::TEN_SEL_C:
+        case InputState::TEN_ADJ_C:
+            return "C";
+        case InputState::MOT_PWM_ALL:
+            return "A, B, C";
+        case InputState::TEN_SEL_ALL:
+        case InputState::TEN_ADJ_ALL:
+            return "All";
+        default:
+            return "";
+    }
+}
+
+SystemState DeriveSystemState(InputState state) {
+    switch (state) {
+        case InputState::CAL_SEL:
+        case InputState::CAL_ROM:
+        case InputState::CAL_STI:
+            return SystemState::CALIBRATING;
+        case InputState::CAL_OFF:
+            return SystemState::CAL3;
+        case InputState::FIT_SEL:
+        case InputState::FIT_RUN:
+        case InputState::FIT_ACT:
+            return SystemState::FITTS;
+        case InputState::PRE_TENSION:
+        case InputState::TEN_SEL_ALL:
+        case InputState::TEN_SEL_A:
+        case InputState::TEN_SEL_B:
+        case InputState::TEN_SEL_C:
+            return SystemState::PRETENSION;
+        case InputState::TEN_ADJ_ALL:
+        case InputState::TEN_ADJ_A:
+        case InputState::TEN_ADJ_B:
+        case InputState::TEN_ADJ_C:
+            return SystemState::TENSION_ADJUST;
+        default:
+            return SystemState::IDLE;
+    }
 }

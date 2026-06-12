@@ -73,6 +73,11 @@ void T_SerialClass::ReadFromPC() {
                         case PcState::IDLE:        shared_->System.teensyState = TeensyState::IDLE;    break;
                         case PcState::CALIBRATING: shared_->System.teensyState = TeensyState::IDLE;    break;
                         case PcState::FITTS:       shared_->System.teensyState = TeensyState::IDLE;    break;
+                        case PcState::READY:       shared_->System.teensyState = TeensyState::READY;   break;
+                        case PcState::ZERO_ENC:
+                            shared_->System.teensyState = TeensyState::IDLE;
+                            shared_->System.zeroEncoderRequested = true;
+                            break;
                         default:                   shared_->System.teensyState = TeensyState::WAITING; break;
                     }
                 }
