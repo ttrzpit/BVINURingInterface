@@ -38,6 +38,11 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { {'e'}, InputState::ANY, InputState::SAME, "Returning to IDLE.",    KeyAction::SET_ROBOT_IDLE },
     { {'E'}, InputState::ANY, InputState::SAME, "Requesting READY...",   KeyAction::SET_ROBOT_READY },
 
+    // ---- STIFFNESS GAIN TOGGLE ---------------------------------------------------
+    // 'k' works regardless of the current InputState; the real outcome text
+    // (enabled/disabled) is set via SetExternalStatus() by main.cpp.
+    { {'k'}, InputState::ANY, InputState::SAME, "Toggling stiffness gain...", KeyAction::TOGGLE_STIFFNESS_GAIN },
+
     // ---- CALIBRATION ------------------------------------------------------------
     { {'C'}, InputState::IDLE,    InputState::CAL_SEL, "Select calibration mode: [a] ARoM, [s] Stiffness, [o] Offset...", KeyAction::NONE },
     { {'a'}, InputState::CAL_SEL, InputState::CAL_ROM, "Running ARoM calibration.", KeyAction::NONE },
@@ -149,6 +154,39 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { {45, 173}, InputState::TEN_ADJ_B,   InputState::SAME, "", KeyAction::ADJUST_TENSION_DEC },
     { {45, 173}, InputState::TEN_ADJ_C,   InputState::SAME, "", KeyAction::ADJUST_TENSION_DEC },
     { {45, 173}, InputState::TEN_ADJ_ALL, InputState::SAME, "", KeyAction::ADJUST_TENSION_DEC },
+
+    // ---- GAIN TUNING (direction-dependent kP boost) -----------------------------
+    // 'G' enters gain tuning: [+/-] nudges the selected motor's gainTune_X by
+    // 0.1, an extra K(theta)-style boost added to kP_effective (Stage 1) on
+    // top of K(theta)/gain_kP. [a/b/c/d] pick which motor's direction the
+    // boost applies to ('d' = all three at once).
+    { {'G'}, InputState::ANY, InputState::GAIN_ALL,
+      "Gain tuning: [+/-] adjust all motors, or [a/b/c/d] select a motor.",
+      KeyAction::NONE },
+
+    // Re-select a different motor while one is already selected
+    { {'a', 185}, InputState::GAIN_ALL, InputState::GAIN_A, "", KeyAction::NONE },
+    { {'a', 185}, InputState::GAIN_B,   InputState::GAIN_A, "", KeyAction::NONE },
+    { {'a', 185}, InputState::GAIN_C,   InputState::GAIN_A, "", KeyAction::NONE },
+    { {'b', 183}, InputState::GAIN_ALL, InputState::GAIN_B, "", KeyAction::NONE },
+    { {'b', 183}, InputState::GAIN_A,   InputState::GAIN_B, "", KeyAction::NONE },
+    { {'b', 183}, InputState::GAIN_C,   InputState::GAIN_B, "", KeyAction::NONE },
+    { {'c', 178}, InputState::GAIN_ALL, InputState::GAIN_C, "", KeyAction::NONE },
+    { {'c', 178}, InputState::GAIN_A,   InputState::GAIN_C, "", KeyAction::NONE },
+    { {'c', 178}, InputState::GAIN_B,   InputState::GAIN_C, "", KeyAction::NONE },
+    { {'d', 181}, InputState::GAIN_A,   InputState::GAIN_ALL, "", KeyAction::NONE },
+    { {'d', 181}, InputState::GAIN_B,   InputState::GAIN_ALL, "", KeyAction::NONE },
+    { {'d', 181}, InputState::GAIN_C,   InputState::GAIN_ALL, "", KeyAction::NONE },
+
+    // +/- nudge the selected motor's gain tune by 0.1
+    { {61, 171}, InputState::GAIN_ALL, InputState::SAME, "", KeyAction::ADJUST_GAIN_INC },
+    { {61, 171}, InputState::GAIN_A,   InputState::SAME, "", KeyAction::ADJUST_GAIN_INC },
+    { {61, 171}, InputState::GAIN_B,   InputState::SAME, "", KeyAction::ADJUST_GAIN_INC },
+    { {61, 171}, InputState::GAIN_C,   InputState::SAME, "", KeyAction::ADJUST_GAIN_INC },
+    { {45, 173}, InputState::GAIN_ALL, InputState::SAME, "", KeyAction::ADJUST_GAIN_DEC },
+    { {45, 173}, InputState::GAIN_A,   InputState::SAME, "", KeyAction::ADJUST_GAIN_DEC },
+    { {45, 173}, InputState::GAIN_B,   InputState::SAME, "", KeyAction::ADJUST_GAIN_DEC },
+    { {45, 173}, InputState::GAIN_C,   InputState::SAME, "", KeyAction::ADJUST_GAIN_DEC },
 };
 
 

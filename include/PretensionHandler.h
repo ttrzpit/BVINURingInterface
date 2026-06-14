@@ -64,6 +64,18 @@ public:
     bool IsComplete() const { return phase_ == Phase::DONE; }
 
     /**
+     * @brief One-shot: true exactly once, the first call after the ZERO->TENSION
+     *        auto-transition (step 3/4 begins). Clears the flag on read — main.cpp
+     *        uses this to default the input state to TEN_SEL_ALL so +/- adjusts
+     *        all three motors immediately, without requiring [a/b/c/d] first.
+     */
+    bool ConsumeTensionPhaseEntered() {
+        bool fired = tensionPhaseEntered_;
+        tensionPhaseEntered_ = false;
+        return fired;
+    }
+
+    /**
      * @brief One-line status string for the [DISPLAY_TEXT] box. During step
      *        3/4 this is computed live from ControllerHandler::GetTensions().
      */
@@ -84,6 +96,7 @@ private:
     Phase  phase_           = Phase::UNSPOOL;
     double zeroSentAtSecs_  = 0.0;
     bool   sendZeroCommand_ = false;
+    bool   tensionPhaseEntered_ = false;
 
     std::string status_;
 

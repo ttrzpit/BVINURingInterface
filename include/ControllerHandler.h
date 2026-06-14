@@ -27,8 +27,10 @@
 //   #9  Fy suppression heuristic removed (see commented block in .cpp)
 // =============================================================================
 
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <string>
 
 #include <opencv2/core.hpp>
 
@@ -42,15 +44,36 @@
 
 struct ControllerTelemetry {
     cv::Point2f pos_virtual;   ///< Virtual fingertip deflection from home [mm]
+    cv::Point2f vel_virtual;   ///< Virtual fingertip velocity, low-pass filtered [mm/s]
+    cv::Point2f posErrorIntegral; ///< PID accumulated position error (integral term) [mm*s]
     cv::Point3f q_abs;         ///< Absolute motor angles [rad]
     cv::Point3f q_home;        ///< Home motor angles [rad]
     cv::Point3f r_eff;         ///< Spool-corrected effective radii [m]
     cv::Point3f dL;            ///< Tendon length changes from home [m]
-    cv::Point3f tension;       ///< Commanded tensions [N]
+    cv::Point3f tension;       ///< Commanded tensions [N] (preload + force-derived correction)
+    cv::Point3f preloadTension; ///< Preload tensions set during pretensioning [N]
+    cv::Point3f deflectionForce;    ///< Per-motor tension contribution from the guidance force command [N],
+                                     ///< clamped to +/- cfg_.deflection_force_max
+    cv::Point3f outputTension; ///< preloadTension + deflectionForce, clamped to [tension_min, tension_max] [N]
     cv::Point3f current;       ///< Commanded currents [A]
     cv::Point3f pwm;           ///< Commanded PWM values (as float for display)
+    cv::Point3f preloadPwm;    ///< PWM values corresponding to preload tensions (as float for display)
+    cv::Point3f outputPwm;     ///< PWM values corresponding to outputTension (as float for display) — always in [CONSTANT_PWM_MAX, CONSTANT_PWM_OFF]
+    cv::Point3f deflectionForcePwm; ///< PWM equivalent of |deflectionForce| via the same Tension->Current->PWM
+                                     ///< pipeline as preloadPwm/outputPwm — always in [CONSTANT_PWM_MAX,
+                                     ///< CONSTANT_PWM_OFF], never negative. Direction is conveyed by
+                                     ///< deflectionForce's sign, not by this value.
+    cv::Point3f gainTune;       ///< Direction-dependent kP boost per motor [N/mm] ('G' key,
+                                 ///< see AdjustGainTune) — added to kP_effective in Stage 1.
     bool        homeSet;       ///< True once SetHomePosition() has been called
     bool        outputEnabled; ///< True when PWM is actually sent to the Teensy
+    bool        manualTensionMode; ///< True during pretensioning step 3/4 — tension is being adjusted live
+                                    ///< and has not yet been confirmed as the new preload via SetPreloadTensions()
+
+    cv::Point2f measuredForce;          ///< Measured force from amplifier current [N]
+    std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT> stiffnessProfile; ///< K(theta) [N/mm]
+    bool        stiffnessValid;         ///< True once Cal2Handler has produced K(theta)
+    bool        stiffnessGainEnabled;   ///< True when K(theta) replaces gain_kP
 };
 
 
@@ -121,6 +144,53 @@ public:
      *         SetPreloadTensions() is called. */
     cv::Point3f GetPreloadTensions() const { return { preload_A_, preload_B_, preload_C_ }; }
 
+    // ---- Calibration force mode (Stage 2 stiffness calibration) --------------
+    // When enabled, Stage 1 (PID) is bypassed; force_x_/force_y_ come from
+    // SetCalibrationForce() instead. Stages 2-4 (solver/current/PWM) run as
+    // usual on that commanded force.
+    void SetCalibrationForceMode(bool enabled);
+    bool IsCalibrationForceMode() const { return calibrationForceMode_; }
+
+    /** @brief Set the open-loop force command [N] used while calibration force
+     *         mode is enabled. Saturated to cfg_.deflection_force_max. */
+    void SetCalibrationForce(float fx, float fy);
+
+    /** @brief Maximum commanded force magnitude [N] (cfg_.deflection_force_max). */
+    float GetDeflectionForceMax() const { return cfg_.deflection_force_max; }
+
+    // ---- Measured force/current (from amplifier-reported current, Stage 0) ---
+    cv::Point3f GetMeasuredCurrent() const { return { measuredCurrent_A_, measuredCurrent_B_, measuredCurrent_C_ }; }
+    cv::Point2f GetMeasuredForce()   const { return { measuredForce_x_, measuredForce_y_ }; }
+
+    // ---- Stiffness profile K(theta) [N/mm] (Stage 2 calibration result) ------
+    // 10 values aligned with CONSTANT_CALIBRATION_ANGLES_DEG. When valid and
+    // enabled, periodic linear interpolation of this profile at the current
+    // error heading replaces cfg_.gain_kP in Stage 1.
+    void SetStiffnessProfile(const std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT>& kTheta);
+    bool HasStiffnessProfile() const { return stiffnessProfileValid_; }
+
+    void SetStiffnessGainEnabled(bool enabled) { stiffnessGainEnabled_ = enabled; }
+    bool IsStiffnessGainEnabled() const { return stiffnessGainEnabled_; }
+
+    std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT> GetStiffnessProfile() const { return stiffness_profile_; }
+
+    // ---- Direction-dependent gain tuning ('G' key) ---------------------------
+    // gainTune_A/B/C act as an extra K(theta)-style boost, centered on each
+    // motor's direction (35deg/145deg/270deg) and periodically interpolated
+    // the same way as the stiffness profile (InterpolateGainTune). The
+    // interpolated result is added to kP_effective in Stage 1, on top of
+    // K(theta)/gain_kP, before force_x_/force_y_ are computed.
+
+    /** @brief Nudge one motor's gain tune by deltaGain, clamped to [0, 5].
+     *         motor: 'A','B','C', or 'D' (all three). */
+    void AdjustGainTune(char motor, float deltaGain);
+
+    /** @brief Per-motor gain tune values [N/mm], default 0 (no boost). */
+    cv::Point3f GetGainTune() const { return { gainTune_A_, gainTune_B_, gainTune_C_ }; }
+
+    /** @brief Live status string for the 'G' (gain tuning) input mode. */
+    std::string GetGainTuneStatus() const;
+
     // ---- PWM outputs (write into PcToTeensyPacket before sending) -----------
     uint16_t GetPwmA() const { return pwm_A_; }
     uint16_t GetPwmB() const { return pwm_B_; }
@@ -147,6 +217,15 @@ private:
     float       ComputeEffectiveRadius(float q_abs) const;
     float       ComputeTendonLengthChange(float q_abs, float q_home) const;
     cv::Point2f ComputeVirtualPosition(float dL_A, float dL_B, float dL_C) const;
+
+    // ---- Stage 1 helper -----------------------------------------------------
+    /** @brief Periodic linear interpolation of stiffness_profile_ at heading
+     *         thetaRad, over CONSTANT_CALIBRATION_ANGLES_DEG. */
+    float InterpolateStiffness(float thetaRad) const;
+
+    /** @brief Periodic linear interpolation of gainTune_A/B/C_ at heading
+     *         thetaRad, over the three motor angles (35deg/145deg/270deg). */
+    float InterpolateGainTune(float thetaRad) const;
 
     // ---- Stage 2 helper -----------------------------------------------------
     void SolveTensions(float force_x, float force_y);
@@ -208,4 +287,20 @@ private:
 
     // ---- Manual tension override (pretensioning step 3/4) --------------------
     bool manualTensionMode_ = false;
+
+    // ---- Calibration force mode (Stage 2 stiffness calibration) --------------
+    bool  calibrationForceMode_ = false;
+    float calForce_x_ = 0.0f, calForce_y_ = 0.0f;
+
+    // ---- Measured current/force (Stage 0, from amplifier-reported current) ---
+    float measuredCurrent_A_ = 0.0f, measuredCurrent_B_ = 0.0f, measuredCurrent_C_ = 0.0f;
+    float measuredForce_x_ = 0.0f, measuredForce_y_ = 0.0f;
+
+    // ---- Stiffness profile K(theta) [N/mm] (Stage 2 calibration result) ------
+    std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT> stiffness_profile_ = {};
+    bool stiffnessProfileValid_ = false;
+    bool stiffnessGainEnabled_  = true;
+
+    // ---- Direction-dependent gain tuning ('G' key) ---------------------------
+    float gainTune_A_ = 0.0f, gainTune_B_ = 0.0f, gainTune_C_ = 0.0f;
 };

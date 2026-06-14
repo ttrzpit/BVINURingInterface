@@ -127,7 +127,7 @@ struct ArucoDisplayConfig {
 
 // ---- ArUco Calibration Grid (touchscreen grid — Cal2 / Cal3 solvePnP) -------
 // Columns and rows are auto-calculated: pack markers with exactly markerPadMm
-// between them inside the exclusion zone boundary. Uses DICT_4X4_100.
+// between them inside the exclusion zone boundary. Uses DICT_4X4_250.
 
 struct ArucoCalibrationGridConfig {
     float markerSizeMm     = 15.0f;  // Physical side length of each marker [mm]
@@ -193,6 +193,14 @@ struct Cal1Config {
     double recordSecs = 10.0;  // Duration of the circle-tracing recording [s]
 };
 
+// ---- Calibration Stage 2: Finger Deflection Stiffness -----------------------
+
+struct Cal2Config {
+    float  forceRampRate   = 0.5f;  // Open-loop force ramp-up rate [N/s]
+    double holdSecs        = 2.0;   // Hold duration at peak force per heading [s]
+    double releaseWaitSecs = 2.0;   // Wait after releasing before the next heading [s]
+};
+
 // ---- Gesture Detection (flick up/down, RobotState::READY only) -------------
 
 struct GestureConfig {
@@ -226,7 +234,7 @@ struct ControllerConfig {
     float gain_kP             = 1.0f;    // Proportional gain [N/mm]
     float gain_kD             = 0.0f;    // Derivative gain [N·s/mm]
     float gain_kI             = 0.0f;    // Integral gain [N/(mm·s)]
-    float force_max           = 5.0f;    // Maximum allowable force magnitude [N]
+    float deflection_force_max = 5.0f;   // Maximum allowable guidance deflection force magnitude [N]
     float tension_min         = 0.3f;    // Preload (minimum) tension per motor [N]
     float tension_max         = 10.0f;   // Maximum tension per motor [N]
     float position_tolerance  = 1.0f;    // Deadband radius — no force inside [mm]
@@ -265,6 +273,7 @@ class Config {
     ControllerConfig controllerGains;
     Cal3Config cal3;
     Cal1Config cal1;
+    Cal2Config cal2;
     GestureConfig gesture;
 
    private:

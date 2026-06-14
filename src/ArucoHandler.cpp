@@ -13,9 +13,6 @@
 //   minMarkerPerimeterRate   = 0.01 — allows small/distant markers to be detected
 //   detectInvertedMarker     = true — handles reflective/glossy marker surfaces
 //   CORNER_REFINE_SUBPIX     — sub-pixel corner refinement for accurate 3D pose
-//
-// The 3D corner template (markerCorners3D_) is built once at init using the
-// physical marker size. estimatePoseSingleMarkers() uses it per-frame.
 // =============================================================================
 
 static constexpr float RAD2DEG = 57.2958f;
@@ -32,7 +29,7 @@ ArucoHandler::ArucoHandler(const ArucoMarkerConfig& markerCfg,
     : detectCfg_(markerCfg), detectorCfg_(detectorCfg), displayCfg_(displayCfg),
       calGridCfg_(calGridCfg), touchCfg_(touchCfg),
       camMatrix_(camMatrix.clone()), distCoeffs_(distCoeffs.clone()),
-      calGridDictionary_(cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_100)) {
+      calGridDictionary_(cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_250)) {
     initDetector();
     renderGridImage();
     renderCalibrationGridImage();
@@ -325,9 +322,9 @@ void ArucoHandler::SetCalibrationGridVisible(bool visible) {
 void ArucoHandler::SetCalibrationDetection(bool calibration) {
     if (calibration) {
         activeValidIdMin_.store(0);
-        activeValidIdMax_.store(100);
+        activeValidIdMax_.store(249);
         useCalDetector_.store(true);
-        std::cout << "ArucoHandler: Detection → DICT_4X4_100 (IDs 0–100)\n";
+        std::cout << "ArucoHandler: Detection → DICT_4X4_250 (IDs 0–249)\n";
     } else {
         useCalDetector_.store(false);
         activeValidIdMin_.store(detectCfg_.validIdMin);
@@ -382,7 +379,7 @@ void ArucoHandler::renderCalibrationGridImage() {
     float excMm = calGridCfg_.markerExclusionMm;
 
     std::cout << std::fixed << std::setprecision(1)
-              << "ArucoHandler: Calibration grid rendered (DICT_4X4_100) — "
+              << "ArucoHandler: Calibration grid rendered (DICT_4X4_250) — "
               << cols << " cols x " << rows << " rows = " << markerID << " markers\n"
               << "  Marker size:     " << szMm  << " mm  |  " << sz  << " px\n"
               << "  Marker gap:      " << gapMm << " mm  |  " << gap << " px\n"
@@ -486,13 +483,5 @@ void ArucoHandler::initDetector() {
     activeValidIdMin_.store(detectCfg_.validIdMin);
     activeValidIdMax_.store(detectCfg_.validIdMax);
 
-    // Pre-build the 3D marker corner template in the marker's local frame.
-    // Origin is the marker center; corners are at ±half in X and Y.
-    float half = detectCfg_.markerSizeMm / 2.0f;
-    markerCorners3D_.ptr<cv::Vec3f>(0)[0] = cv::Vec3f(-half, half, 0.0f);
-    markerCorners3D_.ptr<cv::Vec3f>(0)[1] = cv::Vec3f(half, half, 0.0f);
-    markerCorners3D_.ptr<cv::Vec3f>(0)[2] = cv::Vec3f(half, -half, 0.0f);
-    markerCorners3D_.ptr<cv::Vec3f>(0)[3] = cv::Vec3f(-half, -half, 0.0f);
-
-    std::cout << "ArucoHandler: Detector initialized (DICT_4X4_50 + DICT_4X4_100).\n";
+    std::cout << "ArucoHandler: Detector initialized (DICT_4X4_50 + DICT_4X4_250).\n";
 }

@@ -15,13 +15,6 @@
 
 namespace {
 
-// 10 boundary angles [deg], sorted ascending — the 3 motor angles (35/145/270)
-// plus the cardinal directions not already covered by a motor angle
-// (0/90/180) plus 4 intermediate angles, per
-// nuring_calibration_implementation_guide.md item 5.
-constexpr float kBoundaryAnglesDeg[kAromBoundaryPoints] =
-    { 0.f, 35.f, 90.f, 145.f, 180.f, 210.f, 240.f, 270.f, 300.f, 330.f };
-
 float WrapToTwoPi(float theta) {
     while (theta < 0.0f)             theta += CONSTANT_TWO_PI;
     while (theta >= CONSTANT_TWO_PI) theta -= CONSTANT_TWO_PI;
@@ -42,7 +35,7 @@ Cal1Handler::Cal1Handler(const ControllerHandler& controller, const Cal1Config& 
     : controller_(controller), cfg_(cfg)
 {
     for (int i = 0; i < kAromBoundaryPoints; i++) {
-        boundary_.theta[i] = kBoundaryAnglesDeg[i] * DEG_TO_RAD;
+        boundary_.theta[i] = CONSTANT_CALIBRATION_ANGLES_DEG[i] * DEG_TO_RAD;
     }
 }
 

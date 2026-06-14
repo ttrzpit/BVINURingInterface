@@ -36,6 +36,7 @@ enum class InputState {
     FIT_SEL, FIT_RUN, FIT_ACT,
     TEN_SEL_ALL, TEN_SEL_A, TEN_SEL_B, TEN_SEL_C,
     TEN_ADJ_ALL, TEN_ADJ_A, TEN_ADJ_B, TEN_ADJ_C,
+    GAIN_ALL, GAIN_A, GAIN_B, GAIN_C,
     // Sentinels — only valid in KeyCommand::requiredState / newState
     ANY, SAME, QUIT
 };
@@ -76,8 +77,11 @@ enum class KeyAction {
     ADJUST_TENSION_INC,
     ADJUST_TENSION_DEC,
     SET_TENSION,
+    ADJUST_GAIN_INC,
+    ADJUST_GAIN_DEC,
     SET_ROBOT_IDLE,
     SET_ROBOT_READY,
+    TOGGLE_STIFFNESS_GAIN,
 };
 
 // ---- Motor test request -----------------------------------------------------
@@ -96,6 +100,14 @@ struct TensionAdjustRequest {
     bool  isAbsolute = false; ///< true: set to valueN; false: nudge by deltaN
     float deltaN     = 0.0f;  ///< +/- step [N], used when !isAbsolute
     float valueN     = 0.0f;  ///< Absolute setpoint [N], used when isAbsolute
+};
+
+// ---- Gain tuning request (direction-dependent kP boost, 'G' key) -------------
+
+struct GainAdjustRequest {
+    bool  active    = false;
+    char  motor     = 'A';   ///< 'A', 'B', 'C', or 'D' (all motors)
+    float deltaGain = 0.0f;  ///< +/- step applied to gainTune_[motor]
 };
 
 // ---- RobotState ladder request -----------------------------------------------
@@ -117,7 +129,9 @@ struct KeyboardState {
     MotorTestRequest pendingMotorTest;                         ///< One-shot motor PWM test request
     bool         pendingPretensionAdvance = false;             ///< One-shot: Enter pressed during PRETENSION
     TensionAdjustRequest pendingTensionAdjust;                 ///< One-shot: tension setpoint adjustment (PRETENSION step 3/4)
+    GainAdjustRequest pendingGainAdjust;                       ///< One-shot: gain tune adjustment ('G' mode)
     RobotStateRequest pendingRobotStateRequest = RobotStateRequest::NONE; ///< One-shot: 'e'/'E' pressed
+    bool         pendingStiffnessGainToggle = false;          ///< One-shot: 'k' pressed (toggle K(theta) application)
     std::string  inputBuffer;                                  ///< Numeric value currently being typed
     std::string  outputBuffer;                                 ///< Display text for the last executed command
 };
@@ -158,8 +172,24 @@ public:
     /** @brief Clear the tension-adjust request after main.cpp has acted on it. */
     void ClearTensionAdjust() { state_.pendingTensionAdjust.active = false; }
 
+    /** @brief Clear the gain-tune adjust request after main.cpp has acted on it. */
+    void ClearGainAdjust() { state_.pendingGainAdjust.active = false; }
+
     /** @brief Clear the robot-state request after main.cpp has acted on it. */
     void ClearRobotStateRequest() { state_.pendingRobotStateRequest = RobotStateRequest::NONE; }
+
+    /** @brief Clear the stiffness-gain toggle request after main.cpp has acted on it. */
+    void ClearStiffnessGainToggle() { state_.pendingStiffnessGainToggle = false; }
+
+    /**
+     * @brief Force the input state directly (bypassing the key-table dispatch),
+     *        re-deriving systemState. Used e.g. by PretensionHandler's
+     *        ZERO->TENSION auto-transition to default into TEN_SEL_ALL.
+     */
+    void SetInputState(InputState state) {
+        state_.inputState  = state;
+        state_.systemState = DeriveSystemState(state);
+    }
 
     /** @brief Set the active Fitts target ID directly (e.g. from a flick
      *         gesture during FITTS), clamped to [1, 45]. Mirrors SET_FITTS_TARGET. */

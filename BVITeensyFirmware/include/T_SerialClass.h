@@ -53,6 +53,10 @@ private:
 
     bool     connected_ = false;
 
+    // Comms watchdog — millis() timestamp of the last valid packet. Checked
+    // every ReadFromPC() call (see T_Config::WATCHDOG_TIMEOUT_MS).
+    uint32_t lastValidPacketMillis_ = 0;
+
     SharedDataManager&           dataHandle_;
     std::shared_ptr<ManagedData> shared_;
 };

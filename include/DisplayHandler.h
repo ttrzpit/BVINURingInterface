@@ -179,7 +179,8 @@ private:
 
     // ---- Controller grid helpers --------------------------------------------
     void PopulateControllerPanel(const std::vector<DetectedMarker> &markers,
-                                 const TouchState &touch, const KeyboardState &kb);
+                                 const TouchState &touch, const KeyboardState &kb,
+                                 const SerialState &serial);
 
     void DrawControllerCell(const std::string &text, const std::string &cellRef,
                             int colSpan, int rowSpan, const std::string &align,

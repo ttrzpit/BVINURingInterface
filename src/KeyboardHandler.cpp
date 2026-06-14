@@ -33,7 +33,7 @@ void KeyboardHandler::ProcessKey(int key) {
     key = key & 0xFF;
 
     // For debugging
-    std::cout << "Key code: " << key << "\n";
+    // std::cout << "Key code: " << key << "\n";
 
     // ---- Global escape hatches — always take priority -----------------------
     if (key == 27 || key == 32 || key == 96) {
@@ -225,12 +225,28 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
             state_.pendingTensionAdjust.valueN     = static_cast<float>(value) / 10.0f;
             break;
 
+        case KeyAction::ADJUST_GAIN_INC:
+            state_.pendingGainAdjust.active    = true;
+            state_.pendingGainAdjust.motor     = MotorLetterFromState(state_.inputState);
+            state_.pendingGainAdjust.deltaGain = 0.1f;
+            break;
+
+        case KeyAction::ADJUST_GAIN_DEC:
+            state_.pendingGainAdjust.active    = true;
+            state_.pendingGainAdjust.motor     = MotorLetterFromState(state_.inputState);
+            state_.pendingGainAdjust.deltaGain = -0.1f;
+            break;
+
         case KeyAction::SET_ROBOT_IDLE:
             state_.pendingRobotStateRequest = RobotStateRequest::GO_IDLE;
             break;
 
         case KeyAction::SET_ROBOT_READY:
             state_.pendingRobotStateRequest = RobotStateRequest::GO_READY;
+            break;
+
+        case KeyAction::TOGGLE_STIFFNESS_GAIN:
+            state_.pendingStiffnessGainToggle = true;
             break;
 
         case KeyAction::NONE:
@@ -269,16 +285,20 @@ char KeyboardHandler::MotorLetterFromState(InputState state) const {
     switch (state) {
         case InputState::MOT_PWM_A:
         case InputState::TEN_SEL_A:
-        case InputState::TEN_ADJ_A: return 'A';
+        case InputState::TEN_ADJ_A:
+        case InputState::GAIN_A: return 'A';
         case InputState::MOT_PWM_B:
         case InputState::TEN_SEL_B:
-        case InputState::TEN_ADJ_B: return 'B';
+        case InputState::TEN_ADJ_B:
+        case InputState::GAIN_B: return 'B';
         case InputState::MOT_PWM_C:
         case InputState::TEN_SEL_C:
-        case InputState::TEN_ADJ_C: return 'C';
+        case InputState::TEN_ADJ_C:
+        case InputState::GAIN_C: return 'C';
         case InputState::MOT_PWM_ALL:
         case InputState::TEN_SEL_ALL:
-        case InputState::TEN_ADJ_ALL: return 'D';
+        case InputState::TEN_ADJ_ALL:
+        case InputState::GAIN_ALL: return 'D';
         default: return 'A';
     }
 }
@@ -301,7 +321,14 @@ std::string KeyboardHandler::MotorLabelFromState(InputState state) const {
             return "A, B, C";
         case InputState::TEN_SEL_ALL:
         case InputState::TEN_ADJ_ALL:
+        case InputState::GAIN_ALL:
             return "All";
+        case InputState::GAIN_A:
+            return "A";
+        case InputState::GAIN_B:
+            return "B";
+        case InputState::GAIN_C:
+            return "C";
         default:
             return "";
     }

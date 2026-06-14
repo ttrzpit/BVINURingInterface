@@ -17,6 +17,7 @@ void PretensionHandler::Reset() {
     phase_           = Phase::UNSPOOL;
     sendZeroCommand_ = false;
     zeroSentAtSecs_  = 0.0;
+    tensionPhaseEntered_ = false;
     controller_.SetOutputEnabled(false);
     controller_.SetManualTensionMode(false);
     status_ = "Tension 1/4: Unspool all tendons fully, then press Enter.";
@@ -34,6 +35,7 @@ void PretensionHandler::Update(double nowSecs) {
         controller_.SetOutputEnabled(true);
         controller_.SetManualTensionMode(true);
         phase_  = Phase::TENSION;
+        tensionPhaseEntered_ = true;
         status_.clear();  // step 3/4 status is computed dynamically by GetStatus()
     }
 }

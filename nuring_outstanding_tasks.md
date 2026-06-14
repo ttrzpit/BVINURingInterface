@@ -1,63 +1,83 @@
-# NURing PC program outstanding tasks
+# NURing Outstanding Tasks
 
 Use this document as a reference to tasks that need to still be completed. If the task has been finished, update it's status.
 
-
----
-
-
-## List of outstanding PC-side tasks
+Rank 1 = Highest priority
+Rank 2 = Middle priority
+Rank 3 = Lowest priority
 
 
-### Controller
--   Enable tension using newton input
-    - t/T   Toggle tension setting
-    - 
-    - t
+## PC Side 
+
+ Status  | Rank | Source             | Task
+---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
+[X]      | 1    | Cal1Handler        | Implement calibration 1 handler (measuring finger active range of motion)
+[X]      | 1    | Cal1Handler        | Show virtual points being captured on the little virtualXY window
+[X]      | 1    | Cal1Handler        | Check if r_pulley_effective can drop below 2.5; ensure that when tendon is fully extended, r_pulley_eff is set at 2.5
+[ ]      | 3    | Cal1Handler        | Implement "soft centering": if fingertip has stationary for X seconds, set that as new virtual fingertip zero
+---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
+[X]      | 1    | Cal2Handler        | Implement calibration 2 handler (finger deflection stiffness)
+[ ]      | 1    | Cal2Handler        | Display polygon of stiffness based on normalized stiffness value
+[ ]      | 2    | Cal2Handler        | Implement camera-based ground truth for virtual XY estimation
+---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
+[X]      | 1    | Cal3Handler        | Implement fingertip-to-camera offset calibration measurement
+[ ]      | 2    | Cal3Handler        | Confirm calibration 3 is accurate
+[ ]      | 2    | Cal3Handler        | Display calibration status
+[ ]      | 2    | Cal3Handler        | Display calibrated fingertip position
+[ ]      | 1    | Cal3Handler        | Allow for toggle of fingertip-to-camera offset
+---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
+[ ]      | 3    | CameraHandler      | Test "auto-calibration" tool to find optimal camera settings for ArUco detection
+[ ]      | 3    | CameraHandler      | Test "auto-calibration" tool to find optimal detector settings for ArUco detectionand 
+---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
+[X]      | 1    | ControllerHandler  | Add input that enables/disables application of stiffness gain to allow for performance comparisons
+[ ]      | 3    | ControllerHandler  | Attempt auto-tensioning, where the tendons will spool up on their own until they detect no more rotation per that motor's encoder
+[ ]      | 1    | ControllerHandler  | Enable PI controller, where we allow for either a single proportional gain across the 3 tendons or the user stiffness gains
+[ ]      | 1    | ControllerHandler  | Scale error by distance to prevent large deflections during more precise guidance during homing phase
+[ ]      | 1    | ControllerHandler  | Find way for dealing with lost markers, if a marker goes off the FOV, then trigger "reverse" cue
+[ ]      | 1    | ControllerHandler  | Set amplitude, frequency, and pattern for reverse cue
+[ ]      | 1    | ControllerHandler  | Check default values for controller (gains, max tension, etc)
+[ ]      | 1    | ControllerHandler  | Implement vibrotactile feedback for "on target"
+[ ]      | 1    | ControllerHandler  | Implement vibrotactile feedback for "about to contact"
+---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
+[ ]      | 1    | DisplayHandler     | Flag for UserID in the status panel
+[ ]      | 1    | DisplayHandler     | Fix controller panel controller values
+[ ]      | 1    | DisplayHandler     | Fix status panel on main panel
+---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
+[ ]      | 2    | FittsTaskHandler   | Project fingertip position onto ArUco tag plane
+[ ]      | 1    | FittsTaskHandler   | Enable logging when task begins
+[ ]      | 1    | FittsTaskHandler   | Add baseline study with audio cues (tones or voice)
+[ ]      | 1    | FittsTaskHandler   | Add cognitive loading task
+[ ]      | 1    | FittsTaskHandler   | Add toggles for various calibrations
+[ ]      | 2    | FittsTaskHandler   | Check projected fingertip endpoint on touchscreen
+---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
+[X]      | 1    | GestureHandler     | Implement up/down gesture recognition
+[X]      | 1    | GestureHandler     | Implement circle gesture recognition
+[ ]      | 3    | GestureHandler     | Test left/right flick for confirm/reject
+[ ]      | 3    | GestureHandler     | Test optical flow for gesture detection
+[ ]      | 2    | GestureHandler     | Test closed fist for "stop" gesture
+---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
+[ ]      | 1    | LoggingHandler     | Save and output participant gains info
+[ ]      | 1    | LoggingHandler     | Enable logging of appropriate data; potentially have a section in the config.yaml where I can flag on/off data to save?
+[ ]      | 1    | LoggingHandler     | Allow dummy userID that prevents data from being saved (e.g., U000 means no-save, U-1 means user ID not set yet)
+[ ]      | 1    | LoggingHandler     | Find optimal way to save logging data (e.g., log in real time, save data to vector, rolling vector save, etc.)
+[ ]      | 1    | LoggingHandler     | Check that userID is entered before starting calibration or tasks
+[ ]      | 1    | LoggingHandler     | Set up folder and file for logging once valid user ID is entered
+[ ]      | 1    | LoggingHandler     | Output configuration file for each participant
+---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
+[ ]      | 1    | SerialHandler      | Add large whole-screen text for when safety switch is released (from Teensy serial state)
+[ ]      | 1    | SerialHandler      | Add large whole-screen text for when Teensy is disconnected during runtime
 
 
 
-
--   [CALIBRATION1]  Implement calibration 1 handler (finger active range of motion)
--   [CALIBRATION1]  Show virtual points being captured on the little virtualXY window
--   [CALIBRATION2]  Implement calibration 2 handler (finger deflection stiffness)
--   [CALIBRATION2]  Implement camera-based ground truth for virtual XY estimation
--   [CALIBRATION3]  Implement fingertip-to-camera offset calibration measurement
--   [CALIBRATION3]  Confirm calibration 3 is complete
-X   [CALIBRATION3]  Display calibration status
--   [CALIBRATION3]  Display calibrated fingertip position
--   [CALIBRATION3]  Allow for toggle of fingertip-to-camera offset
--   [CAMERA]        Test "auto-calibration" tool to find optimal camera settings for ArUco detection
--   [CAMERA]        Test "auto-calibration" tool to find optimal detector settings for ArUco detectionand 
--   [CONTROLLER]    Add input that enables/disables application of stiffness gain to allow for performance comparisons
--   [CONTROLLER]    Attempt auto-tensioning, where the tendons will spool up on their own until they detect no more rotation per that motor's encoder
--   [CONTROLLER]    Enable PI controller, where we allow for either a single proportional gain across the 3 tendons or the user stiffness gains
--   [CONTROLLER]    Scale error by distance to prevent large deflections during more precise guidance during homing phase
--   [CONTROLLER]    Find way for dealing with lost markers, if a marker goes off the FOV, then trigger "reverse" cue
--   [CONTROLLER]    Set amplitude, frequency, and pattern for reverse cue
--   [CONTROLLER]    Check default values for controller (gains, max tension, etc)
-X   [DISPLAY]       Flag for UserID in the status panel
--   [LOGGING]       Save and output participant gains info
--   [LOGGING]       Enable logging of appropriate data; potentially have a section in the config.yaml where I can flag on/off data to save?
--   [LOGGING]       Allow dummy userID that prevents data from being saved (e.g., U000 means no-save, U-1 means user ID not set yet)
--   [LOGGING]       Find optimal way to save logging data (e.g., log in real time, save data to vector, rolling vector save, etc.)
--   [SERIAL]        Add large whole-screen text for when safety switch is released (from Teensy serial state)
--   [STUDY]         Add overall task handler that accepts user ID
--   [STUDY]         Check that userID is entered before starting calibration or tasks
--   [STUDY]         Set up folder and file for logging once valid user ID is entered
--   [STUDY]         Output configuration file for each participant
--   [TASKS_ACC]     Create / move all fitts-related stuff into a Tasks_Accuracy handler
--   [TASKS_ACC]     Project fingertip position onto ArUco tag plane
--   [TASKS_ACC]     Enable logging when task begins
--   [TASKS_ACC]     Add baseline study with audio cues (tones or voice)
-
-**Teensy Side**
-X   [AMPLIFIER]     Implement hardware serial interfaces 
-X   [AMPLIFIER]     Implement intelligent serial probing for encoder position and measured current 
-X   [AMPLIFIER]     Send encoder and current values to PC
-X   [LED]           Add LED for verifying PC serial connection
-X   [LED]           Implement so that blue LEDs go one once higher baud rate has been achieved
--   [SERIAL]        Implement 'SAFETY_OFF" state if participant releases safety button, and send state to PC
+## Teensy Side
+ Status  | Rank |Source              | Task
+---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
+[X]      | 1    | T_SerialClass      | Implement hardware serial interfaces 
+[X]      | 1    | T_AmplifierClass   | Implement intelligent serial probing for encoder position and measured current 
+[X]      | 1    | T_AmplifierClass   | Send encoder and current values to PC
+[X]      | 1    | T_SerialClass      | Add LED for verifying PC serial connection
+[X]      | 1    | T_SerialClass      | Implement so that blue LEDs go one once higher baud rate has been achieved
+[X]      | 1    | T_AmplifierClass   | Implement 'SAFETY_OFF" state if participant releases safety button, and send state to PC
 
 
 

@@ -181,7 +181,7 @@ bool Config::load(const std::string& filepath) {
         cg["gain_kP"]               >> controllerGains.gain_kP;
         cg["gain_kD"]               >> controllerGains.gain_kD;
         cg["gain_kI"]               >> controllerGains.gain_kI;
-        cg["force_max"]             >> controllerGains.force_max;
+        cg["deflection_force_max"]  >> controllerGains.deflection_force_max;
         cg["tension_min"]           >> controllerGains.tension_min;
         cg["tension_max"]           >> controllerGains.tension_max;
         cg["position_tolerance"]    >> controllerGains.position_tolerance;
@@ -204,6 +204,14 @@ bool Config::load(const std::string& filepath) {
     cv::FileNode c1 = fs["cal1"];
     if (!c1.empty()) {
         c1["record_secs"] >> cal1.recordSecs;
+    }
+
+    // ---- Cal2 timing (stiffness) ----------------------------------------------
+    cv::FileNode c2 = fs["cal2"];
+    if (!c2.empty()) {
+        c2["force_ramp_rate"]   >> cal2.forceRampRate;
+        c2["hold_secs"]         >> cal2.holdSecs;
+        c2["release_wait_secs"] >> cal2.releaseWaitSecs;
     }
 
     // ---- Gesture detection (flick up/down) -----------------------------------

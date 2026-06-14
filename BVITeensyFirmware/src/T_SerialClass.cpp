@@ -60,6 +60,7 @@ void T_SerialClass::ReadFromPC() {
                     memcpy(&pkt, rxBuf_, sizeof(PcToTeensyPacket));
 
                     connected_ = true;
+                    lastValidPacketMillis_ = millis();
 
                     // Write commanded PWM values into shared data.
                     // These are declared volatile — safe for ISR to read concurrently.
@@ -86,6 +87,18 @@ void T_SerialClass::ReadFromPC() {
                 break;
             }
         }
+    }
+
+    // ---- Comms watchdog -------------------------------------------------------
+    // No valid packet within WATCHDOG_TIMEOUT_MS (PC crashed or serial
+    // disconnected) — force PWM output off so the amplifiers stop applying
+    // tension instead of holding the last commanded value indefinitely.
+    if (millis() - lastValidPacketMillis_ > WATCHDOG_TIMEOUT_MS) {
+        shared_->Amplifier.commandedPwm_A = PWM_OFF;
+        shared_->Amplifier.commandedPwm_B = PWM_OFF;
+        shared_->Amplifier.commandedPwm_C = PWM_OFF;
+        connected_ = false;
+        shared_->System.teensyState = TeensyState::WAITING;
     }
 }
 

@@ -128,14 +128,14 @@ public:
      * @brief Show or hide the dense calibration grid on the touchscreen.
      *        Layout is auto-calculated from ArucoCalibrationGridConfig:
      *        markers are packed with fixed markerPadMm spacing inside the
-     *        markerExclusionMm boundary. Uses DICT_4X4_100 (IDs start at 0).
+     *        markerExclusionMm boundary. Uses DICT_4X4_250 (IDs start at 0).
      *        Idempotent — safe to call repeatedly with the same value.
      */
     void SetCalibrationGridVisible(bool visible);
 
     /**
      * @brief Switch the detection dictionary and valid ID range.
-     *        true  → DICT_4X4_100, IDs 0–100 (Cal3 calibration grid)
+     *        true  → DICT_4X4_250, IDs 0–249 (Cal3 calibration grid)
      *        false → DICT_4X4_50,  IDs from aruco_marker config (default)
      *        Thread-safe — takes effect on the next detection cycle.
      */
@@ -171,8 +171,7 @@ private:
     cv::aruco::Dictionary         dictionary_;       // DICT_4X4_50  — Fitts / default
     cv::aruco::DetectorParameters detectorParams_;
     cv::aruco::ArucoDetector      detector_;         // built from dictionary_
-    cv::aruco::ArucoDetector      calDetector_;      // built from calGridDictionary_ (DICT_4X4_100)
-    cv::Mat                       markerCorners3D_{ 4, 1, CV_32FC3 };
+    cv::aruco::ArucoDetector      calDetector_;      // built from calGridDictionary_ (DICT_4X4_250)
 
     // Active detection mode — written from main thread, read from detect thread.
     // Atomics avoid the need for a mutex in the RunDetection() hot path.
@@ -194,7 +193,7 @@ private:
     std::string fittsLine1_;
     std::string fittsLine2_;
 
-    // Calibration grid uses a larger dictionary (DICT_4X4_100) so it can
+    // Calibration grid uses a larger dictionary (DICT_4X4_250) so it can
     // accommodate more markers than the Fitts grid (DICT_4X4_50).
     cv::aruco::Dictionary calGridDictionary_;
 

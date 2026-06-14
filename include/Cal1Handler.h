@@ -7,9 +7,9 @@
 // PID target), the participant traces circles at the edge of comfortable
 // reach for cfg_.recordSecs. The recorded virtual fingertip positions
 // (ControllerHandler::GetVirtualPosition()) are converted to polar
-// coordinates, binned into 10 angular sectors, and the 95th-percentile
-// radius per sector is fit with a periodic cubic spline to define the AROM
-// boundary (nuring_calibration_implementation_guide.md, item 5).
+// coordinates, binned into kAromBoundaryPoints angular sectors, and the
+// 95th-percentile radius per sector is fit with a periodic cubic spline to
+// define the AROM boundary (nuring_calibration_implementation_guide.md, item 5).
 //
 // State machine:
 //   RECORDING → (recordSecs elapsed) → ComputeBoundary() → DONE
@@ -25,11 +25,11 @@
 #include "ControllerHandler.h"
 
 
-constexpr int kAromBoundaryPoints = 10;
+constexpr int kAromBoundaryPoints = CONSTANT_CALIBRATION_ANGLE_COUNT;
 
 // ---- AROM boundary -----------------------------------------------------------
-// 10 (angle, radius) control points plus periodic cubic spline coefficients,
-// sorted by theta ascending. theta[0..9] cover [0, 2*PI).
+// kAromBoundaryPoints (angle, radius) control points plus periodic cubic
+// spline coefficients, sorted by theta ascending. theta[] covers [0, 2*PI).
 
 struct AromBoundary {
     bool valid = false;

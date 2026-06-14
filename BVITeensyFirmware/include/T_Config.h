@@ -36,6 +36,14 @@ inline constexpr uint32_t BAUD_FAST = 115200;  // Target after init sequence
 inline constexpr uint16_t PWM_OFF = 2047;  // Zero torque output (safe default)
 inline constexpr uint16_t PWM_MAX = 1;     // Maximum torque
 
+// ---- Comms watchdog -----------------------------------------------------------
+// If no valid PcToTeensyPacket has been received within this window (PC crashed
+// or serial disconnected), ReadFromPC() forces commandedPwm_A/B/C back to
+// PWM_OFF so the amplifiers stop applying tension. The PC sends at 200 Hz
+// (5 ms period), so 250 ms is ~50 missed packets — comfortably above normal
+// jitter but fast enough to cut output quickly on a real disconnect.
+inline constexpr uint32_t WATCHDOG_TIMEOUT_MS = 250;
+
 // ---- IntervalTimer periods (microseconds) ------------------------------------
 inline constexpr uint32_t PERIOD_PWM_US      = 1000;  // 1000 Hz — PWM analogWrite
 inline constexpr uint32_t PERIOD_POLL_AMP_US = 2000;  //  500 Hz — HW serial poll

@@ -57,11 +57,11 @@ aruco_display:
 # ---- ArUco Calibration Grid (on the touchscreen) --------------------------------
 # The C x R grid starts at marker ID 1 and increments left-to-right, top-to-bottom.
 # Spacing between markers is auto-calculated from screen size, padding, and marker size.
-# Uses the larger ArUco dictionary 4x4x100
+# Uses the larger ArUco dictionary 4x4x250
 aruco_calibration_grid:
-   marker_size_mm: 18.0       # Marker side length [mm] — converted to pixels at runtime
-   marker_pad_mm: 15.0        # Padding between markers [mm] — converted to pixels at runtime
-   marker_exclusion_mm: 35.0  # Exclusion zone around the aruco grid to keep markers away from the screen edge
+   marker_size_mm: 12.0       # Marker side length [mm] — converted to pixels at runtime
+   marker_pad_mm: 12.0        # Padding between markers [mm] — converted to pixels at runtime
+   marker_exclusion_mm: 20.0  # Exclusion zone around the aruco grid to keep markers away from the screen edge
 
 
 # ---- Camera -----------------------------------------------------------------
@@ -132,9 +132,9 @@ telemetry:
 
 controller:
    width: 450
-   height: 1344
+   height: 1350
    cols: 15
-   rows: 42
+   rows: 44
    x_pos: 1372
    y_pos: 0
 
@@ -147,6 +147,12 @@ cal3:
 # ---- Calibration Stage 1 timing (AROM) ---------------------------------------
 cal1:
    record_secs: 10.0     # Duration of the AROM circle-tracing recording [s]
+
+# ---- Calibration Stage 2 timing (Stiffness) ------------------------------------
+cal2:
+   force_ramp_rate:   0.5  # Open-loop force ramp-up rate [N/s]
+   hold_secs:         2.0  # Hold duration at peak force per heading [s]
+   release_wait_secs: 2.0  # Wait after releasing (no ramp-down) before the next heading [s]
 
 # ---- Gesture detection (flick up/down + confirm circle, RobotState::READY only) ----
 # velocity_thresh_mm_s : |vel_filtered_.y| must exceed this to arm a flick [mm/s]
@@ -191,7 +197,7 @@ serial:
 # gain_kP           : Proportional gain [N/mm]
 # gain_kD           : Derivative gain [N·s/mm]
 # gain_kI           : Integral gain [N/(mm·s)]
-# force_max         : Maximum commanded force magnitude [N]
+# deflection_force_max : Maximum commanded guidance deflection force magnitude [N]
 # tension_min       : Preload (minimum) tension per motor [N]
 # tension_max       : Maximum tension per motor [N]
 # position_tolerance: Deadband radius — no force applied inside this radius [mm]
@@ -204,9 +210,9 @@ controller_gains:
    gain_kP: 1.0
    gain_kD: 0.0
    gain_kI: 0.0
-   force_max: 5.0
+   deflection_force_max: 10.0
    tension_min: 0.1
-   tension_max: 5.0
+   tension_max: 2.0
    position_tolerance: 1.0
    lowpass_alpha: 0.15
    tension_solver_iters: 5
