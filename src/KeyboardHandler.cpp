@@ -9,14 +9,14 @@
 // KeyboardHandler.cpp
 //
 // Every keystroke is processed immediately:
-//   1. ESC / SPACE / grave (27/32/96) always apply, even mid numeric-entry —
+//   1. ESC / SPACE / grave (27/32/96) always apply, even mid numeric-entry -
 //      they quit / clear-to-IDLE / reset-to-IDLE respectively.
 //   2. If the current inputState expects a numeric entry (kNumericEntryTable),
 //      digit/decimal/Backspace/Enter keys are buffered until Enter confirms.
 //   3. Otherwise, kKeyCommandTable is scanned for a row matching (key,
 //      inputState) or (key, ANY); the first match fires its action and
 //      transition.
-//   4. No match — state is left unchanged.
+//   4. No match - state is left unchanged.
 // =============================================================================
 
 KeyboardHandler::KeyboardHandler() {
@@ -24,7 +24,7 @@ KeyboardHandler::KeyboardHandler() {
 }
 
 void KeyboardHandler::ProcessKey(int key) {
-    // cv::pollKey() returns -1 when no key is pending — exit immediately
+    // cv::pollKey() returns -1 when no key is pending - exit immediately
     if (key < 0) return;
 
     // Strip modifier bits (e.g. Fn keys return values > 255); extract the
@@ -35,7 +35,7 @@ void KeyboardHandler::ProcessKey(int key) {
     // For debugging
     // std::cout << "Key code: " << key << "\n";
 
-    // ---- Global escape hatches — always take priority -----------------------
+    // ---- Global escape hatches - always take priority -----------------------
     if (key == 27 || key == 32 || key == 96) {
         DispatchTableCommand(key);
         return;
@@ -71,9 +71,9 @@ bool KeyboardHandler::ProcessNumericEntry(int key) {
         return true;
     }
 
-    // Enter — validate and commit
+    // Enter - validate and commit
     if (key == 13 || key == 10) {
-        // A "bare" Enter (nothing typed yet) isn't a numeric confirmation —
+        // A "bare" Enter (nothing typed yet) isn't a numeric confirmation -
         // let it fall through to DispatchTableCommand (e.g. PRETENSION_ADVANCE
         // while a TEN_SEL_* motor is selected).
         if (inputBuffer_.empty()) return false;
@@ -87,7 +87,7 @@ bool KeyboardHandler::ProcessNumericEntry(int key) {
         int rawValue = std::stoi(digits);  // for n.n, this is value*10 (e.g. "2.5" -> 25)
 
         if (rawValue < fmt->minValue || rawValue > fmt->maxValue) {
-            state_.outputBuffer = "Invalid value — must be " +
+            state_.outputBuffer = "Invalid value - must be " +
                                    FormatNumericValue(fmt->minValue, fmt->hasDecimal) + " to " +
                                    FormatNumericValue(fmt->maxValue, fmt->hasDecimal) + ".";
             state_.lastInputKey = key;
@@ -111,7 +111,7 @@ bool KeyboardHandler::ProcessNumericEntry(int key) {
         return true;
     }
 
-    // Digit — number row (48-57) or numpad (176-185)
+    // Digit - number row (48-57) or numpad (176-185)
     char ch = '\0';
     if (key >= '0' && key <= '9') {
         ch = static_cast<char>(key);
@@ -128,7 +128,7 @@ bool KeyboardHandler::ProcessNumericEntry(int key) {
 
     // TEN_SEL_* (pretensioning step 3/4) and TEN_ADJ_* (standalone tension
     // adjust) also bind a/b/c/d (reselect motor) and +/- (nudge by 0.1 N) via
-    // kKeyCommandTable. Don't swallow those here — let any key that isn't a
+    // kKeyCommandTable. Don't swallow those here - let any key that isn't a
     // digit/decimal fall through to DispatchTableCommand.
     switch (state_.inputState) {
         case InputState::TEN_SEL_A:
@@ -160,15 +160,24 @@ void KeyboardHandler::DispatchTableCommand(int key) {
         if (row.newState == InputState::QUIT) {
             state_.quitRequested = true;
         } else if (row.newState != InputState::SAME) {
-            state_.inputState  = row.newState;
-            state_.systemState = DeriveSystemState(state_.inputState);
+            // Entering the gain-tuning overlay for the first time: remember
+            // the state to return to on EXIT_GAIN_MODE, and leave systemState
+            // untouched so the active task keeps running underneath it.
+            if (IsGainTuneInputState(row.newState) && !IsGainTuneInputState(oldState)) {
+                preGainState_ = oldState;
+            }
+
+            state_.inputState = row.newState;
+            if (!IsGainTuneInputState(row.newState)) {
+                state_.systemState = DeriveSystemState(state_.inputState);
+            }
         }
 
         state_.outputBuffer = FormatDisplayText(row.displayText, -1, false, oldState);
         state_.lastInputKey = key;
         return;
     }
-    // No match — leave state unchanged (don't clobber e.g. Cal3's live status)
+    // No match - leave state unchanged (don't clobber e.g. Cal3's live status)
 }
 
 void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
@@ -235,6 +244,10 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
             state_.pendingGainAdjust.active    = true;
             state_.pendingGainAdjust.motor     = MotorLetterFromState(state_.inputState);
             state_.pendingGainAdjust.deltaGain = -0.1f;
+            break;
+
+        case KeyAction::EXIT_GAIN_MODE:
+            state_.inputState = preGainState_;
             break;
 
         case KeyAction::SET_ROBOT_IDLE:
@@ -331,6 +344,18 @@ std::string KeyboardHandler::MotorLabelFromState(InputState state) const {
             return "C";
         default:
             return "";
+    }
+}
+
+bool IsGainTuneInputState(InputState state) {
+    switch (state) {
+        case InputState::GAIN_ALL:
+        case InputState::GAIN_A:
+        case InputState::GAIN_B:
+        case InputState::GAIN_C:
+            return true;
+        default:
+            return false;
     }
 }
 

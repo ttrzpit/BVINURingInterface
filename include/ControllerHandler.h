@@ -1,26 +1,28 @@
 #pragma once
 
 // =============================================================================
-// ControllerHandler.h — Phase 1 corrected controller pipeline
+// ControllerHandler.h - Phase 1 corrected controller pipeline
 //
 // Full pipeline per Update() call:
 //   Stage 0: Encoder counts → q_abs → spool-corrected r_eff and dL
 //            → virtual fingertip position via pseudoinverse mapping
 //   Stage 1: PID (position error → force), deadband, anti-windup integrator
-//   Stage 2: Tension solver — projected gradient descent
-//            min_T 0.5‖W·T − F‖² s.t. T_min ≤ T_i ≤ T_max
+//   Stage 2: Tension allocation - closed-form preload + deflection split:
+//            T_deflection_i = clamp((W_pinv^T · F)_i, ±T_deflection_max)
+//            T_output_i     = clamp(T_preload_i + T_deflection_i, T_preload_i, T_output_max)
+//            i.e. the guidance force can only ADD tension on top of each
+//            tendon's preload, never relax it below T_preload_i.
 //   Stage 3: Tension → current (spool-corrected: I = T·r_eff / K_t)
 //   Stage 4: Current → PWM (inverted linear: I=0→2047 off, I=max→24 full)
 //
 // Physical constants (from hardware spec, corrected from old code bugs):
 //   CONSTANT_MOTOR_PULLEY_RADIUS   = 0.0025 m  (was wrongly 0.003 m)
-//   CONSTANT_TENDON_THICKNESS      = 0.0003 m  (new — needed for spool correction)
+//   CONSTANT_TENDON_THICKNESS      = 0.0003 m  (new - needed for spool correction)
 //
 // Bugs fixed vs. reference ControllerClass.cpp:
 //   #1  D-term uses vel.y for F_y  (old code used vel.x for both axes)
-//   #3  Tension solver warm-starts from prior solution, not preload+prior
 //   #4  Tension→current uses per-motor spool-corrected r_eff, not bare radius
-//   #5  Force magnitude saturated before solver
+//   #5  Force magnitude saturated before Stage 2
 //   #6  Integrator clamp derived from K_i budget, not arbitrary 2×F_max
 //   #7  Pulley radius corrected to 0.0025 m
 //   #8  Virtual mapping uses spool-corrected integral formula for dL
@@ -50,30 +52,46 @@ struct ControllerTelemetry {
     cv::Point3f q_home;        ///< Home motor angles [rad]
     cv::Point3f r_eff;         ///< Spool-corrected effective radii [m]
     cv::Point3f dL;            ///< Tendon length changes from home [m]
-    cv::Point3f tension;       ///< Commanded tensions [N] (preload + force-derived correction)
-    cv::Point3f preloadTension; ///< Preload tensions set during pretensioning [N]
-    cv::Point3f deflectionForce;    ///< Per-motor tension contribution from the guidance force command [N],
-                                     ///< clamped to +/- cfg_.deflection_force_max
-    cv::Point3f outputTension; ///< preloadTension + deflectionForce, clamped to [tension_min, tension_max] [N]
+    cv::Point3f tension;       ///< T_output per motor [N] - T_preload + T_deflection, clamped to
+                                     ///< [T_preload_i, cfg_.tension_output_max]. This is the tension
+                                     ///< that Stages 3/4 convert to current/PWM.
+    cv::Point3f preloadTension; ///< T_preload - preload tensions set during pretensioning [N]
+    cv::Point3f deflectionForce;    ///< T_deflection - per-motor tension contribution from the
+                                     ///< guidance force command [N], clamped to
+                                     ///< +/- cfg_.tension_deflection_max. May be negative (that
+                                     ///< tendon's contribution would relax it), but Stage 2 floors
+                                     ///< T_output at T_preload_i regardless.
+    cv::Point3f outputTension; ///< Equal to `tension` (T_output) - kept for display-table clarity [N]
     cv::Point3f current;       ///< Commanded currents [A]
     cv::Point3f pwm;           ///< Commanded PWM values (as float for display)
     cv::Point3f preloadPwm;    ///< PWM values corresponding to preload tensions (as float for display)
-    cv::Point3f outputPwm;     ///< PWM values corresponding to outputTension (as float for display) — always in [CONSTANT_PWM_MAX, CONSTANT_PWM_OFF]
+    cv::Point3f outputPwm;     ///< PWM values corresponding to outputTension (as float for display) - always in [CONSTANT_PWM_MAX, CONSTANT_PWM_OFF]
     cv::Point3f deflectionForcePwm; ///< PWM equivalent of |deflectionForce| via the same Tension->Current->PWM
-                                     ///< pipeline as preloadPwm/outputPwm — always in [CONSTANT_PWM_MAX,
+                                     ///< pipeline as preloadPwm/outputPwm - always in [CONSTANT_PWM_MAX,
                                      ///< CONSTANT_PWM_OFF], never negative. Direction is conveyed by
                                      ///< deflectionForce's sign, not by this value.
-    cv::Point3f gainTune;       ///< Direction-dependent kP boost per motor [N/mm] ('G' key,
-                                 ///< see AdjustGainTune) — added to kP_effective in Stage 1.
+    cv::Point3f gainTune;       ///< Custom-tuned proportional gain per motor [N/mm], seeded
+                                 ///< from cfg_.gain_kP and adjustable via 'G' (AdjustGainTune).
+                                 ///< Interpolated by direction and combined with K(theta) to
+                                 ///< form kP_effective in Stage 1.
     bool        homeSet;       ///< True once SetHomePosition() has been called
     bool        outputEnabled; ///< True when PWM is actually sent to the Teensy
-    bool        manualTensionMode; ///< True during pretensioning step 3/4 — tension is being adjusted live
+    bool        manualTensionMode; ///< True during pretensioning step 3/4 - tension is being adjusted live
                                     ///< and has not yet been confirmed as the new preload via SetPreloadTensions()
+    bool        guidanceOutputEnabled; ///< True when Stage 2 includes the guidance force (force_x_/force_y_);
+                                        ///< false when 'e' has zeroed it (tension-only / preload output)
+    bool        isTargetActive; ///< Mirrors the isTargetActive argument passed to the last Update() call
 
     cv::Point2f measuredForce;          ///< Measured force from amplifier current [N]
     std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT> stiffnessProfile; ///< K(theta) [N/mm]
     bool        stiffnessValid;         ///< True once Cal2Handler has produced K(theta)
-    bool        stiffnessGainEnabled;   ///< True when K(theta) replaces gain_kP
+    bool        stiffnessGainEnabled;   ///< True when K(theta) is added on top of gainTune
+
+    float stiffnessGain; ///< K(theta) [N/mm] - the stiffness-calibration profile,
+                          ///< interpolated at the current error heading. Independent
+                          ///< of gainTune_A/B/C_ (the "Gain kP" row); 0 if no valid
+                          ///< profile exists yet. Whether this value is actually added
+                          ///< into kP_effective depends on stiffnessGainEnabled.
 };
 
 
@@ -97,7 +115,7 @@ public:
      * @param rx             Latest Teensy packet (encoder counts + measured current)
      * @param pos_target     Desired fingertip deflection in virtual task space [mm]
      * @param isTargetActive True when a valid target exists; false decays PID to preload
-     * @param nowSecs        Current time [s] — used for ramp and integral timing
+     * @param nowSecs        Current time [s] - used for ramp and integral timing
      * @param dt             Time step since last Update() [s]
      */
     void Update(const TeensyToPcPacket& rx,
@@ -115,16 +133,22 @@ public:
     void SetOutputEnabled(bool enabled) { outputEnabled_ = enabled; }
     bool IsOutputEnabled() const { return outputEnabled_; }
 
+    // ---- Guidance output gating ('e'/'E') -------------------------------------
+    // When disabled, Stage 2 receives (0,0) instead of (force_x_, force_y_), so
+    // tension_A/B/C_ fall back to preload only (tension-only / no guidance).
+    void SetGuidanceOutputEnabled(bool enabled) { guidanceOutputEnabled_ = enabled; }
+    bool IsGuidanceOutputEnabled() const { return guidanceOutputEnabled_; }
+
     // ---- Manual tension override (pretensioning step 3/4) --------------------
-    // When enabled, Stage 2 (tension solver) is bypassed; tension_A/B/C come
-    // from AdjustManualTension()/SetManualTension() instead. Enabling seeds
-    // all three to cfg_.tension_min. Stages 3/4 (tension->current->PWM) still
-    // run on whatever tension_A/B/C currently holds.
+    // When enabled, Stage 2 (T_output = T_preload + T_deflection) is bypassed;
+    // tension_A/B/C come from AdjustManualTension()/SetManualTension() instead.
+    // Enabling seeds all three to cfg_.tension_preload_min. Stages 3/4
+    // (tension->current->PWM) still run on whatever tension_A/B/C currently holds.
     void SetManualTensionMode(bool enabled);
     bool IsManualTensionMode() const { return manualTensionMode_; }
 
     /** @brief Nudge one motor's manual tension setpoint by deltaN [N], clamped
-     *         to [tension_min, tension_max]. motor: 'A','B','C', or 'D' (all three). */
+     *         to [tension_preload_min, tension_preload_max]. motor: 'A','B','C', or 'D' (all three). */
     void AdjustManualTension(char motor, float deltaN);
 
     /** @brief Set one motor's manual tension setpoint to valueN [N], clamped.
@@ -132,22 +156,22 @@ public:
     void SetManualTension(char motor, float valueN);
 
     /**
-     * @brief Capture the current tension_A/B/C as the preload tensions held
-     *        by SolveTensions() at zero commanded force. Call once when
-     *        pretensioning completes (step 3/4 -> 4/4), before
-     *        SetHomePosition() resets tension_A/B/C.
+     * @brief Capture the current tension_A/B/C as T_preload - the preload held
+     *        by Stage 2 (T_output = T_preload + T_deflection) at zero commanded
+     *        force. Call once when pretensioning completes (step 3/4 -> 4/4),
+     *        before SetHomePosition().
      */
     void SetPreloadTensions();
 
-    /** @brief Per-motor preload tensions [N] held at zero commanded force —
-     *         defaults to cfg_.tension_min on all three until
+    /** @brief Per-motor preload tensions T_preload [N] held at zero commanded
+     *         force - defaults to cfg_.tension_preload_min on all three until
      *         SetPreloadTensions() is called. */
     cv::Point3f GetPreloadTensions() const { return { preload_A_, preload_B_, preload_C_ }; }
 
     // ---- Calibration force mode (Stage 2 stiffness calibration) --------------
     // When enabled, Stage 1 (PID) is bypassed; force_x_/force_y_ come from
-    // SetCalibrationForce() instead. Stages 2-4 (solver/current/PWM) run as
-    // usual on that commanded force.
+    // SetCalibrationForce() instead. Stages 2-4 (tension allocation/current/PWM)
+    // run as usual on that commanded force.
     void SetCalibrationForceMode(bool enabled);
     bool IsCalibrationForceMode() const { return calibrationForceMode_; }
 
@@ -165,7 +189,8 @@ public:
     // ---- Stiffness profile K(theta) [N/mm] (Stage 2 calibration result) ------
     // 10 values aligned with CONSTANT_CALIBRATION_ANGLES_DEG. When valid and
     // enabled, periodic linear interpolation of this profile at the current
-    // error heading replaces cfg_.gain_kP in Stage 1.
+    // error heading is added on top of the custom-tuned gain (gainTune) in
+    // Stage 1.
     void SetStiffnessProfile(const std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT>& kTheta);
     bool HasStiffnessProfile() const { return stiffnessProfileValid_; }
 
@@ -175,17 +200,19 @@ public:
     std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT> GetStiffnessProfile() const { return stiffness_profile_; }
 
     // ---- Direction-dependent gain tuning ('G' key) ---------------------------
-    // gainTune_A/B/C act as an extra K(theta)-style boost, centered on each
-    // motor's direction (35deg/145deg/270deg) and periodically interpolated
-    // the same way as the stiffness profile (InterpolateGainTune). The
-    // interpolated result is added to kP_effective in Stage 1, on top of
-    // K(theta)/gain_kP, before force_x_/force_y_ are computed.
+    // gainTune_A/B/C are the custom-tuned proportional gain, one of the two
+    // gain terms that make up kP_effective (the other being K(theta)). Each
+    // seeds from cfg_.gain_kP and is independently adjustable via 'G',
+    // centered on its motor's direction (35deg/145deg/270deg) and
+    // periodically interpolated the same way as the stiffness profile
+    // (InterpolateGainTune). The interpolated result is added to K(theta)
+    // (when valid and enabled) to form kP_effective in Stage 1.
 
     /** @brief Nudge one motor's gain tune by deltaGain, clamped to [0, 5].
      *         motor: 'A','B','C', or 'D' (all three). */
     void AdjustGainTune(char motor, float deltaGain);
 
-    /** @brief Per-motor gain tune values [N/mm], default 0 (no boost). */
+    /** @brief Per-motor custom-tuned gain values [N/mm], seeded from cfg_.gain_kP. */
     cv::Point3f GetGainTune() const { return { gainTune_A_, gainTune_B_, gainTune_C_ }; }
 
     /** @brief Live status string for the 'G' (gain tuning) input mode. */
@@ -228,7 +255,10 @@ private:
     float InterpolateGainTune(float thetaRad) const;
 
     // ---- Stage 2 helper -----------------------------------------------------
-    void SolveTensions(float force_x, float force_y);
+    /** @brief T_deflection_i = clamp((W_pinv^T·F)_i, ±T_deflection_max);
+     *         T_output_i = clamp(T_preload_i + T_deflection_i, T_preload_i, T_output_max).
+     *         Writes tension_deflection_A/B/C_ and tension_A/B/C_. */
+    void ComputeTensionOutputs(float force_x, float force_y);
 
     // ---- Stage 3 / 4 helpers ------------------------------------------------
     float    TensionToCurrent(float tension, float r_eff) const;
@@ -264,12 +294,21 @@ private:
     double      rampStart_ = 0.0;
     float       rampValue_ = 0.0f;
 
-    // ---- Tension solver state (warm-start from previous cycle) --------------
+    // ---- Live proportional gain (Stage 1, for telemetry) --------------------
+    float kPEffective_ = cfg_.gain_kP;
+
+    // ---- K(theta) interpolated at the current error heading (for telemetry) --
+    // Independent of gainTune_A/B/C_ - see ControllerTelemetry::stiffnessGain.
+    float stiffnessGainValue_ = 0.0f;
+
+    // ---- T_output per motor (Stage 2 result, drives Stages 3/4) -------------
     float tension_A_ = 0.0f, tension_B_ = 0.0f, tension_C_ = 0.0f;
-    bool  solverFirstCycle_ = true;
+
+    // ---- T_deflection per motor (signed, for telemetry) ----------------------
+    float tension_deflection_A_ = 0.0f, tension_deflection_B_ = 0.0f, tension_deflection_C_ = 0.0f;
 
     // ---- Preload tensions, held at zero commanded force ----------------------
-    float preload_A_, preload_B_, preload_C_;  ///< Set in ctor to cfg_.tension_min
+    float preload_A_, preload_B_, preload_C_;  ///< Set in ctor to cfg_.tension_preload_min
 
     // ---- Commanded current [A] (for telemetry) ------------------------------
     float current_A_ = 0.0f, current_B_ = 0.0f, current_C_ = 0.0f;
@@ -284,6 +323,12 @@ private:
 
     // ---- Output gating --------------------------------------------------------
     bool outputEnabled_ = false;
+
+    // ---- Guidance output gating ('e'/'E') --------------------------------------
+    bool guidanceOutputEnabled_ = true;
+
+    // ---- Last isTargetActive passed to Update() (for telemetry) ----------------
+    bool isTargetActive_ = false;
 
     // ---- Manual tension override (pretensioning step 3/4) --------------------
     bool manualTensionMode_ = false;
@@ -302,5 +347,7 @@ private:
     bool stiffnessGainEnabled_  = true;
 
     // ---- Direction-dependent gain tuning ('G' key) ---------------------------
-    float gainTune_A_ = 0.0f, gainTune_B_ = 0.0f, gainTune_C_ = 0.0f;
+    // Seeded from cfg_.gain_kP - the config value is now purely the starting
+    // point for this user-adjustable gain, not a separate baseline term.
+    float gainTune_A_ = cfg_.gain_kP, gainTune_B_ = cfg_.gain_kP, gainTune_C_ = cfg_.gain_kP;
 };

@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Cal1Handler.h — Calibration Stage 1: Finger Active Range of Motion (AROM)
+// Cal1Handler.h - Calibration Stage 1: Finger Active Range of Motion (AROM)
 //
 // While the operator holds preload tension on all three tendons (no active
 // PID target), the participant traces circles at the edge of comfortable

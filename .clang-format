@@ -1,3 +1,34 @@
 BasedOnStyle: Google
 IndentWidth: 4
 ColumnLimit: 0
+
+BraceWrapping: {
+    AfterClass: 'false'
+    AfterControlStatement: 'false'
+    AfterEnum : 'false'
+    AfterFunction : 'false'
+    AfterNamespace : 'false'
+    AfterStruct : 'false'
+    AfterUnion : 'false'
+    BeforeCatch : 'false'
+    BeforeElse : 'false'
+    IndentBraces : 'false'
+    AfterExternBlock : 'false'
+    SplitEmptyFunction : 'false'
+    SplitEmptyRecord : 'false'
+    SplitEmptyNamespace : 'false'
+}
+
+# Spacing
+SpaceAfterCStyleCast: false
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeParens: true
+SpaceInEmptyParentheses: false
+SpacesBeforeTrailingComments: 4
+SpacesInAngles:  false
+SpacesInContainerLiterals: true
+SpacesInCStyleCastParentheses: true
+SpacesInParentheses: true
+SpacesInSquareBrackets: false
+SpaceAfterTemplateKeyword: true
+SpaceBeforeInheritanceColon: true

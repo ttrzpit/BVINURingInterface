@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// GestureHandler.h — Flick up/down + confirm-circle gesture detection
+// GestureHandler.h - Flick up/down + confirm-circle gesture detection
 //                     (RobotState::READY only)
 //
 // Detects two families of gestures from the virtual fingertip position
@@ -12,7 +12,7 @@
 // --- Flick (up/down) ---------------------------------------------------------
 // A quick scroll-style flick, evaluated every Update() call. Two consecutive
 // same-direction "raw" flicks within cfg_.doubleFlickWindowSecs are required
-// to register a single FLICK_UP/FLICK_DOWN event — this is the second line of
+// to register a single FLICK_UP/FLICK_DOWN event - this is the second line of
 // defense (after the motion-duration gate below) against a confirm-circle
 // gesture being misread as a flick, since a circle's incidental up/down raw
 // flicks rarely repeat in the same direction twice in a row.
@@ -73,7 +73,7 @@ public:
     void Reset();
 
     /** @brief True while the on-screen indicator for the last gesture should be
-     *         shown — cfg_.cooldownSecs for flicks, cfg_.circleCooldownSecs for
+     *         shown - cfg_.cooldownSecs for flicks, cfg_.circleCooldownSecs for
      *         a confirm. */
     bool IsIndicatorActive(double nowSecs) const;
 
@@ -105,17 +105,17 @@ private:
     float  armY_          = 0.0f;  // pos_virtual_.y at the moment armed [mm]
     double armTimeSecs_   = 0.0;
 
-    // Double-flick tracking — a registered FLICK_UP/FLICK_DOWN requires two
+    // Double-flick tracking - a registered FLICK_UP/FLICK_DOWN requires two
     // same-direction raw flicks within doubleFlickWindowSecs
     int    pendingFlickSign_     = 0;     // +1/-1 = first raw flick of a pending double-flick, 0 = none
     double pendingFlickTimeSecs_ = 0.0;   // nowSecs when pendingFlickSign_ was set
-    double lastRawFlickSecs_     = -1e9;  // nowSecs of the most recent raw flick — drives COOLDOWN
+    double lastRawFlickSecs_     = -1e9;  // nowSecs of the most recent raw flick - drives COOLDOWN
 
-    // Shared "at rest" tracking — gates flick arming, also resets the circle accumulator
+    // Shared "at rest" tracking - gates flick arming, also resets the circle accumulator
     double motionDurationSecs_ = 0.0;  // Continuous time speed has stayed >= restSpeedThreshMmS, as of the end of the previous frame (0 if at rest)
     double lastUpdateSecs_     = -1.0; // nowSecs at the previous Update() call (-1 = first call)
 
-    // Confirm (circle) accumulator — rolling window of heading deltas + positions
+    // Confirm (circle) accumulator - rolling window of heading deltas + positions
     std::deque<RotationSample> rotationHistory_;
     float cumulativeRotationRad_ = 0.0f;
     float prevHeading_           = 0.0f;

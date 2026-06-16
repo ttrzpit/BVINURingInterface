@@ -107,7 +107,7 @@ build CMakeFiles/BVINURingInterface.dir/src/ControllerHandler.cpp.o: CXX_COMPILE
 
 build CMakeFiles/BVINURingInterface.dir/src/DisplayHandler.cpp.o: CXX_COMPILER__BVINURingInterface_unscanned_Release /home/tom/Code/BVINURingInterface/src/DisplayHandler.cpp || cmake_object_order_depends_target_BVINURingInterface
   DEP_FILE = CMakeFiles/BVINURingInterface.dir/src/DisplayHandler.cpp.o.d
-  FLAGS = -O3 -DNDEBUG -std=c++17
+  FLAGS = -O3 -DNDEBUG -std=c++17 -O2
   INCLUDES = -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4
   OBJECT_DIR = CMakeFiles/BVINURingInterface.dir
   OBJECT_FILE_DIR = CMakeFiles/BVINURingInterface.dir/src

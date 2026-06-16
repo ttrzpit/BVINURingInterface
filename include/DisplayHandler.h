@@ -1,20 +1,20 @@
 #pragma once
 
 // =============================================================================
-// DisplayHandler.h — Operator display + Telemetry panel + Controller panel
+// DisplayHandler.h - Operator display + Telemetry panel + Controller panel
 //
 // Three windows are managed here:
 //
-//   "NURing Operator"  — camera feed with marker overlays.
-//   "System Information" — Telemetry grid panel (see AddHeadingCell etc.)
-//   "Controller"         — Controller panel (see AddControllerHeadingCell etc.)
+//   "NURing Operator"  - camera feed with marker overlays.
+//   "System Information" - Telemetry grid panel (see AddHeadingCell etc.)
+//   "Controller"         - Controller panel (see AddControllerHeadingCell etc.)
 //
 // Both grid panels use Excel-style cell references ("A1", "B3", "AB2").
 // Cell functions follow the same signature pattern:
 //   Add*Cell(text, cellRef, colSpan, rowSpan, align, fontSize [, fill, text])
 //   Add*Border(cellRef, colSpan, rowSpan, color, thickness)
 //
-// PollKey() must be called once per main loop iteration — it drives the OpenCV
+// PollKey() must be called once per main loop iteration - it drives the OpenCV
 // window event system for ALL windows.
 // =============================================================================
 
@@ -105,10 +105,29 @@ public:
                       const AromBoundary &boundary);
 
     /**
+     * @brief Cache the Cal2 (stiffness) recording state for the calibration
+     *        angle overlay in the controller panel.
+     * @param recording  True while CAL_STI is actively running headings
+     * @param headingIdx Index into CONSTANT_CALIBRATION_ANGLES_DEG for the
+     *                    heading currently being measured (Cal2Handler::GetCurrentHeadingIndex)
+     */
+    void SetCal2State(bool recording, int headingIdx);
+
+    /**
+     * @brief Cache the FITTS target circle - the active tag center offset
+     *        "under" by the Cal3 Y offset (or the default before Cal3 is
+     *        complete) - for the operator display overlay.
+     * @param visible  True while an active target marker is being tracked
+     * @param centerPx Circle center in operator camera pixels
+     * @param radiusPx Circle radius in pixels
+     */
+    void SetTargetCircle(bool visible, cv::Point2i centerPx, int radiusPx, cv::Scalar color);
+
+    /**
      * @brief Show/hide the gesture indicator on the Virtual Fingertip Mapping
-     *        plot — a green arrow for FLICK_UP/FLICK_DOWN, a green ring for
+     *        plot - a green arrow for FLICK_UP/FLICK_DOWN, a green ring for
      *        CONFIRM. Call every frame with GestureHandler::IsIndicatorActive()
-     *        and GestureHandler::GetLastGesture() — the indicator disappears
+     *        and GestureHandler::GetLastGesture() - the indicator disappears
      *        once active goes false (cooldownSecs / circleCooldownSecs after
      *        the gesture fired).
      */
@@ -120,6 +139,16 @@ public:
      *        FITTS mode with Cal3 complete; call with visible=false otherwise.
      */
     void SetVirtualFingertip(bool visible, cv::Point2i px = {});
+
+    /**
+     * @brief Set the frozen fingertip-at-touch marker for the operator display.
+     *        Call with visible=true and the virtual fingertip pixel position
+     *        recorded at the moment of a touchscreen contact in FITTS mode;
+     *        the marker persists until the next target is selected
+     *        (FittsTaskHandler::OnNewTarget), at which point call with
+     *        visible=false.
+     */
+    void SetTouchFingertip(bool visible, cv::Point2i px = {});
 
     /** @brief Cache the latest controller telemetry for the controller panel. */
     void SetControllerTelemetry(const ControllerTelemetry &tele);
@@ -203,10 +232,23 @@ private:
     bool        virtualFingertipVisible_ = false;
     cv::Point2i virtualFingertipPx_      = {};
 
+    bool        touchFingertipVisible_ = false;
+    cv::Point2i touchFingertipPx_      = {};
+
     // Cal1 (AROM) state (updated via SetCal1State)
     bool                      cal1Recording_ = false;
     std::vector<cv::Point2f> cal1Samples_    = {};
     AromBoundary              cal1Boundary_  = {};
+
+    // Cal2 (stiffness) state (updated via SetCal2State)
+    bool cal2Recording_  = false;
+    int  cal2HeadingIdx_ = -1;
+
+    // FITTS target circle (updated via SetTargetCircle)
+    bool        targetCircleVisible_  = false;
+    cv::Point2i targetCircleCenterPx_ = {};
+    int         targetCircleRadiusPx_ = 0;
+    cv::Scalar  targetCircleColor_    = Colors::RedMd;  // red once Cal3 complete, gray before
 
     // Flick gesture indicator (updated via SetGestureIndicator)
     bool         gestureIndicatorActive_ = false;
@@ -230,7 +272,7 @@ private:
     double freqWindowStart_ = 0.0;
     float  measuredFreqHz_  = 0.0f;
 
-    // Panel update throttle — telemetry and controller panels refresh at 10 Hz
+    // Panel update throttle - telemetry and controller panels refresh at 10 Hz
     double lastPanelUpdateTime_ = 0.0;
 
     static constexpr const char *WIN_OPERATOR   = "NURing Operator";

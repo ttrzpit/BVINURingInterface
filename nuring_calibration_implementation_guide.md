@@ -1,4 +1,4 @@
-# NURing Calibration & Controller Pipeline — Implementation Reference
+# NURing Calibration & Controller Pipeline - Implementation Reference
 
 This document describes the three-stage per-participant calibration procedure and
 the corrected controller pipeline for the NURing device. Use this as the
@@ -88,11 +88,19 @@ into the desired position for the controller.
 Before calibration or guidance, the system must establish absolute encoder
 references for accurate spool-corrected radius computation.
 
+Motor encoders are zeroed exactly once, by the Teensy at boot
+(`T_AmplifierClass::Begin()` -> `ZeroEncoders()`), with all tendons fully
+unspooled (bare pulley, no tendon wound) - this is the absolute zero used by
+`q_abs = 0` throughout. Re-zeroing at runtime is intentionally not done: it
+would shift the amplifier's internal cogging-compensation table out of
+alignment with the motor's commutation reference, and cogging would return.
+
 ### Procedure
-1. Command all motors to fully release tendons (unspool completely)
-2. Zero all three motor encoders → this is the absolute zero (bare pulley, no tendon wound)
-3. Command pretensioning to take up tendon slack and seat the ring
-4. Once the participant's finger is in the neutral home pose (index finger extended),
+1. Before powering on the Teensy/amplifiers, command/manually unspool all
+   motors to fully release tendons (bare pulley, no tendon wound) - this is
+   the state the boot-time encoder zero is referenced to.
+2. Command pretensioning to take up tendon slack and seat the ring
+3. Once the participant's finger is in the neutral home pose (index finger extended),
    record each motor's absolute encoder position as `q_home_i`
 
 ### Why This Matters
@@ -214,7 +222,7 @@ against camera ground truth.
 **Decompose camera motion:**
 - The rotation component R represents finger deflection about the MCP joint
 - The translation component t represents hand/wrist drift
-- These fall out directly from solvePnP — no separate decomposition step needed
+- These fall out directly from solvePnP - no separate decomposition step needed
 
 **Compute stiffness K(θ):**
 - For each calibration angle θ, apply a least-squares linear fit to the
@@ -259,7 +267,7 @@ not the camera.
 
 ### Procedure
 1. Participant is asked to press their fingertip firmly against the touchscreen
-   10 times at various positions (they can touch anywhere — no visual targeting
+   10 times at various positions (they can touch anywhere - no visual targeting
    needed, important for BVI participants)
 2. At each stable contact (sustained touch for 200-300 ms), the system
    simultaneously records:
@@ -298,7 +306,7 @@ e = p_t − p_f
 
 The roll correction is necessary because the hand's roll can vary over a ~70°
 range during reaching. At 20 mm offset and 35° roll, uncompensated lateral error
-would be ~11 mm — comparable to the guidance accuracy from prior studies.
+would be ~11 mm - comparable to the guidance accuracy from prior studies.
 
 ### Cross-Validation
 The touchscreen contact point can be compared against the camera-predicted
@@ -337,7 +345,7 @@ The full corrected pipeline, running at 1000 Hz on the Teensy:
 Projected gradient descent solving: min_T 0.5‖WT − F‖² s.t. T_min ≤ T_i ≤ T_max
 
 1. If force is near-zero, return preload tensions
-2. Initialize from previous cycle's solution (do NOT add preload — it's already
+2. Initialize from previous cycle's solution (do NOT add preload - it's already
    included from prior convergence). First-cycle fallback: initialize to preload.
 3. For 5 iterations:
    - Compute residual: r = W×T − F
@@ -374,7 +382,7 @@ where:
 - z = depth from camera to target (from solvePnP translation Z component)
 - z_min = ~40 mm (closest reliable ArUco tracking distance)
 - z_taper = ~150 mm (distance where tapering begins)
-- G_floor = ~0.2 (minimum gain, not zero — maintain some guidance)
+- G_floor = ~0.2 (minimum gain, not zero - maintain some guidance)
 
 Applied to the error before the PID controller:
 ```
@@ -393,12 +401,12 @@ e = G(z) × (p_t − p_f)
 
 | # | Location | Bug | Fix | Impact on Prior Studies |
 |---|----------|-----|-----|----------------------|
-| 1 | Controller.cpp line 508 | D-term uses measuredVel2f_.x for both Fx and Fy | Use .y for Fy | None — K_d was zero |
-| 2 | Controller.cpp line 629 | Fy zeroed when |Fx| > 1.5×|Fy| (±34° dead band) | Remove; replace with K(θ) from stiffness calibration | Active during studies — affected force at near-horizontal headings |
-| 3 | Controller.cpp line 636 | Preload added to previous tensions every cycle (double-counting) | Initialize from prior solution; preload as lower bound only | Masked by fMax clamping — biased solver starting point |
+| 1 | Controller.cpp line 508 | D-term uses measuredVel2f_.x for both Fx and Fy | Use .y for Fy | None - K_d was zero |
+| 2 | Controller.cpp line 629 | Fy zeroed when |Fx| > 1.5×|Fy| (±34° dead band) | Remove; replace with K(θ) from stiffness calibration | Active during studies - affected force at near-horizontal headings |
+| 3 | Controller.cpp line 636 | Preload added to previous tensions every cycle (double-counting) | Initialize from prior solution; preload as lower bound only | Masked by fMax clamping - biased solver starting point |
 | 4 | Controller.cpp line 690 | Tension→current uses constant bare pulley radius | Use per-motor spool-corrected r_eff_i | Commanded ~half the needed current; controller compensated but telemetry values are wrong |
 | 5 | MapPositionToForce | No force magnitude saturation before solver | Add clamp to F_max | Solver could be asked for infeasible forces, biasing output direction |
-| 6 | MapPositionToForce | Integrator clamp at ±2×fMax (arbitrary) | Clamp based on K_i contribution budget | Minor — could allow integrator windup |
+| 6 | MapPositionToForce | Integrator clamp at ±2×fMax (arbitrary) | Clamp based on K_i contribution budget | Minor - could allow integrator windup |
 | 7 | Globals.h line 72 | Pulley radius = 0.003 m (3 mm), comment says "6mm diameter" | Correct to 0.0025 m (2.5 mm), "5mm diameter" | Scale error in virtual mapping (absorbed by proportional controller) |
 | 8 | Virtual mapping | Constant pulley radius ignores spool-up | Integral formula with per-motor q_home | ~2× scale error after pretensioning (absorbed by proportional controller) |
 

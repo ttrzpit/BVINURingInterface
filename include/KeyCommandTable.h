@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// KeyCommandTable.h — Data tables for KeyboardHandler's single-key FSM
+// KeyCommandTable.h - Data tables for KeyboardHandler's single-key FSM
 //
 // Mirrors keyboard_reference.md 1:1, grouped by section. kKeyCommandTable
 // covers immediate single-keypress commands (requiredState == ANY means the
@@ -32,11 +32,11 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { {32}, InputState::ANY, InputState::IDLE, "Input cleared.", KeyAction::NONE },
     { {96}, InputState::ANY, InputState::IDLE, "System cleared, returning to IDLE state.", KeyAction::NONE },
 
-    // ---- ROBOT STATE LADDER -----------------------------------------------------
+    // ---- GUIDANCE OUTPUT TOGGLE ---------------------------------------------------
     // 'e'/'E' work regardless of the current InputState; the real outcome text
     // is set via SetExternalStatus() by main.cpp once it is known.
-    { {'e'}, InputState::ANY, InputState::SAME, "Returning to IDLE.",    KeyAction::SET_ROBOT_IDLE },
-    { {'E'}, InputState::ANY, InputState::SAME, "Requesting READY...",   KeyAction::SET_ROBOT_READY },
+    { {'e'}, InputState::ANY, InputState::SAME, "Disabling guidance output...", KeyAction::SET_ROBOT_IDLE },
+    { {'E'}, InputState::ANY, InputState::SAME, "Enabling guidance output...",  KeyAction::SET_ROBOT_READY },
 
     // ---- STIFFNESS GAIN TOGGLE ---------------------------------------------------
     // 'k' works regardless of the current InputState; the real outcome text
@@ -65,7 +65,7 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     // main.cpp once the actual connect/disconnect result is known.
     { {'S'}, InputState::ANY, InputState::SAME, "Toggling serial connection...", KeyAction::TOGGLE_SERIAL },
 
-    // ---- ACCURACY (Task 1 — Fitts) ---------------------------------------------
+    // ---- ACCURACY (Task 1 - Fitts) ---------------------------------------------
     { {'F'},   InputState::IDLE,    InputState::FIT_SEL, "Select marker mode: [r] Random, [m] Manual...", KeyAction::NONE },
     { {'m'},   InputState::FIT_SEL, InputState::FIT_ACT, "Which marker (1-45)...", KeyAction::NONE },
     { {'m'},   InputState::FIT_RUN, InputState::FIT_ACT, "Which marker (1-45)...", KeyAction::NONE },
@@ -87,13 +87,13 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { {'p'},    InputState::TEN_MENU,    InputState::PRE_TENSION, "", KeyAction::NONE },
     { {13, 10}, InputState::PRE_TENSION, InputState::SAME,        "", KeyAction::PRETENSION_ADVANCE },
 
-    // Step 3/4 — select a motor to adjust its preload tension setpoint [N]
+    // Step 3/4 - select a motor to adjust its preload tension setpoint [N]
     { {'a', 185}, InputState::PRE_TENSION, InputState::TEN_SEL_A,   "", KeyAction::NONE },
     { {'b', 183}, InputState::PRE_TENSION, InputState::TEN_SEL_B,   "", KeyAction::NONE },
     { {'c', 178}, InputState::PRE_TENSION, InputState::TEN_SEL_C,   "", KeyAction::NONE },
     { {'d', 181}, InputState::PRE_TENSION, InputState::TEN_SEL_ALL, "", KeyAction::NONE },
 
-    // Step 3/4 — re-select a different motor while one is already selected
+    // Step 3/4 - re-select a different motor while one is already selected
     { {'a', 185}, InputState::TEN_SEL_B,   InputState::TEN_SEL_A,   "", KeyAction::NONE },
     { {'a', 185}, InputState::TEN_SEL_C,   InputState::TEN_SEL_A,   "", KeyAction::NONE },
     { {'a', 185}, InputState::TEN_SEL_ALL, InputState::TEN_SEL_A,   "", KeyAction::NONE },
@@ -107,7 +107,7 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { {'d', 181}, InputState::TEN_SEL_B,   InputState::TEN_SEL_ALL, "", KeyAction::NONE },
     { {'d', 181}, InputState::TEN_SEL_C,   InputState::TEN_SEL_ALL, "", KeyAction::NONE },
 
-    // Step 3/4 — +/- nudge the selected motor's tension setpoint by 0.1 N
+    // Step 3/4 - +/- nudge the selected motor's tension setpoint by 0.1 N
     { {61, 171}, InputState::TEN_SEL_A,   InputState::SAME, "", KeyAction::ADJUST_TENSION_INC },
     { {61, 171}, InputState::TEN_SEL_B,   InputState::SAME, "", KeyAction::ADJUST_TENSION_INC },
     { {61, 171}, InputState::TEN_SEL_C,   InputState::SAME, "", KeyAction::ADJUST_TENSION_INC },
@@ -117,7 +117,7 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { {45, 173}, InputState::TEN_SEL_C,   InputState::SAME, "", KeyAction::ADJUST_TENSION_DEC },
     { {45, 173}, InputState::TEN_SEL_ALL, InputState::SAME, "", KeyAction::ADJUST_TENSION_DEC },
 
-    // Step 3/4 — Enter with no value typed advances TENSION->DONE
+    // Step 3/4 - Enter with no value typed advances TENSION->DONE
     { {13, 10}, InputState::TEN_SEL_A,   InputState::SAME, "", KeyAction::PRETENSION_ADVANCE },
     { {13, 10}, InputState::TEN_SEL_B,   InputState::SAME, "", KeyAction::PRETENSION_ADVANCE },
     { {13, 10}, InputState::TEN_SEL_C,   InputState::SAME, "", KeyAction::PRETENSION_ADVANCE },
@@ -155,11 +155,20 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { {45, 173}, InputState::TEN_ADJ_C,   InputState::SAME, "", KeyAction::ADJUST_TENSION_DEC },
     { {45, 173}, InputState::TEN_ADJ_ALL, InputState::SAME, "", KeyAction::ADJUST_TENSION_DEC },
 
-    // ---- GAIN TUNING (direction-dependent kP boost) -----------------------------
+    // ---- GAIN TUNING (custom-tuned proportional gain) ---------------------------
     // 'G' enters gain tuning: [+/-] nudges the selected motor's gainTune_X by
-    // 0.1, an extra K(theta)-style boost added to kP_effective (Stage 1) on
-    // top of K(theta)/gain_kP. [a/b/c/d] pick which motor's direction the
-    // boost applies to ('d' = all three at once).
+    // 0.1. gainTune_X is the custom-tuned proportional gain (seeded from
+    // gain_kP), one of the two terms - with K(theta) - that form kP_effective
+    // (Stage 1). [a/b/c/d] pick which motor's direction the adjustment applies
+    // to ('d' = all three at once). Pressing 'G' again exits gain tuning and
+    // resumes whatever task (FITTS, CAL_STI, ...) was active before - these
+    // rows must come before the ANY row below so they win while already in a
+    // GAIN_* state.
+    { {'G'}, InputState::GAIN_ALL, InputState::SAME, "Gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { {'G'}, InputState::GAIN_A,   InputState::SAME, "Gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { {'G'}, InputState::GAIN_B,   InputState::SAME, "Gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { {'G'}, InputState::GAIN_C,   InputState::SAME, "Gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+
     { {'G'}, InputState::ANY, InputState::GAIN_ALL,
       "Gain tuning: [+/-] adjust all motors, or [a/b/c/d] select a motor.",
       KeyAction::NONE },
@@ -205,25 +214,25 @@ struct NumericEntryFormat {
 };
 
 inline const std::vector<NumericEntryFormat> kNumericEntryTable = {
-    // LOGGING — nnn (000-999) -> user ID
+    // LOGGING - nnn (000-999) -> user ID
     { InputState::LOG_UID, 3, false, 0, 999, InputState::LOG, KeyAction::SET_USER_ID, "User ID set to [VAL]." },
 
-    // PWM_TEST — nnnn (0000-2047) -> motor PWM, 1 s test pulse
+    // PWM_TEST - nnnn (0000-2047) -> motor PWM, 1 s test pulse
     { InputState::MOT_PWM_A,   4, false, 0, 2047, InputState::MOT_PWM, KeyAction::SET_MOTOR_PWM, "Sending test pulse to motor [MOTOR]." },
     { InputState::MOT_PWM_B,   4, false, 0, 2047, InputState::MOT_PWM, KeyAction::SET_MOTOR_PWM, "Sending test pulse to motor [MOTOR]." },
     { InputState::MOT_PWM_C,   4, false, 0, 2047, InputState::MOT_PWM, KeyAction::SET_MOTOR_PWM, "Sending test pulse to motor [MOTOR]." },
     { InputState::MOT_PWM_ALL, 4, false, 0, 2047, InputState::MOT_PWM, KeyAction::SET_MOTOR_PWM, "Sending test pulse to motor [MOTOR]." },
 
-    // ACCURACY — nn (00-45) -> Fitts target marker
+    // ACCURACY - nn (00-45) -> Fitts target marker
     { InputState::FIT_ACT, 2, false, 0, 45, InputState::FIT_RUN, KeyAction::SET_FITTS_TARGET, "Active marker set to [MARKER_ID]." },
 
-    // PRETENSION step 3/4 — n.n (0.0-10.0) -> tension setpoint [N] for [MOTOR]
+    // PRETENSION step 3/4 - n.n (0.0-10.0) -> tension setpoint [N] for [MOTOR]
     { InputState::TEN_SEL_A,   3, true, 0, 100, InputState::SAME, KeyAction::SET_TENSION, "" },
     { InputState::TEN_SEL_B,   3, true, 0, 100, InputState::SAME, KeyAction::SET_TENSION, "" },
     { InputState::TEN_SEL_C,   3, true, 0, 100, InputState::SAME, KeyAction::SET_TENSION, "" },
     { InputState::TEN_SEL_ALL, 3, true, 0, 100, InputState::SAME, KeyAction::SET_TENSION, "" },
 
-    // TENSION_ADJUST (standalone) — n.n (0.0-10.0) -> tension setpoint [N] for [MOTOR]
+    // TENSION_ADJUST (standalone) - n.n (0.0-10.0) -> tension setpoint [N] for [MOTOR]
     { InputState::TEN_ADJ_A,   3, true, 0, 100, InputState::SAME, KeyAction::SET_TENSION, "" },
     { InputState::TEN_ADJ_B,   3, true, 0, 100, InputState::SAME, KeyAction::SET_TENSION, "" },
     { InputState::TEN_ADJ_C,   3, true, 0, 100, InputState::SAME, KeyAction::SET_TENSION, "" },

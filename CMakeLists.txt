@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Release build by default — enables compiler optimizations important for 90 Hz loop
+# Release build by default - enables compiler optimizations important for 90 Hz loop
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
@@ -27,7 +27,7 @@ include_directories(
 
 # ---- Source files ------------------------------------------------------------
 
-# Automatically picks up all .cpp files in src/ — add new handlers there
+# Automatically picks up all .cpp files in src/ - add new handlers there
 file(GLOB SRC_FILES "src/*.cpp")
 
 add_executable(BVINURingInterface main.cpp ${SRC_FILES})
@@ -41,12 +41,17 @@ target_link_libraries(BVINURingInterface PRIVATE
     Threads::Threads     # pthreads (std::thread)
 )
 
+# DisplayHandler.cpp triggers a GCC 13 internal compiler error in the ud_dce
+# RTL pass at -O3 due to the large PopulateControllerPanel() function. -O2
+# avoids the ICE with no meaningful performance impact (this is GUI/drawing code).
+set_source_files_properties(src/DisplayHandler.cpp PROPERTIES COMPILE_FLAGS "-O2")
+
 # ---- Runtime resources -------------------------------------------------------
 
 # Symlink config.yaml into the build directory so the binary finds it whether
 # it is launched from the build directory or the project root.
 # A symlink (not a copy) means edits to the source config.yaml take effect
-# immediately — no rebuild needed.
+# immediately - no rebuild needed.
 add_custom_command(
     TARGET BVINURingInterface POST_BUILD
     COMMAND ln -sf ${CMAKE_SOURCE_DIR}/config.yaml ${CMAKE_BINARY_DIR}/config.yaml

@@ -17,7 +17,7 @@ Rank 3 = Lowest priority
 [ ]      | 3    | Cal1Handler        | Implement "soft centering": if fingertip has stationary for X seconds, set that as new virtual fingertip zero
 ---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
 [X]      | 1    | Cal2Handler        | Implement calibration 2 handler (finger deflection stiffness)
-[ ]      | 1    | Cal2Handler        | Display polygon of stiffness based on normalized stiffness value
+[X]      | 1    | Cal2Handler        | Display polygon of stiffness based on normalized stiffness value
 [ ]      | 2    | Cal2Handler        | Implement camera-based ground truth for virtual XY estimation
 ---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
 [X]      | 1    | Cal3Handler        | Implement fingertip-to-camera offset calibration measurement

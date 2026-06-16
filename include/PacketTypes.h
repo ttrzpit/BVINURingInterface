@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// PacketTypes.h — Shared binary packet definitions for PC ↔ Teensy serial link
+// PacketTypes.h - Shared binary packet definitions for PC ↔ Teensy serial link
 //
 // Single full-duplex USB CDC port (/dev/ttyACM0).
 // Frame format for both directions:
@@ -30,8 +30,7 @@ namespace PcState {
     static constexpr uint8_t CAL2        = '3';
     static constexpr uint8_t CAL3        = '3';
     static constexpr uint8_t FITTS       = 'F';
-    static constexpr uint8_t ZERO_ENC    = 'Z';  ///< One-shot: zero motor encoders (pretensioning)
-    static constexpr uint8_t READY       = 'R';  ///< RobotState::READY/GUIDING — preload tension held
+    static constexpr uint8_t READY       = 'R';  ///< RobotState::READY/GUIDING - preload tension held
 }
 
 // ---- Robot state ladder -----------------------------------------------------
@@ -39,10 +38,10 @@ namespace PcState {
 // each loop in main.cpp and used to drive PWM output policy and the
 // telemetry display.
 enum class RobotState {
-    DISCONNECTED,  ///< No serial connection — no PWM values sent
+    DISCONNECTED,  ///< No serial connection - no PWM values sent
     IDLE,          ///< Connected, PWM = 2047 (no output)
     READY,         ///< Connected, preload tension held (tensioning component only)
-    GUIDING        ///< Guidance enabled — full controller output [NOT YET IMPLEMENTED]
+    GUIDING        ///< Guidance enabled - full controller output [NOT YET IMPLEMENTED]
 };
 
 // ---- PC → Teensy (8 bytes payload) ------------------------------------------

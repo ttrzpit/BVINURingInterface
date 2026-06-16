@@ -1,21 +1,23 @@
 #pragma once
 
 // =============================================================================
-// ArucoHandler.h — ArUco marker detection (threaded) and touchscreen grid
+// ArucoHandler.h - ArUco marker detection (threaded) and touchscreen grid
 //
 // Detection runs on a dedicated background thread so the main loop never
-// blocks waiting for the OpenCV detector. The result is at most one frame
-// stale (~11 ms at 88 Hz), which is imperceptible for a guidance system.
+// blocks waiting for the OpenCV detector. Detection can take longer than one
+// camera frame period, so the result may be a few frames stale - main.cpp
+// pairs the displayed frame with GetLatestDetectionTimestamp() so the
+// overlay never drifts relative to the image underneath.
 //
 // Usage:
-//   aruco.Start();                         // launch detection thread once
+//   aruco.Start();                              // launch detection thread once
 //   // each main loop iteration:
-//   aruco.SubmitFrame(frame.gray);         // non-blocking, hands off frame
-//   auto markers = aruco.GetLatestDetection(); // non-blocking, reads last result
-//   aruco.Stop();                          // join thread on shutdown
+//   aruco.SubmitFrame(frame.gray, frame.timestamp); // non-blocking, hands off frame
+//   auto markers = aruco.GetLatestDetection();  // non-blocking, reads last result
+//   aruco.Stop();                               // join thread on shutdown
 //
 // Display functions (showMarkerGrid, updateGridConfig) remain on the main
-// thread — they must not be called from the detection thread.
+// thread - they must not be called from the detection thread.
 // =============================================================================
 
 #include <array>
@@ -73,10 +75,13 @@ public:
 
     /**
      * @brief Submit a new grayscale frame for detection. Non-blocking.
-     *        If a previous frame is still being processed, it is replaced —
+     *        If a previous frame is still being processed, it is replaced -
      *        the detector always works on the most recent frame.
+     * @param grayFrame  Grayscale frame to detect markers in
+     * @param timestamp  Capture timestamp of this frame (CameraFrame::timestamp) -
+     *                    echoed back by GetLatestDetectionTimestamp() for lag diagnostics.
      */
-    void SubmitFrame(const cv::Mat& grayFrame);
+    void SubmitFrame(const cv::Mat& grayFrame, double timestamp);
 
     /**
      * @brief Return the most recently completed detection result. Non-blocking.
@@ -84,18 +89,23 @@ public:
      */
     std::vector<DetectedMarker> GetLatestDetection();
 
+    /** @brief Capture timestamp (CameraFrame::timestamp) of the frame that
+     *         produced the latest detection result - used to pair the
+     *         displayed frame with the marker overlay (see main.cpp). */
+    double GetLatestDetectionTimestamp() const { return resultTimestamp_.load(); }
+
     // ---- Touchscreen display (main thread only) -----------------------------
 
     /**
      * @brief Show or hide the ArUco marker grid on the touchscreen.
      *        Showing opens and fullscreens the window; hiding destroys it.
-     *        Idempotent — safe to call repeatedly with the same value.
+     *        Idempotent - safe to call repeatedly with the same value.
      */
     void SetGridVisible(bool visible);
 
     /**
      * @brief Open the touchscreen window and show a blank white screen.
-     *        Used for the Fitts task start state — participant sees a clean
+     *        Used for the Fitts task start state - participant sees a clean
      *        white display until the first target marker is selected via 'r'.
      *        No-op if the window is already open (just redraws white).
      */
@@ -122,6 +132,28 @@ public:
     void SetFittsOverlay(bool visible, cv::Point2i touchPx,
                          const std::string& line1, const std::string& line2);
 
+    /**
+     * @brief Draw (or clear) the Fitts target-offset circle: a hollow circle
+     *        marking the calibrated touch target location (marker center +
+     *        Cal3 camera-to-fingertip offset), or the default "under the tag"
+     *        offset before Cal3 completes. Persists on top of the current
+     *        Fitts target image until cleared or a new target is shown
+     *        (ShowSingleMarker()/ShowBlankTouchscreen()).
+     * @param visible  Draw the circle
+     * @param centerPx Circle center in touchscreen-local pixels
+     * @param radiusPx Circle radius in touchscreen-local pixels
+     * @param color    Circle outline color (e.g. Colors::RedMd once Cal3 is
+     *                  complete, Colors::GraMd for the uncalibrated default)
+     */
+    void SetTargetOffsetCircle(bool visible, cv::Point2i centerPx, int radiusPx, cv::Scalar color);
+
+    /**
+     * @brief Pixel-space center of the Fitts grid cell for marker `id`
+     *        (1-based, left-to-right top-to-bottom), in touchscreen-local
+     *        pixels. Returns {0,0} for id < 1.
+     */
+    cv::Point2i GetGridMarkerCenterPx(int id) const;
+
     void updateGridConfig(int cols, int rows, float markerSizeMm, float paddingMm);
 
     /**
@@ -129,7 +161,7 @@ public:
      *        Layout is auto-calculated from ArucoCalibrationGridConfig:
      *        markers are packed with fixed markerPadMm spacing inside the
      *        markerExclusionMm boundary. Uses DICT_4X4_250 (IDs start at 0).
-     *        Idempotent — safe to call repeatedly with the same value.
+     *        Idempotent - safe to call repeatedly with the same value.
      */
     void SetCalibrationGridVisible(bool visible);
 
@@ -137,7 +169,7 @@ public:
      * @brief Switch the detection dictionary and valid ID range.
      *        true  → DICT_4X4_250, IDs 0–249 (Cal3 calibration grid)
      *        false → DICT_4X4_50,  IDs from aruco_marker config (default)
-     *        Thread-safe — takes effect on the next detection cycle.
+     *        Thread-safe - takes effect on the next detection cycle.
      */
     void SetCalibrationDetection(bool calibration);
 
@@ -158,6 +190,11 @@ private:
     cv::Point2i gridCellOrigin(int col, int row) const;
     void        renderCalibrationGridImage();
 
+    /** @brief Redraw singleMarkerImage_ with the target-offset circle (if
+     *         visible) and the Fitts touch overlay (if visible), then
+     *         cv::imshow(). Called by SetTargetOffsetCircle()/SetFittsOverlay(). */
+    void        RedrawTouchscreenOverlay();
+
     // ---- Configuration ------------------------------------------------------
     ArucoMarkerConfig          detectCfg_;
     ArucoDetectorConfig        detectorCfg_;
@@ -168,12 +205,12 @@ private:
     cv::Mat                    distCoeffs_;
 
     // ---- OpenCV detector ----------------------------------------------------
-    cv::aruco::Dictionary         dictionary_;       // DICT_4X4_50  — Fitts / default
+    cv::aruco::Dictionary         dictionary_;       // DICT_4X4_50  - Fitts / default
     cv::aruco::DetectorParameters detectorParams_;
     cv::aruco::ArucoDetector      detector_;         // built from dictionary_
     cv::aruco::ArucoDetector      calDetector_;      // built from calGridDictionary_ (DICT_4X4_250)
 
-    // Active detection mode — written from main thread, read from detect thread.
+    // Active detection mode - written from main thread, read from detect thread.
     // Atomics avoid the need for a mutex in the RunDetection() hot path.
     std::atomic<bool> useCalDetector_{ false };
     std::atomic<int>  activeValidIdMin_{ 0 };
@@ -186,12 +223,18 @@ private:
     bool    calGridVisible_ = false;   // Calibration grid open/closed state
     cv::Size calGridSize_   = {};      // Auto-calculated cols/rows for the calibration grid
 
-    // Fitts touch-sample overlay — drawn on top of singleMarkerImage_
+    // Fitts touch-sample overlay - drawn on top of singleMarkerImage_
     cv::Mat     singleMarkerImage_;        // BGR base image for the current Fitts target
     bool        fittsOverlayVisible_ = false;
     cv::Point2i fittsTouchPx_        = {};
     std::string fittsLine1_;
     std::string fittsLine2_;
+
+    // Fitts target-offset circle (hollow) - drawn on top of singleMarkerImage_
+    bool        targetCircleVisible_   = false;
+    cv::Point2i targetCirclePx_        = {};
+    int         targetCircleRadiusPx_  = 0;
+    cv::Scalar  targetCircleColor_     = { 0, 0, 255 };  // BGR, default red
 
     // Calibration grid uses a larger dictionary (DICT_4X4_250) so it can
     // accommodate more markers than the Fitts grid (DICT_4X4_50).
@@ -207,9 +250,14 @@ private:
     std::mutex              frameMutex_;
     std::condition_variable frameCv_;
     cv::Mat                 pendingFrame_;
+    double                  pendingTimestamp_ = 0.0;
     bool                    frameReady_ = false;
 
     // Output slot: detection thread writes here, main loop reads
     std::mutex                  resultMutex_;
     std::vector<DetectedMarker> latestResult_;
+
+    // Timestamp of the frame behind latestResult_ - written by the detection
+    // thread, read from the main thread, so a plain atomic (no mutex) suffices.
+    std::atomic<double> resultTimestamp_{0.0};
 };

@@ -662,7 +662,7 @@ void TasksClass::AutoGains() {
 	// === Auto Gain (Refined Threshold-Based) ===
 	// Called after each touch to adjust gains based on observed error
 
-	// Parameters — tune as needed
+	// Parameters - tune as needed
 	const float gainStepSmall  = 0.2f;
 	const float gainStepLarge  = 0.4f;
 	const float smallErrThresh = 10.0f;

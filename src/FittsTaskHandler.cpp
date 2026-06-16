@@ -23,14 +23,15 @@ void FittsTaskHandler::Reset() {
 }
 
 void FittsTaskHandler::OnNewTarget(int targetId) {
-    targetId_    = targetId;
-    sampleValid_ = false;
+    targetId_     = targetId;
+    sampleValid_  = false;
+    touchFtValid_ = false;
     errorLine1_.clear();
     errorLine2_.clear();
 }
 
 // =============================================================================
-// Private — multi-tag solvePnP (mirrors ArucoHandler::renderGridImage layout)
+// Private - multi-tag solvePnP (mirrors ArucoHandler::renderGridImage layout)
 // =============================================================================
 
 bool FittsTaskHandler::ComputeArucoPose(const std::vector<DetectedMarker>& markers,
@@ -95,7 +96,7 @@ cv::Point2i FittsTaskHandler::VirtualFingertipPx(const cv::Vec3d& rvec, const cv
     const double dx = cosR * d.x - sinR * d.y;
     const double dy = sinR * d.x + cosR * d.y;
 
-    // Depth of the ArUco plane from the camera (mm) — scales the mm offset to
+    // Depth of the ArUco plane from the camera (mm) - scales the mm offset to
     // pixels so the cursor sits on the same plane as the detected tags
     const double depth = tvec[2];
     const double dxPx = camCfg_.fx * dx / depth;
@@ -106,7 +107,7 @@ cv::Point2i FittsTaskHandler::VirtualFingertipPx(const cv::Vec3d& rvec, const cv
 }
 
 // =============================================================================
-// Update — called once per main loop iteration while in FITTS state
+// Update - called once per main loop iteration while in FITTS state
 // =============================================================================
 
 void FittsTaskHandler::Update(const std::vector<DetectedMarker>& markers,
@@ -117,7 +118,7 @@ void FittsTaskHandler::Update(const std::vector<DetectedMarker>& markers,
     cv::Vec3d rvec, tvec;
     bool havePose = ComputeArucoPose(markers, rvec, tvec) && tvec[2] > 1e-6;
 
-    // Live virtual fingertip cursor — updates every frame
+    // Live virtual fingertip cursor - updates every frame
     if (havePose && cal3Complete) {
         ftPx_    = VirtualFingertipPx(rvec, tvec, cal3Offset, cal3RollRef);
         ftValid_ = true;
@@ -125,14 +126,20 @@ void FittsTaskHandler::Update(const std::vector<DetectedMarker>& markers,
         ftValid_ = false;
     }
 
-    // Touch sample — recorded on the rising edge while a target is active
+    // Touch sample - recorded on the rising edge while a target is active
     bool isTouchedNow = touch.isTouched;
     if (isTouchedNow && !wasTouched_ && targetId_ > 0 && havePose) {
         const cv::Point2f targetPx = TargetCenterPx(rvec, tvec);
 
-        // Touch position is already in touchscreen-local pixels — drawn
+        // Touch position is already in touchscreen-local pixels - drawn
         // directly on the touchscreen display (ArucoHandler::SetFittsOverlay)
         touchScreenPx_ = touch.position;
+
+        // Freeze the virtual fingertip's current position - drawn as a
+        // persistent marker on the operator display (DisplayHandler) until
+        // the next target is selected.
+        touchFtPx_    = ftPx_;
+        touchFtValid_ = ftValid_;
 
         const double depth   = tvec[2];
         const double mmPerPx = depth / ((camCfg_.fx + camCfg_.fy) * 0.5);

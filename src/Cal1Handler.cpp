@@ -100,7 +100,7 @@ void Cal1Handler::ComputeBoundary() {
     // ---- 95th-percentile radius per bin (nearest-rank) -------------------------
     for (int i = 0; i < kAromBoundaryPoints; i++) {
         if (binRadii[i].empty()) {
-            boundary_.radius[i] = meanRadius;  // fallback — sector never traced
+            boundary_.radius[i] = meanRadius;  // fallback - sector never traced
             continue;
         }
         std::sort(binRadii[i].begin(), binRadii[i].end());

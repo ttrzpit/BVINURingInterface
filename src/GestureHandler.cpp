@@ -118,7 +118,7 @@ GestureEvent GestureHandler::Update(double nowSecs) {
 
     // ---- Flick (up/down) state machine --------------------------------------
     // armGateOk_ is latched when a new arm sequence starts, using
-    // motionDurationSecs_ as it stood at the end of the previous frame — i.e.
+    // motionDurationSecs_ as it stood at the end of the previous frame - i.e.
     // "the finger has only just started moving, this isn't a sustained motion
     // like a circle".
     switch (phase_) {
@@ -152,11 +152,11 @@ GestureEvent GestureHandler::Update(double nowSecs) {
             if (confirmed) {
                 if (pendingFlickSign_ == armSign_ &&
                     (nowSecs - pendingFlickTimeSecs_) <= cfg_.doubleFlickWindowSecs) {
-                    // Second same-direction raw flick within the window — register it.
+                    // Second same-direction raw flick within the window - register it.
                     result            = (armSign_ > 0) ? GestureEvent::FLICK_UP : GestureEvent::FLICK_DOWN;
                     pendingFlickSign_ = 0;
                 } else {
-                    // First raw flick of a potential double-flick — wait for the second.
+                    // First raw flick of a potential double-flick - wait for the second.
                     pendingFlickSign_     = armSign_;
                     pendingFlickTimeSecs_ = nowSecs;
                 }
@@ -181,7 +181,7 @@ GestureEvent GestureHandler::Update(double nowSecs) {
     }
 
     // ---- Confirm (circle) accumulator ----------------------------------------
-    // Dropping below restSpeedThreshMmS resets the accumulator — a real circle
+    // Dropping below restSpeedThreshMmS resets the accumulator - a real circle
     // is traced at a roughly continuous speed, so a pause means "not a circle".
     if (atRest) {
         ResetCircleAccumulator();

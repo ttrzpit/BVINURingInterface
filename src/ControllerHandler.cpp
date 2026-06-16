@@ -14,7 +14,7 @@
 
 ControllerHandler::ControllerHandler(const ControllerConfig& cfg)
     : cfg_(cfg)
-    , preload_A_(cfg.tension_min), preload_B_(cfg.tension_min), preload_C_(cfg.tension_min)
+    , preload_A_(cfg.tension_preload_min), preload_B_(cfg.tension_preload_min), preload_C_(cfg.tension_preload_min)
 {
     // ---- Precompute W_pinv = (W * W^T)^-1 * W --------------------------------
     // W (2x3): row 0 = x-components, row 1 = y-components of the tendon
@@ -42,7 +42,7 @@ ControllerHandler::ControllerHandler(const ControllerConfig& cfg)
 
 
 // =============================================================================
-// SetHomePosition — record current encoder positions as the neutral pose
+// SetHomePosition - record current encoder positions as the neutral pose
 // =============================================================================
 
 void ControllerHandler::SetHomePosition(const TeensyToPcPacket& rx) {
@@ -53,18 +53,16 @@ void ControllerHandler::SetHomePosition(const TeensyToPcPacket& rx) {
     q_home_C_ = static_cast<float>(rx.encoder_count_C) * CONSTANT_ENCODER_SIGN_C * countsToRad;
     homeSet_  = true;
 
-    // Restart PID/velocity/solver state so the first cycle after homing is clean.
-    integral_         = {};
-    pos_prev_         = {};
-    vel_filtered_     = {};
-    firstFrame_       = true;
-    solverFirstCycle_ = true;
-    tension_A_ = tension_B_ = tension_C_ = 0.0f;
+    // Restart PID/velocity state so the first cycle after homing is clean.
+    integral_     = {};
+    pos_prev_     = {};
+    vel_filtered_ = {};
+    firstFrame_   = true;
 }
 
 
 // =============================================================================
-// Update — full Stage 0-4 pipeline, one call per control cycle
+// Update - full Stage 0-4 pipeline, one call per control cycle
 // =============================================================================
 
 void ControllerHandler::Update(const TeensyToPcPacket& rx,
@@ -72,6 +70,8 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
                                 bool                    isTargetActive,
                                 double                  nowSecs,
                                 float                   dt) {
+
+    isTargetActive_ = isTargetActive;
 
     // ---- Stage 0: encoders -> q_abs -> r_eff -> dL -> virtual position -------
     const float countsToRad = CONSTANT_TWO_PI / static_cast<float>(cfg_.encoder_counts_per_rev);
@@ -106,7 +106,7 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
                      + CONSTANT_UNIT_VECTOR_B_Y * measuredTension_B
                      + CONSTANT_UNIT_VECTOR_C_Y * measuredTension_C;
 
-    // Velocity — low-pass filtered finite difference [mm/s]
+    // Velocity - low-pass filtered finite difference [mm/s]
     if (firstFrame_) {
         vel_filtered_ = {};
         firstFrame_   = false;
@@ -128,9 +128,22 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
     cv::Point2f pos_corrected = pos_virtual_;  // C(theta) correction is Phase 2+ [NOT YET IMPLEMENTED]
     cv::Point2f error = pos_target - pos_corrected;
     float errMag = std::sqrt(error.x * error.x + error.y * error.y);
+    float errorAngle = std::atan2(error.y, error.x);
+
+    // Live proportional gain: the custom-tuned gain (gainTune_A/B/C_, seeded
+    // from gain_kP and adjustable via 'G') plus K(theta) (Stage 2 stiffness
+    // calibration result, when valid and enabled). These are the only two
+    // proportional gain terms - there is no separate static baseline.
+    // stiffnessGainValue_ is K(theta) alone, kept independent of gainTune for
+    // telemetry (ControllerTelemetry::stiffnessGain).
+    stiffnessGainValue_ = stiffnessProfileValid_ ? InterpolateStiffness(errorAngle) : 0.0f;
+    kPEffective_ = InterpolateGainTune(errorAngle);
+    if (stiffnessProfileValid_ && stiffnessGainEnabled_) {
+        kPEffective_ += stiffnessGainValue_;
+    }
 
     if (calibrationForceMode_) {
-        // Stage 2 stiffness calibration — open-loop force command from
+        // Stage 2 stiffness calibration - open-loop force command from
         // SetCalibrationForce(), PID bypassed entirely.
         force_x_ = calForce_x_;
         force_y_ = calForce_y_;
@@ -142,7 +155,7 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
             force_y_ *= scale;
         }
     } else if (!isTargetActive || errMag < cfg_.position_tolerance) {
-        // Deadband / no active target — decay the integrator toward zero and
+        // Deadband / no active target - decay the integrator toward zero and
         // command zero force. Stage 2 falls back to preload tensions.
         integral_ *= 0.95f;
         force_x_ = 0.0f;
@@ -161,22 +174,10 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
             integral_ = {};
         }
 
-        // Direction-dependent stiffness gain (Stage 2 calibration result):
-        // K(theta) replaces gain_kP when valid and enabled.
-        float errorAngle   = std::atan2(error.y, error.x);
-        float kP_effective = cfg_.gain_kP;
-        if (stiffnessProfileValid_ && stiffnessGainEnabled_) {
-            kP_effective = InterpolateStiffness(errorAngle);
-        }
-
-        // 'G' gain tuning: extra direction-dependent boost on top of
-        // K(theta)/gain_kP, centered on each motor's direction.
-        kP_effective += InterpolateGainTune(errorAngle);
-
         // Bug #1 fix: D-term uses vel_filtered_.y for force_y_ (old code used
         // vel.x for both axes).
-        force_x_ = kP_effective * error.x - cfg_.gain_kD * vel_filtered_.x + cfg_.gain_kI * integral_.x;
-        force_y_ = kP_effective * error.y - cfg_.gain_kD * vel_filtered_.y + cfg_.gain_kI * integral_.y;
+        force_x_ = kPEffective_ * error.x - cfg_.gain_kD * vel_filtered_.x + cfg_.gain_kI * integral_.x;
+        force_y_ = kPEffective_ * error.y - cfg_.gain_kD * vel_filtered_.y + cfg_.gain_kI * integral_.y;
 
         // Bug #2 fix / item #9: the old code suppressed Fy entirely whenever
         // |Fx| > 1.5*|Fy| (a +-34 degree dead band around the X axis):
@@ -185,9 +186,9 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
         //       force_y_ = 0.0f;
         //   }
         //
-        // Removed — the principled replacement is the K(theta) direction-
-        // dependent gain from stiffness calibration (Phase 2+, [NOT YET
-        // IMPLEMENTED]), applied to gain_kP before this point.
+        // Removed - the principled replacement is the K(theta) direction-
+        // dependent gain from stiffness calibration, combined with gainTune
+        // into kPEffective_ before this point.
 
         // Ramp the force up after a new target is presented.
         force_x_ *= rampValue_;
@@ -202,11 +203,15 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
         }
     }
 
-    // ---- Stage 2: tension solver ----------------------------------------------
+    // ---- Stage 2: tension allocation (T_output = T_preload + T_deflection) ----
     // Bypassed during pretensioning step 3/4, where tension_A/B/C are set
     // directly by AdjustManualTension()/SetManualTension().
+    // When guidanceOutputEnabled_ is false ('e' pressed), feed (0,0) so Stage 2
+    // falls back to preload-only tensions (tension-only output, no guidance).
     if (!manualTensionMode_) {
-        SolveTensions(force_x_, force_y_);
+        float fx = guidanceOutputEnabled_ ? force_x_ : 0.0f;
+        float fy = guidanceOutputEnabled_ ? force_y_ : 0.0f;
+        ComputeTensionOutputs(fx, fy);
     }
 
     // ---- Stage 3: tension -> current (spool-corrected) -------------------------
@@ -259,33 +264,16 @@ ControllerTelemetry ControllerHandler::GetTelemetry() const {
                          static_cast<float>(CurrentToPwm(preloadCurrent_C)) };
     }
 
-    // Per-motor tension contribution from the guidance force command
-    // (force_x_, force_y_) — the minimum-norm solution of W*T_delta = F,
-    // i.e. T_delta = W_pinv_^T * F. Unlike `tension` (the clamped, warm-
-    // started solver output), this is a signed delta meant to be added to
-    // `preloadTension` to show where the commanded output comes from.
-    // Clamped to +/- deflection_force_max, same limit as force_x_/force_y_.
-    t.deflectionForce = { std::clamp(W_pinv_[0][0] * force_x_ + W_pinv_[1][0] * force_y_, -cfg_.deflection_force_max, cfg_.deflection_force_max),
-                           std::clamp(W_pinv_[0][1] * force_x_ + W_pinv_[1][1] * force_y_, -cfg_.deflection_force_max, cfg_.deflection_force_max),
-                           std::clamp(W_pinv_[0][2] * force_x_ + W_pinv_[1][2] * force_y_, -cfg_.deflection_force_max, cfg_.deflection_force_max) };
+    // T_deflection per motor (signed) - computed in Stage 2 (ComputeTensionOutputs).
+    t.deflectionForce = { tension_deflection_A_, tension_deflection_B_, tension_deflection_C_ };
 
-    // Output = preload + deflection, clamped to [tension_min, tension_max] —
-    // a tendon can never go slack or exceed its rated tension, regardless of
-    // how large the commanded deflection force is.
-    t.outputTension = { std::clamp(t.preloadTension.x + t.deflectionForce.x, cfg_.tension_min, cfg_.tension_max),
-                         std::clamp(t.preloadTension.y + t.deflectionForce.y, cfg_.tension_min, cfg_.tension_max),
-                         std::clamp(t.preloadTension.z + t.deflectionForce.z, cfg_.tension_min, cfg_.tension_max) };
-
-    // PWM corresponding to outputTension — routed through the same
-    // TensionToCurrent/CurrentToPwm pipeline as the live solver output, so
-    // it is always within [CONSTANT_PWM_MAX, CONSTANT_PWM_OFF] (never negative).
-    t.outputPwm = { static_cast<float>(CurrentToPwm(TensionToCurrent(t.outputTension.x, r_eff_A_))),
-                    static_cast<float>(CurrentToPwm(TensionToCurrent(t.outputTension.y, r_eff_B_))),
-                    static_cast<float>(CurrentToPwm(TensionToCurrent(t.outputTension.z, r_eff_C_))) };
+    // T_output per motor - identical to `tension`/`pwm` (Stage 2 result).
+    t.outputTension = t.tension;
+    t.outputPwm     = t.pwm;
 
     // PWM equivalent of |deflectionForce| via the same Tension->Current->PWM
     // pipeline as preloadPwm/outputPwm. A PWM register value can never be
-    // negative, so this reports magnitude only — direction is conveyed by
+    // negative, so this reports magnitude only - direction is conveyed by
     // deflectionForce's sign instead.
     t.deflectionForcePwm = { static_cast<float>(CurrentToPwm(TensionToCurrent(std::abs(t.deflectionForce.x), r_eff_A_))),
                              static_cast<float>(CurrentToPwm(TensionToCurrent(std::abs(t.deflectionForce.y), r_eff_B_))),
@@ -293,11 +281,14 @@ ControllerTelemetry ControllerHandler::GetTelemetry() const {
     t.homeSet          = homeSet_;
     t.outputEnabled    = outputEnabled_;
     t.manualTensionMode = manualTensionMode_;
+    t.guidanceOutputEnabled = guidanceOutputEnabled_;
+    t.isTargetActive   = isTargetActive_;
 
     t.measuredForce        = GetMeasuredForce();
     t.stiffnessProfile     = stiffness_profile_;
     t.stiffnessValid       = stiffnessProfileValid_;
     t.stiffnessGainEnabled = stiffnessGainEnabled_;
+    t.stiffnessGain        = stiffnessGainValue_;
     t.gainTune             = GetGainTune();
     return t;
 }
@@ -310,7 +301,7 @@ ControllerTelemetry ControllerHandler::GetTelemetry() const {
 float ControllerHandler::ComputeEffectiveRadius(float q_abs) const {
     // Bug #7/#8 fix: spool-corrected radius, r_eff = r_p + (t / 2*pi) * q_abs
     // q_abs <= 0 means "fully unspooled" (zero or negative wraps), which is
-    // not physically possible — clamp to the bare-pulley radius r_p.
+    // not physically possible - clamp to the bare-pulley radius r_p.
     return CONSTANT_MOTOR_PULLEY_RADIUS
          + (CONSTANT_TENDON_THICKNESS / CONSTANT_TWO_PI) * std::max(q_abs, 0.0f);
 }
@@ -336,7 +327,7 @@ cv::Point2f ControllerHandler::ComputeVirtualPosition(float dL_A, float dL_B, fl
 
 
 // =============================================================================
-// Stage 1: stiffness profile K(theta) — periodic linear interpolation
+// Stage 1: stiffness profile K(theta) - periodic linear interpolation
 // =============================================================================
 
 float ControllerHandler::InterpolateStiffness(float thetaRad) const {
@@ -362,7 +353,7 @@ float ControllerHandler::InterpolateStiffness(float thetaRad) const {
 
 
 // =============================================================================
-// Stage 1: gain tuning boost — periodic linear interpolation over the three
+// Stage 1: gain tuning boost - periodic linear interpolation over the three
 // motor angles (35deg/145deg/270deg), mirroring InterpolateStiffness above.
 // =============================================================================
 
@@ -413,7 +404,7 @@ void ControllerHandler::AdjustGainTune(char motor, float deltaGain) {
 std::string ControllerHandler::GetGainTuneStatus() const {
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(2);
-    ss << "Gain tune (added to kP_effective): A=" << gainTune_A_
+    ss << "Gain tune (custom kP, combined with K(theta) for kP_effective): A=" << gainTune_A_
        << "  B=" << gainTune_B_ << "  C=" << gainTune_C_
        << " -- [a/b/c/d] select motor, +/- = +/-0.1. Press [grave] to exit.";
     return ss.str();
@@ -421,49 +412,21 @@ std::string ControllerHandler::GetGainTuneStatus() const {
 
 
 // =============================================================================
-// Stage 2: tension solver — projected gradient descent
-//   min_T  0.5 * ||W*T - F||^2   s.t.  tension_min <= T_i <= tension_max
+// Stage 2: tension allocation - closed-form preload + deflection decomposition
+//   T_deflection_i = clamp((W_pinv^T * F)_i, -T_deflection_max, T_deflection_max)
+//   T_output_i     = clamp(T_preload_i + T_deflection_i, T_preload_i, T_output_max)
 // =============================================================================
 
-void ControllerHandler::SolveTensions(float force_x, float force_y) {
-    float fMag = std::sqrt(force_x * force_x + force_y * force_y);
+void ControllerHandler::ComputeTensionOutputs(float force_x, float force_y) {
+    tension_deflection_A_ = std::clamp(W_pinv_[0][0] * force_x + W_pinv_[1][0] * force_y, -cfg_.tension_deflection_max, cfg_.tension_deflection_max);
+    tension_deflection_B_ = std::clamp(W_pinv_[0][1] * force_x + W_pinv_[1][1] * force_y, -cfg_.tension_deflection_max, cfg_.tension_deflection_max);
+    tension_deflection_C_ = std::clamp(W_pinv_[0][2] * force_x + W_pinv_[1][2] * force_y, -cfg_.tension_deflection_max, cfg_.tension_deflection_max);
 
-    if (fMag < 1e-4f) {
-        // Near-zero force -> hold preload tension on all three tendons
-        tension_A_ = preload_A_;
-        tension_B_ = preload_B_;
-        tension_C_ = preload_C_;
-        solverFirstCycle_ = false;
-        return;
-    }
-
-    // Bug #3 fix: warm-start from the previous cycle's solution (not preload +
-    // previous, which double-counted the preload every cycle).
-    if (solverFirstCycle_) {
-        tension_A_ = preload_A_;
-        tension_B_ = preload_B_;
-        tension_C_ = preload_C_;
-        solverFirstCycle_ = false;
-    }
-
-    const float stepSize = 1.0f / 2.5f;  // 1 / ||W||^2 (gradient Lipschitz constant)
-
-    for (int iter = 0; iter < cfg_.tension_solver_iters; iter++) {
-        // Residual r = W*T - F
-        float rx = CONSTANT_UNIT_VECTOR_A_X * tension_A_ + CONSTANT_UNIT_VECTOR_B_X * tension_B_
-                 + CONSTANT_UNIT_VECTOR_C_X * tension_C_ - force_x;
-        float ry = CONSTANT_UNIT_VECTOR_A_Y * tension_A_ + CONSTANT_UNIT_VECTOR_B_Y * tension_B_
-                 + CONSTANT_UNIT_VECTOR_C_Y * tension_C_ - force_y;
-
-        // Gradient g = W^T * r
-        float gA = CONSTANT_UNIT_VECTOR_A_X * rx + CONSTANT_UNIT_VECTOR_A_Y * ry;
-        float gB = CONSTANT_UNIT_VECTOR_B_X * rx + CONSTANT_UNIT_VECTOR_B_Y * ry;
-        float gC = CONSTANT_UNIT_VECTOR_C_X * rx + CONSTANT_UNIT_VECTOR_C_Y * ry;
-
-        tension_A_ = std::clamp(tension_A_ - stepSize * gA, cfg_.tension_min, cfg_.tension_max);
-        tension_B_ = std::clamp(tension_B_ - stepSize * gB, cfg_.tension_min, cfg_.tension_max);
-        tension_C_ = std::clamp(tension_C_ - stepSize * gC, cfg_.tension_min, cfg_.tension_max);
-    }
+    // T_output floors at T_preload - deflection can only add tension on top of
+    // preload, never reduce it below preload.
+    tension_A_ = std::clamp(preload_A_ + tension_deflection_A_, preload_A_, std::max(cfg_.tension_output_max, preload_A_));
+    tension_B_ = std::clamp(preload_B_ + tension_deflection_B_, preload_B_, std::max(cfg_.tension_output_max, preload_B_));
+    tension_C_ = std::clamp(preload_C_ + tension_deflection_C_, preload_C_, std::max(cfg_.tension_output_max, preload_C_));
 }
 
 
@@ -493,12 +456,13 @@ uint16_t ControllerHandler::CurrentToPwm(float current) const {
 void ControllerHandler::SetManualTensionMode(bool enabled) {
     manualTensionMode_ = enabled;
     if (enabled) {
-        tension_A_ = tension_B_ = tension_C_ = cfg_.tension_min;
+        tension_A_ = tension_B_ = tension_C_ = cfg_.tension_preload_min;
+        tension_deflection_A_ = tension_deflection_B_ = tension_deflection_C_ = 0.0f;
     }
 }
 
 void ControllerHandler::AdjustManualTension(char motor, float deltaN) {
-    auto adjust = [&](float& t) { t = std::clamp(t + deltaN, cfg_.tension_min, cfg_.tension_max); };
+    auto adjust = [&](float& t) { t = std::clamp(t + deltaN, cfg_.tension_preload_min, cfg_.tension_preload_max); };
     switch (motor) {
         case 'A': adjust(tension_A_); break;
         case 'B': adjust(tension_B_); break;
@@ -509,7 +473,7 @@ void ControllerHandler::AdjustManualTension(char motor, float deltaN) {
 }
 
 void ControllerHandler::SetManualTension(char motor, float valueN) {
-    float clamped = std::clamp(valueN, cfg_.tension_min, cfg_.tension_max);
+    float clamped = std::clamp(valueN, cfg_.tension_preload_min, cfg_.tension_preload_max);
     switch (motor) {
         case 'A': tension_A_ = clamped; break;
         case 'B': tension_B_ = clamped; break;

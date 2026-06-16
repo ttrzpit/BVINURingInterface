@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 
 // =============================================================================
@@ -79,6 +80,15 @@ void Cal2Handler::Update(double nowSecs) {
             if (elapsed >= cfg_.holdSecs) {
                 FitStiffness(headingIdx_);
 
+                const Cal2HeadingResult& r = results_[headingIdx_];
+                std::cout << std::fixed << std::setprecision(3)
+                          << "Cal2: " << (headingIdx_ + 1) << "/" << CONSTANT_CALIBRATION_ANGLE_COUNT
+                          << " theta=" << (r.theta * RAD_TO_DEG) << " deg"
+                          << "  K(theta)=" << r.stiffness_kP << " N/mm"
+                          << "  samples=" << r.rampUpSamples
+                          << (r.valid ? "" : "  [INVALID]") << "\n"
+                          << std::defaultfloat;
+
                 commandedMag    = 0.0f;
                 phase_          = Phase::WAIT;
                 phaseStartSecs_ = nowSecs;
@@ -93,6 +103,16 @@ void Cal2Handler::Update(double nowSecs) {
                 } else {
                     phase_  = Phase::DONE;
                     status_ = "Stiffness calibration complete.";
+
+                    std::cout << "Cal2: === STIFFNESS CALIBRATION COMPLETE ===\n"
+                              << std::fixed << std::setprecision(3);
+                    for (int i = 0; i < CONSTANT_CALIBRATION_ANGLE_COUNT; i++) {
+                        const Cal2HeadingResult& res = results_[i];
+                        std::cout << "Cal2:   theta=" << (res.theta * RAD_TO_DEG) << " deg"
+                                  << "  K(theta)=" << res.stiffness_kP << " N/mm"
+                                  << (res.valid ? "" : "  [INVALID]") << "\n";
+                    }
+                    std::cout << std::defaultfloat;
                 }
             }
             break;

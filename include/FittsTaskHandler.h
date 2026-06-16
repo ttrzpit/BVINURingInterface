@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// FittsTaskHandler.h — Fitts pointing task: virtual fingertip + touch error log
+// FittsTaskHandler.h - Fitts pointing task: virtual fingertip + touch error log
 //
 // Computes the live "virtual fingertip" cursor (camera principal point plus
 // the calibrated camera-to-fingertip offset, scaled by the detected ArUco
@@ -32,7 +32,7 @@ public:
                      const TouchscreenConfig&  touchCfg,
                      const CameraConfig&       camCfg);
 
-    /** @brief Call when entering the FITTS state — clears all task state. */
+    /** @brief Call when entering the FITTS state - clears all task state. */
     void Reset();
 
     /** @brief Call when a new random target is selected ('r'). Clears the touch sample. */
@@ -62,8 +62,12 @@ public:
     const std::string& GetErrorLine1() const { return errorLine1_; }
     const std::string& GetErrorLine2() const { return errorLine2_; }
 
+    // ---- Virtual fingertip position at the moment of touch (for DisplayHandler) ----
+    bool        HasTouchFingertip() const { return sampleValid_ && touchFtValid_; }
+    cv::Point2i GetTouchFingertipPx() const { return touchFtPx_; }
+
 private:
-    /** @brief Multi-tag solvePnP from the Fitts grid markers — current camera pose. */
+    /** @brief Multi-tag solvePnP from the Fitts grid markers - current camera pose. */
     bool ComputeArucoPose(const std::vector<DetectedMarker>& markers,
                           cv::Vec3d& rvecOut, cv::Vec3d& tvecOut) const;
 
@@ -88,4 +92,7 @@ private:
     cv::Point2i touchScreenPx_ = {};
     std::string errorLine1_;
     std::string errorLine2_;
+
+    bool        touchFtValid_ = false;
+    cv::Point2i touchFtPx_    = {};
 };

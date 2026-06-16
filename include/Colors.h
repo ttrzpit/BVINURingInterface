@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Colors.h — Named color constants for all display windows
+// Colors.h - Named color constants for all display windows
 //
 // All values are OpenCV BGR order (Blue, Green, Red).
 // Naming convention matches the reference codebase, organised into families:

@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Cal3Handler.h — Calibration Stage 3: Camera-to-Fingertip Offset
+// Cal3Handler.h - Calibration Stage 3: Camera-to-Fingertip Offset
 //
 // The participant presses their fingertip against the touchscreen 10 times at
 // random positions. At each stable contact (~200 ms hold), the system records:
@@ -36,7 +36,7 @@ public:
                 const ArucoCalibrationGridConfig& calGridCfg,
                 const Cal3Config&                 cal3Cfg);
 
-    /** @brief Reset all samples and state — call when entering CAL3. */
+    /** @brief Reset all samples and state - call when entering CAL3. */
     void Reset();
 
     /**
@@ -66,7 +66,7 @@ private:
      *        Computes camera position in screen-world mm coordinates.
      * @param markers   Current frame's detections
      * @param rvecOut   Rotation vector (Rodrigues) for roll extraction
-     * @param camPosOut Camera position in screen world [mm] — populated on success
+     * @param camPosOut Camera position in screen world [mm] - populated on success
      * @return true if solvePnP succeeded with enough correspondences
      */
     bool ComputeCameraPoseInScreen(const std::vector<DetectedMarker>& markers,

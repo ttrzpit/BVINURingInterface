@@ -1,7 +1,7 @@
 %YAML:1.0
 ---
 # =============================================================================
-# BVI NURing Interface — Runtime Configuration
+# BVI NURing Interface - Runtime Configuration
 #
 # Edit this file to change parameters without recompiling the program.
 # Uses OpenCV's FileStorage YAML format (no extra dependencies).
@@ -10,39 +10,39 @@
 
 # === Aruco Detector Parameters ===============================================
 aruco_marker:
-   marker_size_mm: 20.0   # Physical side length of ring markers [mm] — used for pose estimation
+   marker_size_mm: 20.0   # Physical side length of ring markers [mm] - used for pose estimation
    valid_id_min: 0        # Discard detected markers with ID below this
    valid_id_max: 46       # Discard detected markers with ID above this
 
 
 # ---- ArUco Detector Algorithm Parameters ------------------------------------
 aruco_detector:
-   adaptive_thresh_constant:     5     # Adaptive threshold: converts grayscale to binary before finding borders.
-   adaptive_thresh_win_size_min: 3
-   adaptive_thresh_win_size_max: 23
-   adaptive_thresh_win_size_step: 10   # Larger win_size_max catches markers farther from the camera (slower).
+   adaptive_thresh_constant:     5     # Constant subtracted from the local mean during adaptive thresholding, which converts the grayscale image to binary before contours are searched for marker borders. Higher values produce a stricter (darker) threshold, rejecting faint/low-contrast edges; lower values pick up more edges but add noise. OpenCV default is 7.
+   adaptive_thresh_win_size_min: 3     # Smallest local window size (pixels) used by the adaptive threshold step. Smaller windows adapt to fine local lighting variation but are noisier; this is the starting size of the win_size_min..max..step sweep run at multiple scales to find markers under uneven illumination.
+   adaptive_thresh_win_size_max: 23    # Largest local window size (pixels) used by the adaptive threshold sweep. Larger windows tolerate broader lighting gradients and help detect markers farther from the camera (where they appear smaller), at the cost of extra thresholding passes and slower detection.
+   adaptive_thresh_win_size_step: 10   # Step size (pixels) between adaptive_thresh_win_size_min and _max - the detector reruns thresholding at each window size in this sequence. A larger step means fewer passes (faster) but coarser coverage of lighting scales; a smaller step is slower but more thorough.
 
    # Marker geometry filters: reject detections that are too small/large/imprecise.
-   min_marker_perimeter_rate:      0.01
-   max_marker_perimeter_rate:      4.0
-   polygonal_approx_accuracy_rate: 0.03
-   min_corner_distance_rate:       0.05
-   min_distance_to_border:         3
+   min_marker_perimeter_rate:      0.01   # Minimum marker contour perimeter, as a fraction of the maximum image dimension, for a candidate to be considered. Smaller values allow smaller (more distant) markers to be detected but increase false positives from noise; larger values filter out tiny spurious contours.
+   max_marker_perimeter_rate:      4.0    # Maximum marker contour perimeter, as a fraction of the maximum image dimension, for a candidate to be considered. Values above 4.0 (i.e. larger than the image itself) effectively disable this upper bound, so only min_marker_perimeter_rate filters out implausibly large contours.
+   polygonal_approx_accuracy_rate: 0.03   # Relative accuracy (as a fraction of the contour perimeter) used by cv::approxPolyDP when reducing each candidate contour to a 4-corner polygon. Smaller values demand a tighter fit to 4 corners (rejecting non-square shapes) but can fail on slightly distorted markers; larger values are more permissive.
+   min_corner_distance_rate:       0.05   # Minimum allowed distance between any two corners of a candidate marker, as a fraction of its perimeter. Candidates whose corners are closer together than this (degenerate/collapsed quads) are rejected as noise rather than real markers.
+   min_distance_to_border:         3      # Minimum distance, in pixels, that every corner of a detected marker must be from the image border. Markers partially cut off by the frame edge (corners closer than this) are rejected, since their pose/ID cannot be reliably estimated.
 
    # Corner refinement improves 3D pose accuracy at a small speed cost.
-   corner_refinement_method:         1       # 0 = no refinement, 1 = subpixel, 2 = contour-based, 3 = AprilTag-based
-   corner_refinement_max_iterations: 30
-   corner_refinement_min_accuracy:   0.01
+   corner_refinement_method:         1       # Corner refinement algorithm applied after initial detection to improve pose accuracy: 0 = none (fastest, least accurate), 1 = subpixel refinement (cv::cornerSubPix), 2 = contour-based, 3 = AprilTag-based refinement (most accurate, slowest). 1 (subpixel) is a good accuracy/speed tradeoff.
+   corner_refinement_max_iterations: 30      # Maximum number of iterations the corner refinement algorithm (set by corner_refinement_method) runs per marker. More iterations can improve accuracy slightly but increase per-marker processing time; refinement stops early if corner_refinement_min_accuracy is reached first.
+   corner_refinement_min_accuracy:   0.01    # Convergence threshold (in pixels) for corner refinement: refinement stops once corner positions change by less than this between iterations, or corner_refinement_max_iterations is reached, whichever comes first. Smaller values demand tighter convergence (slower, more precise).
 
    # Detect markers on glossy/reflective surfaces that invert the black/white pattern.
-   detect_inverted_marker: 0
+   detect_inverted_marker: 0   # When enabled (1), also searches for markers printed with inverted polarity (white pattern on black background), in addition to the normal black-on-white markers. Useful for markers viewed on a backlit screen or a reflective/glossy surface where contrast can invert. Roughly doubles detection cost when on.
 
-   # Perspective removal — resolution of the internal bit-extraction step.
-   perspective_remove_pixel_per_cell:          8         # Higher pixel_per_cell = more accurate but slower.
-   perspective_remove_ignored_margin_per_cell: 0.13
+   # Perspective removal - resolution of the internal bit-extraction step.
+   perspective_remove_pixel_per_cell:          8     # Resolution, in pixels per bit-cell, used when the detector warps each candidate marker to a flat square to read its black/white bit pattern. Higher values sample each cell more finely (more accurate bit decoding, especially at oblique angles) at the cost of extra processing per marker.
+   perspective_remove_ignored_margin_per_cell: 0.13  # Fraction of each bit-cell's width/height, around its edge, that is ignored when sampling that cell's color during bit decoding. Avoids letting blur or imperfect perspective correction near a cell's border bias the black/white decision toward the wrong value.
 
-   # ArUco3 detection — faster and more robust algorithm for small/distant markers.
-   use_aruco3_detection: 0
+   # ArUco3 detection - faster and more robust algorithm for small/distant markers.
+   use_aruco3_detection: 0   # Enables the newer ArUco3 detection pipeline, which adds a fast low-resolution pre-pass to locate marker candidates before refining them at full resolution. Generally faster and better at finding small or distant markers than the legacy pipeline, at the cost of some extra tuning parameters (not exposed here).
 
 
 # ---- ArUco Marker Display (on the touchscreen) ------------------------------
@@ -51,16 +51,16 @@ aruco_detector:
 aruco_display:
    cols: 9                # Number of grid columns
    rows: 5                # Number of grid rows
-   marker_size_mm: 20.0   # Marker side length [mm] — converted to pixels at runtime
-   padding_mm: 22.0       # Padding on all 4 sides [mm] — converted to pixels at runtime
+   marker_size_mm: 20.0   # Marker side length [mm] - converted to pixels at runtime
+   padding_mm: 60.0       # Padding on all 4 sides [mm] - converted to pixels at runtime
 
 # ---- ArUco Calibration Grid (on the touchscreen) --------------------------------
 # The C x R grid starts at marker ID 1 and increments left-to-right, top-to-bottom.
 # Spacing between markers is auto-calculated from screen size, padding, and marker size.
 # Uses the larger ArUco dictionary 4x4x250
 aruco_calibration_grid:
-   marker_size_mm: 12.0       # Marker side length [mm] — converted to pixels at runtime
-   marker_pad_mm: 12.0        # Padding between markers [mm] — converted to pixels at runtime
+   marker_size_mm: 12.0       # Marker side length [mm] - converted to pixels at runtime
+   marker_pad_mm: 12.0        # Padding between markers [mm] - converted to pixels at runtime
    marker_exclusion_mm: 20.0  # Exclusion zone around the aruco grid to keep markers away from the screen edge
 
 
@@ -114,7 +114,7 @@ touchscreen:
    x_offset: 3440         # X offset of the touchscreen in the desktop coordinate space
    y_offset: 0            # Y offset of the touchscreen (0 if monitors are top-aligned)
    pixels_per_mm: 3.6430  # Physical pixel density of the touchscreen [px/mm]
-   mm_per_pixel:  0.27450 # Inverse conversion — use whichever direction is convenient
+   mm_per_pixel:  0.27450 # Inverse conversion - use whichever direction is convenient
    xinput_device_id: 9    # xinput device ID for the touchscreen (run 'xinput list' to find it)
    xinput_output: "HDMI-0" # X output name to map the touchscreen to (run 'xrandr' to find it)
 
@@ -150,9 +150,18 @@ cal1:
 
 # ---- Calibration Stage 2 timing (Stiffness) ------------------------------------
 cal2:
-   force_ramp_rate:   0.5  # Open-loop force ramp-up rate [N/s]
+   force_ramp_rate:   1.0  # Open-loop force ramp-up rate [N/s]
    hold_secs:         2.0  # Hold duration at peak force per heading [s]
-   release_wait_secs: 2.0  # Wait after releasing (no ramp-down) before the next heading [s]
+   release_wait_secs: 3.0  # Wait after releasing (no ramp-down) before the next heading [s]
+
+# ---- Fitts target circle ------------------------------------------------------
+# radius_mm         : Drawn target circle radius [mm]
+# offset_default_mm : Default Y offset (below the tag center) shown as a gray
+#                      circle before Cal3 completes [mm]. Once Cal3 is complete,
+#                      the cal3-calibrated offset is used instead (red circle).
+target:
+   radius_mm: 5.0
+   offset_default_mm: 40.0
 
 # ---- Gesture detection (flick up/down + confirm circle, RobotState::READY only) ----
 # velocity_thresh_mm_s : |vel_filtered_.y| must exceed this to arm a flick [mm/s]
@@ -165,12 +174,12 @@ cal2:
 #
 # rest_speed_thresh_mm_s : |vel_filtered_| below this counts as "at rest" [mm/s]
 # flick_max_motion_secs  : Max continuous time spent moving (since last at rest) for a
-#                          velocity spike to still count as a flick [s] — sustained motion
+#                          velocity spike to still count as a flick [s] - sustained motion
 #                          (a circle) exceeds this and blocks flick arming
 # circle_confirm_rad     : Cumulative rotation to confirm a "draw a circle" gesture [rad] (~300 deg)
 # circle_max_window_secs : Rolling time window for rotation accumulation [s]
-# circle_min_radius_mm   : Min path radius from centroid — rejects jitter loops [mm]
-# circle_max_radius_mm   : Max path radius from centroid — rejects large sweeps [mm]
+# circle_min_radius_mm   : Min path radius from centroid - rejects jitter loops [mm]
+# circle_max_radius_mm   : Max path radius from centroid - rejects large sweeps [mm]
 # circle_cooldown_secs   : Min gap between confirms; also the on-screen indicator duration [s]
 gesture:
    velocity_thresh_mm_s: 80.0
@@ -193,29 +202,38 @@ serial:
    port: "/dev/ttyACM0"   # Single full-duplex USB CDC port
    baud_rate: 1000000     # 1 Mbaud (nominal for USB CDC; actual speed is USB-limited)
 
-# ---- Controller gains and solver parameters ----------------------------------
-# gain_kP           : Proportional gain [N/mm]
+# ---- Controller gains and tension allocation parameters -----------------------
+# gain_kP           : Starting value [N/mm] for the custom-tuned proportional
+#                     gain (gainTune_A/B/C, adjustable live via 'G'). Combined
+#                     with K(theta) (stiffness calibration) to form kP_effective.
 # gain_kD           : Derivative gain [N·s/mm]
 # gain_kI           : Integral gain [N/(mm·s)]
-# deflection_force_max : Maximum commanded guidance deflection force magnitude [N]
-# tension_min       : Preload (minimum) tension per motor [N]
-# tension_max       : Maximum tension per motor [N]
-# position_tolerance: Deadband radius — no force applied inside this radius [mm]
+# deflection_force_max : Maximum commanded guidance deflection force magnitude [N] (Stage 1, task space)
+#
+# Stage 2 tension allocation: T_output = T_preload + T_deflection, per motor
+# tension_preload_min   : T_preload_min - minimum preload tension per motor [N]
+# tension_preload_max   : T_preload_max - maximum preload tension per motor [N]
+# tension_deflection_max: T_deflection_max - max per-motor tension contribution from
+#                         the guidance/deflection force [N]
+# tension_output_max    : T_output_max - max total commanded tension per motor
+#                         (T_preload + T_deflection) [N]
+#
+# position_tolerance: Deadband radius - no force applied inside this radius [mm]
 # lowpass_alpha     : Velocity low-pass filter coefficient (0 = heavy, 1 = none)
-# tension_solver_iters : Projected gradient descent iterations per cycle
 # ramp_duration_secs   : Force ramp-up duration when a new target appears [s]
 # max_current_amps     : Amplifier current limit [A]
 # encoder_counts_per_rev : Encoder ticks per full motor revolution
 controller_gains:
-   gain_kP: 1.0
+   gain_kP: 0.0
    gain_kD: 0.0
    gain_kI: 0.0
-   deflection_force_max: 10.0
-   tension_min: 0.1
-   tension_max: 2.0
+   deflection_force_max: 20.0
+   tension_preload_min: 0.1
+   tension_preload_max: 2.0
+   tension_deflection_max: 6.0
+   tension_output_max: 6.0
    position_tolerance: 1.0
    lowpass_alpha: 0.15
-   tension_solver_iters: 5
-   ramp_duration_secs: 1.0
+   ramp_duration_secs: 5.0
    max_current_amps: 1.89
    encoder_counts_per_rev: 4096

@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// T_SharedDataManager.h — Shared data bus between all firmware classes
+// T_SharedDataManager.h - Shared data bus between all firmware classes
 //
 // Mirrors the reference pattern exactly: a SharedDataManager owns a
 // shared_ptr<ManagedData>; each class receives a reference to the manager
@@ -26,7 +26,7 @@ struct AmplifierData {
 
     bool isEnabled = false;
 
-    // Measured values — written by T_AmplifierClass after each poll cycle,
+    // Measured values - written by T_AmplifierClass after each poll cycle,
     // read by T_SerialClass when building the outgoing TeensyToPcPacket.
     int32_t encoder_count_A = 0;   ///< Raw counts from g r0x32 (Maxon ENX 22: 1024 counts/rev)
     int32_t encoder_count_B = 0;
@@ -35,9 +35,9 @@ struct AmplifierData {
     int16_t current_raw_B   = 0;
     int16_t current_raw_C   = 0;
 
-    // Commanded PWM — written by T_SerialClass (main thread) when a PC packet
+    // Commanded PWM - written by T_SerialClass (main thread) when a PC packet
     // arrives, read by DrivePWMFromISR() inside a 1000 Hz IntervalTimer.
-    // uint16_t writes are atomic on Cortex-M7 — no mutex needed.
+    // uint16_t writes are atomic on Cortex-M7 - no mutex needed.
     volatile uint16_t commandedPwm_A = PWM_OFF;
     volatile uint16_t commandedPwm_B = PWM_OFF;
     volatile uint16_t commandedPwm_C = PWM_OFF;
@@ -49,10 +49,6 @@ struct AmplifierData {
 struct SystemData {
     uint8_t teensyState = TeensyState::WAITING;
     uint8_t packetIndex = 0;   ///< Echoed from the most recent valid PC packet
-
-    // One-shot request, set by T_SerialClass::ReadFromPC() on PcState::ZERO_ENC,
-    // consumed (and cleared) by loop() to call Amplifier.ZeroEncoders().
-    bool zeroEncoderRequested = false;
 };
 
 

@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// TouchHandler.h — XInput2 touchscreen event reader
+// TouchHandler.h - XInput2 touchscreen event reader
 //
 // Registers for XInput2 touch events on the X11 root window and drains the
 // event queue each time getLatestTouch() is called. The call is non-blocking:
@@ -36,7 +36,7 @@ struct TouchState {
 class TouchHandler {
 public:
     /**
-     * @param cfg  Touchscreen config — specifically xOffset and yOffset are
+     * @param cfg  Touchscreen config - specifically xOffset and yOffset are
      *             used to convert desktop-space coordinates to screen-local ones.
      *             Must outlive this object.
      */
@@ -60,4 +60,5 @@ private:
     int      xinputOpcode_ = -1;
 
     TouchState currentTouch_;  // Updated in getLatestTouch()
+    bool       prevIsTouched_ = false;  // For debug transition logging
 };

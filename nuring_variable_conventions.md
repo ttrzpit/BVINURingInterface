@@ -70,8 +70,13 @@ but not yet functional) to reserve the names.
 | K_i | `gain_kI` | float | N/(mm·s) | Integral gain |
 | F_x, F_y | `force_x`, `force_y` | float | N | Commanded force in virtual task space |
 | F_max | `force_max` | float | N | Maximum allowable force magnitude |
-| T_min | `tension_min` | float | N | Minimum tension (preload) per motor |
-| T_max | `tension_max` | float | N | Maximum tension per motor |
+| T_preload_min | `tension_preload_min` | float | N | Minimum preload tension per motor |
+| T_preload_max | `tension_preload_max` | float | N | Maximum preload tension per motor |
+| T_preload_i | `preload_A`, `preload_B`, `preload_C` | float | N | Preload tension force component per motor |
+| T_deflection_max | `tension_deflection_max` | float | N | Maximum per-motor tension contribution from the deflection (guidance) force |
+| T_deflection_i | `tension_deflection_A`, `tension_deflection_B`, `tension_deflection_C` | float | N | Signed tension force component from the deflection (guidance) force, based on the error to the target |
+| T_output_max | `tension_output_max` | float | N | Maximum total commanded tension per motor |
+| T_output_i | `tension_A`, `tension_B`, `tension_C` | float | N | Total commanded tension per motor: T_preload_i + T_deflection_i, clamped to [T_preload_i, T_output_max] |
 | G(z) | `gain_depth_schedule` | float | unitless | [NOT YET IMPLEMENTED] Depth-dependent gain scaling: clamp((z − z_min) / (z_taper − z_min), G_floor, 1.0) |
 | z_min | `DEPTH_MIN` | float | mm | [NOT YET IMPLEMENTED] Closest reliable tracking distance (~40 mm) |
 | z_taper | `DEPTH_TAPER` | float | mm | [NOT YET IMPLEMENTED] Distance at which gain tapering begins (~150 mm) |

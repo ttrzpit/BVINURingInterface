@@ -1,12 +1,12 @@
 #include "T_AmplifierClass.h"
 
-#include <stdlib.h>   // strtol — fixed-buffer int parsing, no heap
+#include <stdlib.h>   // strtol - fixed-buffer int parsing, no heap
 
 // =============================================================================
 // T_AmplifierClass.cpp
 //
 // Baud upgrade procedure (per the Copley communication guide):
-//   1. Send "s r0x90 115200\r" at 9600 — IMPORTANT: use .print() not
+//   1. Send "s r0x90 115200\r" at 9600 - IMPORTANT: use .print() not
 //      .println(). The \n that println() adds can be misinterpreted as a
 //      break command that resets the baud back to 9600.
 //   2. The amplifier responds "ok\r" at the NEW baud, so the Teensy won't see it.
@@ -31,7 +31,7 @@ T_AmplifierClass::T_AmplifierClass(SharedDataManager& dataHandle)
 
 
 // =============================================================================
-// Begin — full initialization sequence
+// Begin - full initialization sequence
 // =============================================================================
 
 void T_AmplifierClass::Begin() {
@@ -44,7 +44,7 @@ void T_AmplifierClass::Begin() {
     pinMode(AMP_PIN_PWM_B,    OUTPUT);
     pinMode(AMP_PIN_PWM_C,    OUTPUT);
 
-    // ---- Status LEDs — all off until baud upgrade is verified ---------------
+    // ---- Status LEDs - all off until baud upgrade is verified ---------------
     pinMode(LED_PIN_AMP_A, OUTPUT);
     pinMode(LED_PIN_AMP_B, OUTPUT);
     pinMode(LED_PIN_AMP_C, OUTPUT);
@@ -92,7 +92,13 @@ void T_AmplifierClass::Begin() {
     SetPwmMode(HWSerialC);
 
     // ---- Enable amplifiers and zero encoders --------------------------------
+    // Zeroing here (once, at boot) establishes q_abs = 0 <-> bare-pulley for the
+    // spool-radius model in ControllerHandler AND keeps the amplifier's
+    // internal cogging-compensation table aligned to the motor's commutation
+    // reference. It must NOT be repeated at runtime (e.g. during pretensioning)
+    // - re-zeroing later shifts that reference and cogging returns.
     Enable();
+    ZeroEncoders();
 
 }
 
@@ -103,7 +109,7 @@ void T_AmplifierClass::Begin() {
 
 void T_AmplifierClass::DrivePWMFromISR() {
     // Read volatile commandedPwm values from shared data and apply.
-    // ONLY analogWrite() here — no serial, no branching, no heap.
+    // ONLY analogWrite() here - no serial, no branching, no heap.
     analogWrite(AMP_PIN_PWM_A, shared_->Amplifier.commandedPwm_A);
     analogWrite(AMP_PIN_PWM_B, shared_->Amplifier.commandedPwm_B);
     analogWrite(AMP_PIN_PWM_C, shared_->Amplifier.commandedPwm_C);
@@ -166,13 +172,13 @@ void T_AmplifierClass::ZeroEncoders() {
 
 
 // =============================================================================
-// Private — initialization helpers
+// Private - initialization helpers
 // =============================================================================
 
 bool T_AmplifierClass::UpgradeBaudRate(HardwareSerial& port, uint8_t ledPin) {
 
     // Step 1: Send baud change command at 9600.
-    // CRITICAL: use .print() not .println() — the extra \n can trigger a break
+    // CRITICAL: use .print() not .println() - the extra \n can trigger a break
     // condition that resets the Copley baud rate back to 9600 (Copley manual warning).
     port.print("s r0x90 115200\r");
 
@@ -215,8 +221,8 @@ bool T_AmplifierClass::UpgradeBaudRate(HardwareSerial& port, uint8_t ledPin) {
     }
     verifyBuf[verifyIdx] = '\0';
 
-    // Step 8: Validate — Copley responds "v <value>" where value is the actual
-    // baud rate set (may differ slightly from 115200 — any value >100000 is OK)
+    // Step 8: Validate - Copley responds "v <value>" where value is the actual
+    // baud rate set (may differ slightly from 115200 - any value >100000 is OK)
     if (verifyIdx >= 3 && verifyBuf[0] == 'v' && verifyBuf[1] == ' ') {
         int32_t returnedBaud = strtol(verifyBuf + 2, nullptr, 10);
         if (returnedBaud > 100000 && returnedBaud < 130000) {
@@ -256,7 +262,7 @@ void T_AmplifierClass::SetPwmMode(HardwareSerial& port) {
             if (idx < sizeof(buf) - 1) buf[idx++] = c;
         }
     }
-    // Response "ok" — we don't strictly validate it here; the amplifier will
+    // Response "ok" - we don't strictly validate it here; the amplifier will
     // behave correctly if it accepted the mode change
 }
 
@@ -270,7 +276,7 @@ void T_AmplifierClass::ResetAmplifier(uint8_t enablePin) {
 
 
 // =============================================================================
-// Private — parallel poll cycle
+// Private - parallel poll cycle
 // =============================================================================
 
 void T_AmplifierClass::StartPollCycle() {
@@ -295,12 +301,12 @@ void T_AmplifierClass::PollPort(HardwareSerial& port, AmpQueryState& amp) {
         char c = static_cast<char>(port.read());
 
         if (c == '\r') {
-            // Response complete — null-terminate and parse
+            // Response complete - null-terminate and parse
             amp.rxBuf[amp.rxIdx] = '\0';
 
             if (amp.phase == AmpQueryState::Phase::SENT_POS) {
                 amp.encoderCount = ParseValueResponse(amp);
-                // Immediately chain the current query — no wait needed
+                // Immediately chain the current query - no wait needed
                 port.print("g r0x0c\r");
                 amp.phase = AmpQueryState::Phase::SENT_CUR;
 
@@ -328,5 +334,5 @@ int32_t T_AmplifierClass::ParseValueResponse(const AmpQueryState& amp) const {
     if (amp.rxIdx >= 2 && amp.rxBuf[0] == 'v' && amp.rxBuf[1] == ' ') {
         return strtol(amp.rxBuf + 2, nullptr, 10);
     }
-    return 0;  // Unexpected response (error or empty) — treat as zero
+    return 0;  // Unexpected response (error or empty) - treat as zero
 }

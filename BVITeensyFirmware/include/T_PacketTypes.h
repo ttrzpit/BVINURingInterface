@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// T_PacketTypes.h — Shared binary packet definitions for PC ↔ Teensy serial
+// T_PacketTypes.h - Shared binary packet definitions for PC ↔ Teensy serial
 //
 // These structs MUST be kept identical on both the PC side (PacketTypes.h) and
 // the Teensy side (this file). Pragma pack(1) ensures no padding bytes so that
@@ -28,8 +28,7 @@ namespace PcState {
     static constexpr uint8_t IDLE        = 'I';
     static constexpr uint8_t CALIBRATING = 'C';
     static constexpr uint8_t FITTS       = 'F';
-    static constexpr uint8_t ZERO_ENC    = 'Z';  ///< One-shot: zero motor encoders (pretensioning)
-    static constexpr uint8_t READY       = 'R';  ///< RobotState::READY/GUIDING — preload tension held
+    static constexpr uint8_t READY       = 'R';  ///< RobotState::READY/GUIDING - preload tension held
 }
 
 // ---- State bytes sent from Teensy to PC -------------------------------------
@@ -68,6 +67,6 @@ struct TeensyToPcPacket {
 
 #pragma pack(pop)
 
-// Compile-time size guards — catch accidental struct changes immediately
+// Compile-time size guards - catch accidental struct changes immediately
 static_assert(sizeof(PcToTeensyPacket)  ==  8, "PcToTeensyPacket must be 8 bytes");
 static_assert(sizeof(TeensyToPcPacket)  == 20, "TeensyToPcPacket must be 20 bytes");

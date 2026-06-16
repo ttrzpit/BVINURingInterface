@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Cal2Handler.h — Calibration Stage 2: Finger Deflection Stiffness
+// Cal2Handler.h - Calibration Stage 2: Finger Deflection Stiffness
 //
 // For each of the CONSTANT_CALIBRATION_ANGLE_COUNT calibration headings
 // (CONSTANT_CALIBRATION_ANGLES_DEG), commands an open-loop force ramp via
@@ -19,7 +19,7 @@
 // starting the next heading, giving the finger time to relax back to center.
 //
 // Camera-based ground truth (phi_camera, C(theta) mapping correction) is
-// deferred to Phase 2 — see items 2/4/6.
+// deferred to Phase 2 - see items 2/4/6.
 //
 // State machine per heading:
 //   RAMP_UP -> HOLD -> WAIT (released, no ramp-down) -> (next heading) -> ... -> DONE
@@ -81,6 +81,10 @@ public:
     std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT> GetStiffnessProfile() const;
 
     const std::array<Cal2HeadingResult, CONSTANT_CALIBRATION_ANGLE_COUNT>& GetResults() const { return results_; }
+
+    /** @brief Index into CONSTANT_CALIBRATION_ANGLES_DEG for the heading
+     *         currently being measured, or -1 before the first Update(). */
+    int GetCurrentHeadingIndex() const { return headingIdx_; }
 
 private:
     enum class Phase { RAMP_UP, HOLD, WAIT, DONE, BLOCKED };

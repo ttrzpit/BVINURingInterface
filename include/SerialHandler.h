@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// SerialHandler.h — Bi-directional serial communication with the Teensy
+// SerialHandler.h - Bi-directional serial communication with the Teensy
 //
 // Single full-duplex USB CDC port (/dev/ttyACM0).
 //
@@ -33,7 +33,7 @@ public:
     explicit SerialHandler(const SerialConfig& cfg);
     ~SerialHandler();
 
-    /** @brief Initialize the handler. Does NOT open the port — call Connect() for that. */
+    /** @brief Initialize the handler. Does NOT open the port - call Connect() for that. */
     void start();
 
     /** @brief Disconnect if connected, then shut down cleanly. */
@@ -47,7 +47,7 @@ public:
 
     /**
      * @brief Update the pending TX packet. The TX timer thread reads this every
-     *        5 ms and sends it automatically — do not call Send() directly.
+     *        5 ms and sends it automatically - do not call Send() directly.
      *        The packet_index field is managed internally and will be overwritten.
      */
     void SetPendingTx(const PcToTeensyPacket& cmd);
@@ -67,7 +67,7 @@ public:
     bool IsConnected() const { return fd_ != -1; }
 
     /**
-     * @brief Low-level send — frames and writes one packet directly.
+     * @brief Low-level send - frames and writes one packet directly.
      *        Normally called by TxLoop; exposed for direct use if needed.
      */
     void Send(const PcToTeensyPacket& pkt);

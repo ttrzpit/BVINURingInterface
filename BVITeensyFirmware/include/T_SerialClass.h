@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// T_SerialClass.h — Full-duplex USB CDC serial handler
+// T_SerialClass.h - Full-duplex USB CDC serial handler
 //
 // RX: parse incoming PcToTeensyPacket frames, write commanded PWM and state
 //     to shared data so T_AmplifierClass can act on them.
@@ -10,8 +10,8 @@
 //     send at 200 Hz when flagSendToPC is set.
 //
 // The two functions are now split:
-//   ReadFromPC()  — call every loop() to parse incoming bytes
-//   SendToPC()    — call from the 200 Hz flagged path in loop()
+//   ReadFromPC()  - call every loop() to parse incoming bytes
+//   SendToPC()    - call from the 200 Hz flagged path in loop()
 // =============================================================================
 
 #include <Arduino.h>
@@ -53,7 +53,7 @@ private:
 
     bool     connected_ = false;
 
-    // Comms watchdog — millis() timestamp of the last valid packet. Checked
+    // Comms watchdog - millis() timestamp of the last valid packet. Checked
     // every ReadFromPC() call (see T_Config::WATCHDOG_TIMEOUT_MS).
     uint32_t lastValidPacketMillis_ = 0;
 

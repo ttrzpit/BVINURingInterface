@@ -1,4 +1,4 @@
-# NURing Teensy — Copley Amplifier Communication Reference
+# NURing Teensy - Copley Amplifier Communication Reference
 
 This document describes how the Teensy 4.1 communicates with three Copley Nano
 NES-090-10-Z amplifiers, and the optimal strategy for reading motor position
@@ -25,7 +25,7 @@ The amplifiers use a simple ASCII command/response protocol over RS-232:
 - Successful get: `v <value>\r`
 - Successful set: `ok\r`
 - Error: `e <code>\r`
-- Protocol is "speak when spoken to" — the amplifier never initiates
+- Protocol is "speak when spoken to" - the amplifier never initiates
 
 ### Commands We Use
 
@@ -33,11 +33,11 @@ The amplifiers use a simple ASCII command/response protocol over RS-232:
 |---------|---------|----------|------------|
 | `g r0x32\r` | Get motor position | `v <int32>\r` | int32, encoder counts |
 | `g r0x0c\r` | Get actual current | `v <int16>\r` | int16, units of 0.01 A |
-| `s r0x24 3\r` | Set PWM current mode | `ok\r` | — |
-| `s r0x90 115200\r` | Set baud rate | `ok\r` (at NEW baud) | — |
-| `s r0x17 0\r` | Zero load position | `ok\r` | — |
-| `s r0x32 0\r` | Zero motor position | `ok\r` | — |
-| `r\r` | Reset amplifier | (no response) | — |
+| `s r0x24 3\r` | Set PWM current mode | `ok\r` | - |
+| `s r0x90 115200\r` | Set baud rate | `ok\r` (at NEW baud) | - |
+| `s r0x17 0\r` | Zero load position | `ok\r` | - |
+| `s r0x32 0\r` | Zero motor position | `ok\r` | - |
+| `r\r` | Reset amplifier | (no response) | - |
 
 ### Important Variable IDs
 
@@ -45,7 +45,7 @@ The amplifiers use a simple ASCII command/response protocol over RS-232:
 |----------|-----|------|-------------|-------|
 | Motor position | 0x32 | R | Actual motor position | counts |
 | Actual current | 0x0c | R | Measured output current | 0.01 A |
-| Desired state | 0x24 | R F | Operating mode (3 = PWM current) | — |
+| Desired state | 0x24 | R F | Operating mode (3 = PWM current) | - |
 | Baud rate | 0x90 | R | Serial baud rate | baud |
 | Peak current limit | 0x21 | R F | Maximum current | 0.01 A |
 | Programmed current | 0x02 | R F | Commanded current | 0.01 A |
@@ -74,7 +74,7 @@ the same round-trip takes ~1.5 ms, allowing poll rates of 300+ Hz per amplifier.
 
 ### Critical Warning from Copley Manual
 After sending the baud change command, do NOT send any additional characters at the
-old baud rate. Some serial libraries append a line feed (`\n`) after `\r` — make sure
+old baud rate. Some serial libraries append a line feed (`\n`) after `\r` - make sure
 to use `.print()` not `.println()`, and send only the `\r` as the terminator. Extra
 characters at 9600 may be misinterpreted as a break command, resetting the baud back
 to 9600.
@@ -94,7 +94,7 @@ to 9600.
    c. Switch Teensy HWSerial to 115200
    d. Verify: g r0x90\r → expect v <close to 115200>\r
       (NOTE: Copley sets as close as possible to requested baud,
-       so returned value may differ slightly — that's normal)
+       so returned value may differ slightly - that's normal)
 6. For each amplifier:
    a. Send: s r0x24 3\r               (enable PWM current mode)
    b. Wait for ok\r
@@ -129,7 +129,7 @@ Each poll cycle:
    and sending `g r0x32\r` on all three ports
 2. As each response arrives, parse it, immediately send `g r0x0c\r` (SENT_CUR)
 3. As each current response arrives, parse it → IDLE
-4. When all three are IDLE, the cycle is complete — all 6 values are fresh
+4. When all three are IDLE, the cycle is complete - all 6 values are fresh
 
 This keeps the serial lines maximally busy. At 115200 baud, a full cycle
 (position + current for all 3 motors in parallel) completes in ~3 ms,
@@ -140,7 +140,7 @@ enabling 300+ Hz effective polling.
 - **Amplifier PWM write rate**: 1000 Hz (IntervalTimer, direct in ISR)
 - **Teensy → PC send rate**: 200-500 Hz (IntervalTimer, sets flag for main loop)
 
-### Response Parsing — Avoid Arduino String
+### Response Parsing - Avoid Arduino String
 
 The existing code uses Arduino `String` for building and parsing responses. At high
 poll rates this causes heap fragmentation. Replace with fixed char buffers:
@@ -281,6 +281,6 @@ Must include:
 - PWM output is written via `analogWrite` at 12-bit resolution (0-4095),
   independent of the serial communication. The 1000 Hz PWM write rate does
   not depend on serial poll speed.
-- The serial polling and PWM writing are decoupled — PWM runs in an ISR at
+- The serial polling and PWM writing are decoupled - PWM runs in an ISR at
   1000 Hz, while serial polling runs in the main loop triggered by a flag
   from an IntervalTimer.

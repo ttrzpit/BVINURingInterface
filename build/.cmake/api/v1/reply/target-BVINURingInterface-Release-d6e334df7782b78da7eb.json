@@ -83,13 +83,48 @@
 				5,
 				6,
 				7,
-				8,
 				9,
 				10,
 				11,
 				12,
 				13,
 				14
+			]
+		},
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "-O3 -DNDEBUG -std=c++17"
+				},
+				{
+					"fragment" : "-O2"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 3,
+					"path" : "/home/tom/Code/BVINURingInterface/include"
+				},
+				{
+					"backtrace" : 3,
+					"isSystem" : true,
+					"path" : "/usr/local/include/opencv4"
+				}
+			],
+			"language" : "CXX",
+			"languageStandard" : 
+			{
+				"backtraces" : 
+				[
+					2
+				],
+				"standard" : "17"
+			},
+			"sourceIndexes" : 
+			[
+				8
 			]
 		}
 	],
@@ -531,7 +566,7 @@
 		},
 		{
 			"backtrace" : 1,
-			"compileGroupIndex" : 0,
+			"compileGroupIndex" : 1,
 			"path" : "src/DisplayHandler.cpp",
 			"sourceGroupIndex" : 0
 		},

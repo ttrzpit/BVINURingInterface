@@ -10,9 +10,9 @@
 //   TX (Teensy → PC): [0xAA] [20 bytes TeensyToPcPacket] [XOR checksum]
 //
 // On a valid incoming packet the following are written to shared data:
-//   commandedPwm_A/B/C  — read by DrivePWMFromISR() at 1000 Hz
-//   packetIndex         — echoed in the next outgoing packet
-//   teensyState         — reflected from PC state
+//   commandedPwm_A/B/C  - read by DrivePWMFromISR() at 1000 Hz
+//   packetIndex         - echoed in the next outgoing packet
+//   teensyState         - reflected from PC state
 // =============================================================================
 
 T_SerialClass::T_SerialClass(SharedDataManager& dataHandle)
@@ -21,13 +21,13 @@ T_SerialClass::T_SerialClass(SharedDataManager& dataHandle)
 {}
 
 void T_SerialClass::Begin() {
-    Serial.begin(1000000);  // Nominal baud — USB CDC speed is USB-limited
+    Serial.begin(1000000);  // Nominal baud - USB CDC speed is USB-limited
     delay(500);             // Allow USB stack to enumerate
 }
 
 
 // =============================================================================
-// ReadFromPC — call every loop() iteration
+// ReadFromPC - call every loop() iteration
 // =============================================================================
 
 void T_SerialClass::ReadFromPC() {
@@ -63,7 +63,7 @@ void T_SerialClass::ReadFromPC() {
                     lastValidPacketMillis_ = millis();
 
                     // Write commanded PWM values into shared data.
-                    // These are declared volatile — safe for ISR to read concurrently.
+                    // These are declared volatile - safe for ISR to read concurrently.
                     shared_->Amplifier.commandedPwm_A = pkt.pwm_A;
                     shared_->Amplifier.commandedPwm_B = pkt.pwm_B;
                     shared_->Amplifier.commandedPwm_C = pkt.pwm_C;
@@ -75,10 +75,6 @@ void T_SerialClass::ReadFromPC() {
                         case PcState::CALIBRATING: shared_->System.teensyState = TeensyState::IDLE;    break;
                         case PcState::FITTS:       shared_->System.teensyState = TeensyState::IDLE;    break;
                         case PcState::READY:       shared_->System.teensyState = TeensyState::READY;   break;
-                        case PcState::ZERO_ENC:
-                            shared_->System.teensyState = TeensyState::IDLE;
-                            shared_->System.zeroEncoderRequested = true;
-                            break;
                         default:                   shared_->System.teensyState = TeensyState::WAITING; break;
                     }
                 }
@@ -91,7 +87,7 @@ void T_SerialClass::ReadFromPC() {
 
     // ---- Comms watchdog -------------------------------------------------------
     // No valid packet within WATCHDOG_TIMEOUT_MS (PC crashed or serial
-    // disconnected) — force PWM output off so the amplifiers stop applying
+    // disconnected) - force PWM output off so the amplifiers stop applying
     // tension instead of holding the last commanded value indefinitely.
     if (millis() - lastValidPacketMillis_ > WATCHDOG_TIMEOUT_MS) {
         shared_->Amplifier.commandedPwm_A = PWM_OFF;
@@ -104,7 +100,7 @@ void T_SerialClass::ReadFromPC() {
 
 
 // =============================================================================
-// SendToPC — call at 200 Hz from the flagged path in loop()
+// SendToPC - call at 200 Hz from the flagged path in loop()
 // =============================================================================
 
 void T_SerialClass::SendToPC() {

@@ -3,9 +3,9 @@
 #include <iostream>
 
 // =============================================================================
-// Config.cpp — Loads config.yaml using OpenCV FileStorage
+// Config.cpp - Loads config.yaml using OpenCV FileStorage
 //
-// cv::FileStorage is built into OpenCV — no extra packages needed.
+// cv::FileStorage is built into OpenCV - no extra packages needed.
 // Reads a YAML file written in OpenCV's dialect (starts with %YAML:1.0).
 //
 // Each section in the YAML maps to one of the sub-config structs.
@@ -19,7 +19,7 @@ bool Config::load(const std::string& filepath) {
 
     if (!fs.isOpened()) {
         std::cerr << "Config: Could not open '" << filepath
-                  << "' — all parameters using defaults.\n";
+                  << "' - all parameters using defaults.\n";
         buildDerivedCameraValues();
         return false;
     }
@@ -32,7 +32,7 @@ bool Config::load(const std::string& filepath) {
         cam["height"]     >> camera.height;
         cam["framerate"]  >> camera.framerate;
 
-        // FileStorage has no native bool — read as int and convert
+        // FileStorage has no native bool - read as int and convert
         int rot = 0;
         cam["rotate_180"] >> rot;
         camera.rotate180 = (rot != 0);
@@ -182,11 +182,12 @@ bool Config::load(const std::string& filepath) {
         cg["gain_kD"]               >> controllerGains.gain_kD;
         cg["gain_kI"]               >> controllerGains.gain_kI;
         cg["deflection_force_max"]  >> controllerGains.deflection_force_max;
-        cg["tension_min"]           >> controllerGains.tension_min;
-        cg["tension_max"]           >> controllerGains.tension_max;
+        cg["tension_preload_min"]   >> controllerGains.tension_preload_min;
+        cg["tension_preload_max"]   >> controllerGains.tension_preload_max;
+        cg["tension_deflection_max"] >> controllerGains.tension_deflection_max;
+        cg["tension_output_max"]    >> controllerGains.tension_output_max;
         cg["position_tolerance"]    >> controllerGains.position_tolerance;
         cg["lowpass_alpha"]         >> controllerGains.lowpass_alpha;
-        cg["tension_solver_iters"]  >> controllerGains.tension_solver_iters;
         cg["ramp_duration_secs"]    >> controllerGains.ramp_duration_secs;
         cg["max_current_amps"]      >> controllerGains.max_current_amps;
         cg["encoder_counts_per_rev"] >> controllerGains.encoder_counts_per_rev;
@@ -212,6 +213,13 @@ bool Config::load(const std::string& filepath) {
         c2["force_ramp_rate"]   >> cal2.forceRampRate;
         c2["hold_secs"]         >> cal2.holdSecs;
         c2["release_wait_secs"] >> cal2.releaseWaitSecs;
+    }
+
+    // ---- Fitts target circle --------------------------------------------------
+    cv::FileNode tgt = fs["target"];
+    if (!tgt.empty()) {
+        tgt["radius_mm"]         >> target.radiusMm;
+        tgt["offset_default_mm"] >> target.offsetDefaultMm;
     }
 
     // ---- Gesture detection (flick up/down) -----------------------------------

@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// T_AmplifierClass.h — Copley NES-090-10-Z amplifier handler
+// T_AmplifierClass.h - Copley NES-090-10-Z amplifier handler
 //
 // Key design points vs. the reference code:
 //
@@ -37,10 +37,10 @@ struct AmpQueryState {
     };
 
     Phase   phase    = Phase::IDLE;
-    char    rxBuf[16] = {};  ///< Fixed receive buffer — zero heap allocation
+    char    rxBuf[16] = {};  ///< Fixed receive buffer - zero heap allocation
     uint8_t rxIdx    = 0;
 
-    // Latest parsed values — updated when a full poll cycle completes
+    // Latest parsed values - updated when a full poll cycle completes
     int32_t encoderCount = 0;  ///< Motor position in encoder counts
     int16_t currentRaw   = 0;  ///< Measured current in 0.01 A units
 };
@@ -70,7 +70,7 @@ public:
 
     /**
      * @brief Write commanded PWM to all three motor amplifiers.
-     *        Contains ONLY analogWrite() — safe to call from an IntervalTimer ISR.
+     *        Contains ONLY analogWrite() - safe to call from an IntervalTimer ISR.
      *        Reads commandedPwm_* from shared data written by T_SerialClass.
      */
     void DrivePWMFromISR();

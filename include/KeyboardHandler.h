@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// KeyboardHandler.h — Single-keypress, table-driven input state machine
+// KeyboardHandler.h - Single-keypress, table-driven input state machine
 //
 // Every keystroke from cv::pollKey() is processed immediately against the
 // current InputState (see KeyCommandTable.h for the full key -> transition
@@ -24,7 +24,7 @@
 
 // ---- Input state --------------------------------------------------------------
 // Flat state machine driving single-keypress dispatch. ANY/SAME/QUIT are
-// sentinels used only in KeyCommandTable rows — never assigned to
+// sentinels used only in KeyCommandTable rows - never assigned to
 // KeyboardState::inputState.
 
 enum class InputState {
@@ -37,7 +37,7 @@ enum class InputState {
     TEN_SEL_ALL, TEN_SEL_A, TEN_SEL_B, TEN_SEL_C,
     TEN_ADJ_ALL, TEN_ADJ_A, TEN_ADJ_B, TEN_ADJ_C,
     GAIN_ALL, GAIN_A, GAIN_B, GAIN_C,
-    // Sentinels — only valid in KeyCommand::requiredState / newState
+    // Sentinels - only valid in KeyCommand::requiredState / newState
     ANY, SAME, QUIT
 };
 
@@ -46,8 +46,8 @@ enum class InputState {
 // main.cpp and DisplayHandler to decide which grid/handler is active.
 
 enum class SystemState {
-    IDLE,           ///< Default — no active task, ArUco grid hidden
-    CALIBRATING,    ///< General calibration — ArUco grid shown on touchscreen
+    IDLE,           ///< Default - no active task, ArUco grid hidden
+    CALIBRATING,    ///< General calibration - ArUco grid shown on touchscreen
     CAL3,           ///< Calibration Stage 3: camera-to-fingertip offset collection
     FITTS,          ///< Fitts task running
     PRETENSION,     ///< Guided pretensioning / encoder-zeroing / home-recording sequence
@@ -56,6 +56,13 @@ enum class SystemState {
 
 /** @brief Map an InputState to its coarse SystemState for grid/handler dispatch. */
 SystemState DeriveSystemState(InputState state);
+
+/** @brief True for GAIN_ALL/GAIN_A/GAIN_B/GAIN_C - the gain-tuning overlay
+ *         entered via 'G'. These states don't represent a task of their own,
+ *         so SystemState and any task entry/exit logic must ignore them,
+ *         letting the underlying task (FITTS, CAL_STI, etc.) keep running
+ *         while gains are tuned. */
+bool IsGainTuneInputState(InputState state);
 
 // ---- Serial connection action -----------------------------------------------
 // Set by the 'S' (toggle) key; cleared by main.cpp after acting.
@@ -79,6 +86,7 @@ enum class KeyAction {
     SET_TENSION,
     ADJUST_GAIN_INC,
     ADJUST_GAIN_DEC,
+    EXIT_GAIN_MODE,
     SET_ROBOT_IDLE,
     SET_ROBOT_READY,
     TOGGLE_STIFFNESS_GAIN,
@@ -145,7 +153,7 @@ public:
 
     /**
      * @brief Ingest one raw keystroke value from cv::pollKey().
-     * @param key  Raw return value from cv::pollKey() — pass it unmasked.
+     * @param key  Raw return value from cv::pollKey() - pass it unmasked.
      *             This function handles the -1 "no key" sentinel internally.
      */
     void ProcessKey(int key);
@@ -230,4 +238,5 @@ private:
 
     KeyboardState state_;
     std::string   inputBuffer_;   // In-progress numeric entry (mirrors state_.inputBuffer)
+    InputState    preGainState_ = InputState::IDLE;  // inputState to restore on EXIT_GAIN_MODE
 };

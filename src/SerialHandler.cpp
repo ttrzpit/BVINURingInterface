@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 // =============================================================================
-// SerialHandler.cpp — PC ↔ Teensy binary serial protocol
+// SerialHandler.cpp - PC ↔ Teensy binary serial protocol
 //
 // Wire format: [0xAA] [N payload bytes] [XOR checksum]
 //   N = sizeof(TeensyToPcPacket) = 20 bytes for incoming packets
@@ -35,7 +35,7 @@ SerialHandler::~SerialHandler() { stop(); }
 // ---- Lifecycle --------------------------------------------------------------
 
 void SerialHandler::start() {
-    // Port is NOT opened here — call Connect() explicitly via the "connect" command.
+    // Port is NOT opened here - call Connect() explicitly via the "connect" command.
     std::cout << "SerialHandler: Ready. Type 'connect' to open the Teensy port.\n";
 }
 
@@ -49,20 +49,20 @@ void SerialHandler::Connect() {
         return;
     }
     if (!OpenPort()) {
-        std::cerr << "SerialHandler: Connect failed — is the Teensy plugged in?\n";
+        std::cerr << "SerialHandler: Connect failed - is the Teensy plugged in?\n";
         return;
     }
     running_       = true;
     txThread_      = std::thread(&SerialHandler::TxLoop, this);
     receiveThread_ = std::thread(&SerialHandler::ReceiveLoop, this);
-    std::cout << "SerialHandler: Connected — TX at 200 Hz, RX listening.\n";
+    std::cout << "SerialHandler: Connected - TX at 200 Hz, RX listening.\n";
 }
 
 void SerialHandler::Disconnect() {
     if (fd_ < 0) return;
     running_ = false;
 
-    // Join TX thread first — once it exits, no concurrent write() calls remain
+    // Join TX thread first - once it exits, no concurrent write() calls remain
     // and we can safely write the failsafe packet from this thread.
     if (txThread_.joinable()) txThread_.join();
 
@@ -91,7 +91,7 @@ void SerialHandler::Disconnect() {
 void SerialHandler::SetPendingTx(const PcToTeensyPacket& cmd) {
     std::lock_guard<std::mutex> lock(txMutex_);
     pendingTx_ = cmd;
-    // packet_index is managed by TxLoop — whatever was set here will be overwritten
+    // packet_index is managed by TxLoop - whatever was set here will be overwritten
 }
 
 void SerialHandler::TxLoop() {
@@ -153,7 +153,7 @@ void SerialHandler::Send(const PcToTeensyPacket& pkt) {
     buf[PAYLOAD + 1] = ComputeChecksum(reinterpret_cast<const uint8_t*>(&pkt), PAYLOAD);
 
     // write() is safe to call from the main thread while the receive thread
-    // does read() — Linux guarantees separate TX/RX for full-duplex serial fds.
+    // does read() - Linux guarantees separate TX/RX for full-duplex serial fds.
     [[maybe_unused]] ssize_t n = write(fd_, buf, sizeof(buf));
 }
 
@@ -168,13 +168,13 @@ bool SerialHandler::GetLatestPacket(TeensyToPcPacket& out) {
 }
 
 
-// ---- Private — port setup ---------------------------------------------------
+// ---- Private - port setup ---------------------------------------------------
 
 bool SerialHandler::OpenPort() {
     fd_ = open(cfg_.port.c_str(), O_RDWR | O_NOCTTY);
     if (fd_ < 0) {
         std::cerr << "SerialHandler: Cannot open " << cfg_.port
-                  << " — is the Teensy connected?\n";
+                  << " - is the Teensy connected?\n";
         return false;
     }
 
@@ -182,7 +182,7 @@ bool SerialHandler::OpenPort() {
     memset(&tty, 0, sizeof(tty));
     tcgetattr(fd_, &tty);
 
-    // Baud rate — B1000000 = 1 Mbaud, defined in <termios.h> on Linux.
+    // Baud rate - B1000000 = 1 Mbaud, defined in <termios.h> on Linux.
     // For USB CDC (virtual COM) ports this is informational; real speed
     // is determined by USB scheduling, not baud rate.
     cfsetispeed(&tty, B1000000);
@@ -193,7 +193,7 @@ bool SerialHandler::OpenPort() {
     tty.c_cflag &= ~(PARENB | PARODD | CSTOPB | CRTSCTS);
     tty.c_cflag |= CREAD | CLOCAL;
 
-    // Raw mode — no line discipline, no echo, no signals
+    // Raw mode - no line discipline, no echo, no signals
     tty.c_lflag = 0;
     tty.c_oflag = 0;
     tty.c_iflag &= ~(IXON | IXOFF | IXANY | ICRNL | INLCR);
@@ -219,12 +219,12 @@ void SerialHandler::ClosePort() {
 }
 
 
-// ---- Private — receive thread -----------------------------------------------
+// ---- Private - receive thread -----------------------------------------------
 
 void SerialHandler::ReceiveLoop() {
 
     if (fd_ < 0) {
-        // Port failed to open — sleep until stop() is called
+        // Port failed to open - sleep until stop() is called
         while (running_) std::this_thread::sleep_for(std::chrono::milliseconds(100));
         return;
     }
@@ -241,7 +241,7 @@ void SerialHandler::ReceiveLoop() {
         ssize_t n = read(fd_, &byte, 1);
 
         if (n <= 0) {
-            // Timeout (VTIME elapsed) or error — check running_ and continue
+            // Timeout (VTIME elapsed) or error - check running_ and continue
             continue;
         }
 
@@ -264,14 +264,14 @@ void SerialHandler::ReceiveLoop() {
             case Phase::READ_CHECKSUM: {
                 uint8_t expected = ComputeChecksum(buf, PAYLOAD);
                 if (byte == expected) {
-                    // Valid packet — publish to main thread
+                    // Valid packet - publish to main thread
                     std::lock_guard<std::mutex> lock(rxMutex_);
                     memcpy(&latestRx_, buf, PAYLOAD);
                     rxReady_ = true;
                 } else {
-                    // Checksum mismatch — log and wait for next start byte
+                    // Checksum mismatch - log and wait for next start byte
                     // (silent discard is fine; index counter will reveal the miss)
-                    // std::cerr << "SerialHandler: Checksum mismatch — packet discarded.\n";
+                    // std::cerr << "SerialHandler: Checksum mismatch - packet discarded.\n";
                 }
                 phase = Phase::WAIT_START;
                 break;
@@ -281,7 +281,7 @@ void SerialHandler::ReceiveLoop() {
 }
 
 
-// ---- Private — checksum -----------------------------------------------------
+// ---- Private - checksum -----------------------------------------------------
 
 uint8_t SerialHandler::ComputeChecksum(const uint8_t* data, size_t len) {
     uint8_t cs = 0;

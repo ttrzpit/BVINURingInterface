@@ -1,10 +1,10 @@
 #pragma once
 
 // =============================================================================
-// Config.h — Runtime configuration structs and loader
+// Config.h - Runtime configuration structs and loader
 //
 // All tunable system parameters are defined here as plain structs and loaded
-// from config.yaml at startup via cv::FileStorage (built into OpenCV — no
+// from config.yaml at startup via cv::FileStorage (built into OpenCV - no
 // extra dependencies needed).
 //
 // Usage:
@@ -44,7 +44,7 @@ struct CameraConfig {
     double cx = 801.26194, cy = 535.69455;  // Principal point [px]
     std::array<double, 5> distortion = {0.01561, -0.03298, 0.00020, 0.00136, 0.00561};
 
-    // Derived from the above — built by Config::load(), not set in config.yaml
+    // Derived from the above - built by Config::load(), not set in config.yaml
     cv::Mat cameraMatrix;  // 3×3 intrinsic matrix
     cv::Mat distCoeffs;    // 1×5 distortion coefficients
 
@@ -78,7 +78,7 @@ struct ArucoMarkerConfig {
 // Defaults match the values tuned for the NURing high-res camera setup.
 
 struct ArucoDetectorConfig {
-    // Adaptive thresholding — converts the grayscale frame to binary before
+    // Adaptive thresholding - converts the grayscale frame to binary before
     // searching for marker borders. Larger window sizes catch markers that are
     // farther from the camera; smaller windows are faster.
     double adaptiveThreshConstant = 7.0;  // Added to the mean in the threshold formula
@@ -86,7 +86,7 @@ struct ArucoDetectorConfig {
     int adaptiveThreshWinSizeMax = 53;    // Largest window size [px]
     int adaptiveThreshWinSizeStep = 4;    // Step between window sizes [px]
 
-    // Marker geometry filters — reject detections that are too small, too large,
+    // Marker geometry filters - reject detections that are too small, too large,
     // or have imprecise polygon fits.
     double minMarkerPerimeterRate = 0.01;       // Minimum perimeter as fraction of frame perimeter
     double maxMarkerPerimeterRate = 4.0;        // Maximum perimeter as fraction of frame perimeter
@@ -94,7 +94,7 @@ struct ArucoDetectorConfig {
     double minCornerDistanceRate = 0.02;        // Minimum distance between corners (fraction of perimeter)
     int minDistanceToBorder = 1;                // Minimum distance from marker to frame edge [px]
 
-    // Corner refinement — sub-pixel refinement improves 3D pose accuracy.
+    // Corner refinement - sub-pixel refinement improves 3D pose accuracy.
     // method: 0 = none, 1 = subpix (default), 2 = contour, 3 = AprilTag
     int cornerRefinementMethod = 1;
     int cornerRefinementMaxIterations = 50;
@@ -104,28 +104,28 @@ struct ArucoDetectorConfig {
     // black/white pattern under certain lighting conditions.
     bool detectInvertedMarker = false;
 
-    // Perspective removal — controls the resolution of the internal bit-extraction
+    // Perspective removal - controls the resolution of the internal bit-extraction
     // step. Higher pixel-per-cell values are more accurate but slower.
     int perspectiveRemovePixelPerCell = 8;
     double perspectiveRemoveIgnoredMarginPerCell = 0.13;
 
-    // ArUco3 detection — improved algorithm that is faster and more robust for
+    // ArUco3 detection - improved algorithm that is faster and more robust for
     // small or distant markers. Requires OpenCV 4.6+.
     bool useAruco3Detection = true;
 };
 
-// ---- ArUco Display (touchscreen grid — Fitts / study task) ------------------
+// ---- ArUco Display (touchscreen grid - Fitts / study task) ------------------
 // Markers are distributed evenly across the screen with equal outer padding.
 // Spacing is auto-calculated to fill the usable area.
 
 struct ArucoDisplayConfig {
     int cols = 4;                // Grid columns
     int rows = 2;                // Grid rows
-    float markerSizeMm = 20.0f;  // Marker side length [mm] — converted to px at render time
-    float paddingMm = 22.0f;     // Outer padding on all 4 sides [mm] — converted to px at render time
+    float markerSizeMm = 20.0f;  // Marker side length [mm] - converted to px at render time
+    float paddingMm = 22.0f;     // Outer padding on all 4 sides [mm] - converted to px at render time
 };
 
-// ---- ArUco Calibration Grid (touchscreen grid — Cal2 / Cal3 solvePnP) -------
+// ---- ArUco Calibration Grid (touchscreen grid - Cal2 / Cal3 solvePnP) -------
 // Columns and rows are auto-calculated: pack markers with exactly markerPadMm
 // between them inside the exclusion zone boundary. Uses DICT_4X4_250.
 
@@ -143,7 +143,7 @@ struct TouchscreenConfig {
     int xOffset = 3440;                   // X position of the touchscreen in the desktop coordinate space
     int yOffset = 0;                      // Y position (0 when monitors are top-aligned)
     float pixelsPerMm = 3.6430f;          // Physical pixel density of the touchscreen [px/mm]
-    float mmPerPixel = 0.27450f;          // Inverse — use whichever direction is convenient
+    float mmPerPixel = 0.27450f;          // Inverse - use whichever direction is convenient
     int xinputDeviceId = 9;               // xinput device ID for the touchscreen
     std::string xinputOutput = "HDMI-0";  // X output name to map the touchscreen to
 };
@@ -165,7 +165,7 @@ struct TelemetryConfig {
     int cols = 50;    // Number of grid columns (cell width = width / cols)
     int rows = 6;     // Number of grid rows    (cell height = height / rows)
     int xPos = 0;     // Window X position on the desktop
-    int yPos = 1100;  // Window Y position — set to approx. display height + title bar
+    int yPos = 1100;  // Window Y position - set to approx. display height + title bar
 };
 
 // ---- Controller Panel (separate tall narrow panel for controller telemetry) -
@@ -213,12 +213,19 @@ struct GestureConfig {
 
     // ---- Confirm gesture (circle) + flick false-positive rejection ---------
     float  restSpeedThreshMmS  = 15.0f;  // |vel_filtered_| below this counts as "at rest" [mm/s]
-    double flickMaxMotionSecs  = 0.3;    // Max continuous time spent moving (since last at rest) for a velocity spike to still count as a flick [s] — sustained motion (a circle) exceeds this and blocks flick arming
+    double flickMaxMotionSecs  = 0.3;    // Max continuous time spent moving (since last at rest) for a velocity spike to still count as a flick [s] - sustained motion (a circle) exceeds this and blocks flick arming
     float  circleConfirmRad    = 5.236f; // Cumulative rotation to confirm a circle [rad] (~300 deg)
     double circleMaxWindowSecs = 1.5;    // Rolling time window for rotation accumulation [s]
-    float  circleMinRadiusMm   = 5.0f;   // Min path radius from centroid — rejects jitter [mm]
-    float  circleMaxRadiusMm   = 50.0f;  // Max path radius from centroid — rejects large sweeps [mm]
+    float  circleMinRadiusMm   = 5.0f;   // Min path radius from centroid - rejects jitter [mm]
+    float  circleMaxRadiusMm   = 50.0f;  // Max path radius from centroid - rejects large sweeps [mm]
     double circleCooldownSecs  = 0.6;    // Min gap between confirms; also on-screen indicator duration [s]
+};
+
+// ---- Fitts Target Circle -----------------------------------------------------
+
+struct TargetConfig {
+    float radiusMm        = 5.0f;   // Drawn target circle radius [mm]
+    float offsetDefaultMm = 40.0f;  // Gray circle Y offset below the tag before Cal3 completes [mm]
 };
 
 // ---- Serial (Teensy) --------------------------------------------------------
@@ -235,18 +242,19 @@ struct ControllerConfig {
     float gain_kD             = 0.0f;    // Derivative gain [N·s/mm]
     float gain_kI             = 0.0f;    // Integral gain [N/(mm·s)]
     float deflection_force_max = 5.0f;   // Maximum allowable guidance deflection force magnitude [N]
-    float tension_min         = 0.3f;    // Preload (minimum) tension per motor [N]
-    float tension_max         = 10.0f;   // Maximum tension per motor [N]
-    float position_tolerance  = 1.0f;    // Deadband radius — no force inside [mm]
+    float tension_preload_min   = 0.1f;  // T_preload_min: minimum preload tension per motor [N]
+    float tension_preload_max   = 2.0f;  // T_preload_max: maximum preload tension per motor [N]
+    float tension_deflection_max = 1.0f; // T_deflection_max: max per-motor tension contribution from the guidance/deflection force [N]
+    float tension_output_max    = 3.0f;  // T_output_max: max total commanded tension per motor (T_preload + T_deflection) [N]
+    float position_tolerance  = 1.0f;    // Deadband radius - no force inside [mm]
     float lowpass_alpha       = 0.15f;   // Velocity low-pass coefficient (0=heavy, 1=none)
-    int   tension_solver_iters = 5;      // Projected gradient descent iterations
     float ramp_duration_secs  = 1.0f;   // Force ramp-up duration after new target [s]
     float max_current_amps    = 1.89f;   // Amplifier max current [A]
     int   encoder_counts_per_rev = 4096; // Encoder ticks per motor revolution
 };
 
 // =============================================================================
-// Config — loads all of the above from config.yaml
+// Config - loads all of the above from config.yaml
 // =============================================================================
 
 class Config {
@@ -259,7 +267,7 @@ class Config {
      */
     bool load(const std::string& filepath = "config.yaml");
 
-    // Sub-configs — hand these to handlers by const reference
+    // Sub-configs - hand these to handlers by const reference
     CameraConfig camera;
     ArucoMarkerConfig arucoMarker;
     ArucoDetectorConfig arucoDetector;  // Algorithm tuning params for the OpenCV detector
@@ -275,6 +283,7 @@ class Config {
     Cal1Config cal1;
     Cal2Config cal2;
     GestureConfig gesture;
+    TargetConfig target;
 
    private:
     // Build cameraMatrix and distCoeffs from the scalar values after loading
