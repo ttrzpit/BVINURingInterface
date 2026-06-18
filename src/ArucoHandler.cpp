@@ -1,5 +1,6 @@
 #include "ArucoHandler.h"
 
+#include <cmath>
 #include <iomanip>
 #include <iostream>
 
@@ -165,10 +166,14 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
         // Rotation about the Y axis (most informative for a ring-worn marker)
         marker.rotationDeg = static_cast<float>(rvecs[0][1]) * RAD2DEG;
 
-        // In-plane rotation (Z component of Rodrigues vector) - used by main.cpp
-        // to compute the roll delta relative to Cal3's rollReference_ so the
-        // fingertip offset can be rotated to match the current finger roll.
-        marker.rollRad = static_cast<float>(rvecs[0][2]);
+        // In-plane roll from the marker's top edge in the image (top-left ->
+        // top-right corner). Sub-pixel corners make this stable, unlike rvec[2]
+        // (the Rodrigues Z-component), which flips between the two planar-pose
+        // solutions and makes the roll jump erratically. All screen markers are
+        // axis-aligned, so this angle measures the camera's roll directly. Used
+        // to compute the roll delta vs Cal3's rollReference_ so the fingertip
+        // offset can be rotated to match the current finger roll.
+        marker.rollRad = std::atan2(c[1].y - c[0].y, c[1].x - c[0].x);
 
         results.push_back(marker);
     }

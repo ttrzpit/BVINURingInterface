@@ -132,17 +132,11 @@ void DisplayHandler::Update( const cv::Mat                     &frame,
         }
 
         if ( virtualTargetVisible_ ) {
-            // Green dot: where the marker must appear in the image for the
-            // fingertip to reach the fixed red circle after roll correction.
+            // Green dot = guiding position ("virtual marker"): where the marker
+            // centre must be steered so the fingertip lands on the target. It sits
+            // at the marker centre plus the roll-induced offset (d - R*d).
             cv::circle( canvas, virtualTargetPx_, 6, Colors::GreMd, -1 );
             cv::circle( canvas, virtualTargetPx_, 6, Colors::GreLt, 1 );
-        }
-
-        if ( virtualFingertipVisible_ ) {
-            const cv::Point2i &p = virtualFingertipPx_;
-            cv::circle( canvas, p, 14, cv::Scalar( 255, 0, 255 ), 2 );    // magenta ring
-            cv::circle( canvas, p, 3, cv::Scalar( 255, 0, 255 ), -1 );    // filled centre
-            cv::putText( canvas, "FT", p + cv::Point2i( 16, -12 ), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar( 255, 0, 255 ), 1 );
         }
 
         // if ( touchFingertipVisible_ ) {
@@ -1213,15 +1207,14 @@ void DisplayHandler::DrawMarkerOverlays(
                          m.centerPx + cv::Point2i( 10, -10 ), cv::FONT_HERSHEY_SIMPLEX,
                          0.6, cv::Scalar( 0, 255, 0 ), 2 );
 
-            // Line from the error target (green dot) to the current marker center.
-            // The green dot (virtualTargetPx_) is where the marker must appear for
-            // error = 0, so this line directly shows the error vector in image space.
-            // Without Cal3 the dot sits at principalPoint_, so the line goes from
-            // the camera centre to the marker — the same as the raw marker displacement.
-            cv::Point2i lineFrom = ( cal3Complete_ && virtualTargetVisible_ )
-                                       ? virtualTargetPx_
-                                       : principalPoint_;
-            cv::line( frame, lineFrom, m.centerPx, Colors::GreMd, 2 );
+            // Green line from the camera centre (principal point) to the guiding
+            // position (green dot = where the camera should be steered so the
+            // fingertip lands on the target). Before Cal3 / when no virtual target
+            // is set, fall back to the marker centre.
+            cv::Point2i lineTo = ( cal3Complete_ && virtualTargetVisible_ )
+                                     ? virtualTargetPx_
+                                     : m.centerPx;
+            cv::line( frame, principalPoint_, lineTo, Colors::GreMd, 2 );
 
         } else {
             // Non-active markers: small dot and ID text

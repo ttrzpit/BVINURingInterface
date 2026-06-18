@@ -89,9 +89,19 @@ bool Cal3Handler::Update( const TouchState& touch,
                 offsets_.push_back( offset );
                 lastOffset_ = offset;
 
-                // Store roll reference from Z rotation of rvec
-                // (rvec[2] approximates in-plane rotation; refine convention later)
-                float roll = static_cast<float>( rvec[2] );
+                // Roll reference = circular mean of the per-marker corner roll
+                // (ArucoHandler sets marker.rollRad from the marker's top edge).
+                // This MUST use the same measure as the runtime roll so the delta
+                // is zero at the reference pose; rvec[2] is avoided because the
+                // planar-pose ambiguity makes it jump. All calibration-grid markers
+                // are axis-aligned, so each measures the camera roll; averaging
+                // (via sin/cos to handle wraparound) reduces detector noise.
+                float sumSin = 0.0f, sumCos = 0.0f;
+                for ( const auto& mk : markers ) {
+                    sumSin += std::sin( mk.rollRad );
+                    sumCos += std::cos( mk.rollRad );
+                }
+                float roll = std::atan2( sumSin, sumCos );
                 rollSamples_.push_back( roll );
 
                 sampleCount_++;

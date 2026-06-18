@@ -59,9 +59,9 @@ aruco_display:
 # Spacing between markers is auto-calculated from screen size, padding, and marker size.
 # Uses the larger ArUco dictionary 4x4x250
 aruco_calibration_grid:
-   marker_size_mm: 10.0       # Marker side length [mm] - converted to pixels at runtime
-   marker_pad_mm: 10.0        # Padding between markers [mm] - converted to pixels at runtime
-   marker_exclusion_mm: 60.0  # Exclusion zone around the aruco grid to keep markers away from the screen edge
+   marker_size_mm: 8.0       # Marker side length [mm] - converted to pixels at runtime
+   marker_pad_mm: 8.0        # Padding between markers [mm] - converted to pixels at runtime
+   marker_exclusion_mm: 80.0  # Exclusion zone around the aruco grid to keep markers away from the screen edge
 
 
 # ---- Camera -----------------------------------------------------------------

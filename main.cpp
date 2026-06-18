@@ -445,14 +445,17 @@ int main() {
                 lastTargetCircleRadiusPx  = radiusPx;
                 haveLastTargetCircle      = true;
 
-                // Green dot: image position where the marker must appear for the
-                // fingertip to land exactly on the red circle. At zero roll == principal point.
-                // positionMm.x = tvec[0]; positionMm.y = -tvec[1] (Y-up), so image Y is negated.
-                int cx = static_cast<int>( cfg.camera.cx );
-                int cy = static_cast<int>( cfg.camera.cy );
+                // Green dot = guiding position ("virtual marker"): where the marker
+                // centre must be steered so the fingertip lands on the target. It is
+                // the marker centre plus the roll-induced offset (d - R*d), so it is
+                // anchored to the tag and only shifts as the finger rolls (stable,
+                // since it no longer depends on the noisy single-marker pose).
+                // (ox,oy) and (corrX,corrY) are camera-frame Y-up mm; image Y is down.
+                const float guideOffX = ox - corrX_screen;          // (d - R*d).x
+                const float guideOffY = oy - corrY_screen;          // (d - R*d).y
                 cv::Point2i virtualTargetPx(
-                    cx + static_cast<int>( std::round( cfg.camera.fx * ( corrX_screen - ox ) / depth ) ),
-                    cy - static_cast<int>( std::round( cfg.camera.fy * ( corrY_screen - oy ) / depth ) ) );
+                    activeMarker->centerPx.x + static_cast<int>( std::round( cfg.camera.fx * guideOffX / depth ) ),
+                    activeMarker->centerPx.y - static_cast<int>( std::round( cfg.camera.fy * guideOffY / depth ) ) );
                 display.SetVirtualTarget( cal3.IsComplete(), virtualTargetPx );
             } else {
                 display.SetVirtualTarget( false, {} );
@@ -688,12 +691,10 @@ int main() {
             if ( kb.systemState == SystemState::FITTS ) {
                 fitts.Update( markers, touchState, cal3.IsComplete(),
                               cal3.GetFinalOffset(), cal3.GetRollRef() );
-                display.SetVirtualFingertip( fitts.HasVirtualFingertip(), fitts.GetVirtualFingertipPx() );
                 display.SetTouchFingertip( fitts.HasTouchFingertip(), fitts.GetTouchFingertipPx() );
                 aruco.SetFittsOverlay( fitts.HasTouchSample(), fitts.GetTouchScreenPx(),
                                        fitts.GetErrorLine1(), fitts.GetErrorLine2() );
             } else {
-                display.SetVirtualFingertip( false );
                 display.SetTouchFingertip( false );
                 aruco.SetFittsOverlay( false, {}, "", "" );
             }
