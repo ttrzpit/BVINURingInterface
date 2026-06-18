@@ -31,15 +31,15 @@ aruco_detector:
 
    # Corner refinement improves 3D pose accuracy at a small speed cost.
    corner_refinement_method:         1       # Corner refinement algorithm applied after initial detection to improve pose accuracy: 0 = none (fastest, least accurate), 1 = subpixel refinement (cv::cornerSubPix), 2 = contour-based, 3 = AprilTag-based refinement (most accurate, slowest). 1 (subpixel) is a good accuracy/speed tradeoff.
-   corner_refinement_max_iterations: 30      # Maximum number of iterations the corner refinement algorithm (set by corner_refinement_method) runs per marker. More iterations can improve accuracy slightly but increase per-marker processing time; refinement stops early if corner_refinement_min_accuracy is reached first.
+   corner_refinement_max_iterations: 30      # 30 Maximum number of iterations the corner refinement algorithm (set by corner_refinement_method) runs per marker. More iterations can improve accuracy slightly but increase per-marker processing time; refinement stops early if corner_refinement_min_accuracy is reached first.
    corner_refinement_min_accuracy:   0.01    # Convergence threshold (in pixels) for corner refinement: refinement stops once corner positions change by less than this between iterations, or corner_refinement_max_iterations is reached, whichever comes first. Smaller values demand tighter convergence (slower, more precise).
 
    # Detect markers on glossy/reflective surfaces that invert the black/white pattern.
    detect_inverted_marker: 0   # When enabled (1), also searches for markers printed with inverted polarity (white pattern on black background), in addition to the normal black-on-white markers. Useful for markers viewed on a backlit screen or a reflective/glossy surface where contrast can invert. Roughly doubles detection cost when on.
 
    # Perspective removal - resolution of the internal bit-extraction step.
-   perspective_remove_pixel_per_cell:          8     # Resolution, in pixels per bit-cell, used when the detector warps each candidate marker to a flat square to read its black/white bit pattern. Higher values sample each cell more finely (more accurate bit decoding, especially at oblique angles) at the cost of extra processing per marker.
-   perspective_remove_ignored_margin_per_cell: 0.13  # Fraction of each bit-cell's width/height, around its edge, that is ignored when sampling that cell's color during bit decoding. Avoids letting blur or imperfect perspective correction near a cell's border bias the black/white decision toward the wrong value.
+   perspective_remove_pixel_per_cell:          8   # 8 Resolution, in pixels per bit-cell, used when the detector warps each candidate marker to a flat square to read its black/white bit pattern. Higher values sample each cell more finely (more accurate bit decoding, especially at oblique angles) at the cost of extra processing per marker.
+   perspective_remove_ignored_margin_per_cell: 0.2  # 0.13 Fraction of each bit-cell's width/height, around its edge, that is ignored when sampling that cell's color during bit decoding. Avoids letting blur or imperfect perspective correction near a cell's border bias the black/white decision toward the wrong value.
 
    # ArUco3 detection - faster and more robust algorithm for small/distant markers.
    use_aruco3_detection: 0   # Enables the newer ArUco3 detection pipeline, which adds a fast low-resolution pre-pass to locate marker candidates before refining them at full resolution. Generally faster and better at finding small or distant markers than the legacy pipeline, at the cost of some extra tuning parameters (not exposed here).
@@ -59,9 +59,9 @@ aruco_display:
 # Spacing between markers is auto-calculated from screen size, padding, and marker size.
 # Uses the larger ArUco dictionary 4x4x250
 aruco_calibration_grid:
-   marker_size_mm: 12.0       # Marker side length [mm] - converted to pixels at runtime
-   marker_pad_mm: 12.0        # Padding between markers [mm] - converted to pixels at runtime
-   marker_exclusion_mm: 20.0  # Exclusion zone around the aruco grid to keep markers away from the screen edge
+   marker_size_mm: 10.0       # Marker side length [mm] - converted to pixels at runtime
+   marker_pad_mm: 10.0        # Padding between markers [mm] - converted to pixels at runtime
+   marker_exclusion_mm: 60.0  # Exclusion zone around the aruco grid to keep markers away from the screen edge
 
 
 # ---- Camera -----------------------------------------------------------------
@@ -134,15 +134,10 @@ controller:
    width: 450
    height: 1350
    cols: 15
-   rows: 44
+   rows: 45
    x_pos: 1372
    y_pos: 0
 
-# ---- Calibration Stage 3 timing ---------------------------------------------
-cal3:
-   hold_secs:     0.05   # Seconds the screen must be held before a sample is recorded
-   cooldown_secs: 1.0    # Seconds to wait between successive samples
-   max_samples:   10     # Number of touches required to complete calibration
 
 # ---- Calibration Stage 1 timing (AROM) ---------------------------------------
 cal1:
@@ -150,9 +145,16 @@ cal1:
 
 # ---- Calibration Stage 2 timing (Stiffness) ------------------------------------
 cal2:
-   force_ramp_rate:   1.0  # Open-loop force ramp-up rate [N/s]
+   force_ramp_rate:   0.5  # Open-loop force ramp-up rate [N/s]
    hold_secs:         2.0  # Hold duration at peak force per heading [s]
    release_wait_secs: 3.0  # Wait after releasing (no ramp-down) before the next heading [s]
+
+# ---- Calibration Stage 3 timing ---------------------------------------------
+cal3:
+   hold_secs:     0.05   # Seconds the screen must be held before a sample is recorded
+   cooldown_secs: 0.5    # Seconds to wait between successive samples
+   max_samples:   10     # Number of touches required to complete calibration
+
 
 # ---- Fitts target circle ------------------------------------------------------
 # radius_mm         : Drawn target circle radius [mm]
@@ -187,7 +189,7 @@ gesture:
    min_displacement_mm: 3.0
    max_window_secs: 0.25
    cooldown_secs: 0.4
-   double_flick_window_secs: 1.5
+   double_flick_window_secs: 0.5
 
    rest_speed_thresh_mm_s: 8.0
    flick_max_motion_secs: 0.3

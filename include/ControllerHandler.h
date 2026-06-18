@@ -82,6 +82,9 @@ struct ControllerTelemetry {
                                         ///< false when 'e' has zeroed it (tension-only / preload output)
     bool        isTargetActive; ///< Mirrors the isTargetActive argument passed to the last Update() call
 
+    cv::Point3f displacement;           ///< Δp = pos_target_3d − pos_fingertip [mm] - the move that
+                                         ///< lands the fingertip on the target (camera frame, Y-up, Z=depth).
+                                         ///< Δp.xy equals the PID position error; Δp.z is depth_to_target.
     cv::Point2f measuredForce;          ///< Measured force from amplifier current [N]
     std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT> stiffnessProfile; ///< K(theta) [N/mm]
     bool        stiffnessValid;         ///< True once Cal2Handler has produced K(theta)
@@ -111,20 +114,37 @@ public:
     // ---- Per-frame update ---------------------------------------------------
 
     /**
-     * @brief Run one full pipeline iteration.
-     * @param rx             Latest Teensy packet (encoder counts + measured current)
-     * @param pos_target     Desired fingertip deflection in virtual task space [mm]
-     * @param isTargetActive True when a valid target exists; false decays PID to preload
-     * @param nowSecs        Current time [s] - used for ramp and integral timing
-     * @param dt             Time step since last Update() [s]
+     * @brief Feed the active marker and calibration state for the next Update().
+     *        Stores the inputs; pos_target and the IIR setpoint filter are computed
+     *        inside Update() after Stage 0 updates pos_virtual_.
+     *
+     * @param markerActive     True when an active marker is currently detected
+     * @param markerPosMm      Marker position from DetectedMarker::positionMm [mm]
+     * @param markerRollRad    Marker roll from DetectedMarker::rollRad [rad]
+     * @param cal3Complete     True once Cal3 fingertip-offset calibration is done
+     * @param cal3Offset       Calibrated camera-to-fingertip offset vector (x, y) [mm]
+     * @param cal3RollRefRad   Cal3 reference roll angle [rad]
+     * @param defaultOffsetMm  Fallback Y offset used before Cal3 completes [mm]
+     * @param guidanceActive   False suppresses guidance (e.g. touch already recorded)
      */
-    void Update(const TeensyToPcPacket& rx,
-                cv::Point2f             pos_target,
-                bool                    isTargetActive,
-                double                  nowSecs,
-                float                   dt);
+    void SetTarget(bool        markerActive,
+                   cv::Point3f markerPosMm,
+                   float       markerRollRad,
+                   bool        cal3Complete,
+                   cv::Point2f cal3Offset,
+                   float       cal3RollRefRad,
+                   float       defaultOffsetMm,
+                   bool        guidanceActive);
 
-    /** @brief Restart the force ramp-up (call when a new target is presented). */
+    /**
+     * @brief Run one full pipeline iteration.  Call SetTarget() each frame before this.
+     * @param rx      Latest Teensy packet (encoder counts + measured current)
+     * @param nowSecs Current time [s] - used for ramp and integral timing
+     * @param dt      Time step since last Update() [s]
+     */
+    void Update(const TeensyToPcPacket& rx, double nowSecs, float dt);
+
+    /** @brief Restart the force ramp-up and setpoint filter (call when a new target is presented). */
     void ResetRamp(double nowSecs);
 
     // ---- Output gating --------------------------------------------------------
@@ -185,6 +205,52 @@ public:
     // ---- Measured force/current (from amplifier-reported current, Stage 0) ---
     cv::Point3f GetMeasuredCurrent() const { return { measuredCurrent_A_, measuredCurrent_B_, measuredCurrent_C_ }; }
     cv::Point2f GetMeasuredForce()   const { return { measuredForce_x_, measuredForce_y_ }; }
+
+    // ---- Target state (computed each Update from SetTarget inputs) ---------------
+    // ox/oy: effective unrotated fingertip offset [mm], camera frame (X right, Y up).
+    // corrX/corrY: roll-rotated fingertip offset [mm], same frame.
+    // Main.cpp uses these to project the target circle and virtual-target green dot
+    // into camera image pixels (requires camera intrinsics not held by the controller).
+    struct TargetOffsets { float ox, oy, corrX, corrY; };
+    TargetOffsets GetTargetOffsets() const { return { targetOx_, targetOy_, targetCorrX_, targetCorrY_ }; }
+    bool          IsTargetActive()   const { return isTargetActive_; }
+
+    // ---- Fingertip-to-target positioning transform ------------------------------
+    // All three operate in ONE consistent frame (the caller's responsibility).
+    // The controller calls them in the camera frame that DetectedMarker::positionMm
+    // uses: X right, Y up, Z = depth (forward), camera at the origin.
+    //
+    // CONVENTION FLAGS (see ComputeFingertip body and the .cpp call site):
+    //   * Roll axis is the camera optical (Z) axis - consistent with rvec[2] being
+    //     the stored roll, but rvec[2] is the Rodrigues Z-component, a true roll
+    //     only when pitch/yaw are small.
+    //   * roll_reference (Cal3 multi-tag solvePnP, screen->camera) and roll_current
+    //     (per-marker estimatePoseSingleMarkers, marker->camera) come from DIFFERENT
+    //     PnP solves; their absolute zeros are not guaranteed to coincide.
+    //   * offset_cam_to_fingertip is measured by Cal3 in the screen-world frame
+    //     (Y down, Z toward camera); its X,Y match the OpenCV camera frame.
+    //     Update() negates Y to express it in positionMm's Y-up camera frame and
+    //     rolls it by +(roll_current - roll_reference) about Z. This produces the
+    //     same physical R*d as FittsTaskHandler's fingertip cursor (which works in
+    //     the Y-down frame), so guidance and the FITTS display agree. The
+    //     screen-world<->camera X,Y identity is exact only for a near-frontal view;
+    //     a fully general fix would rotate the offset by the live screen->camera
+    //     pose (Cal3 stores only the scalar roll reference, not the full rotation).
+
+    /** @brief Roll-correction rotation about +Z by (roll_current - roll_reference) [rad]. */
+    cv::Matx33f BuildRollCorrection(float roll_current, float roll_reference) const;
+
+    /** @brief pos_fingertip = pos_camera + R_roll * offset_cam_to_fingertip. */
+    cv::Point3f ComputeFingertip(const cv::Point3f& pos_camera,
+                                 const cv::Matx33f& R_roll,
+                                 const cv::Point3f& offset_cam_to_fingertip) const;
+
+    /** @brief Δp = pos_target_3d - pos_fingertip - the displacement onto the target. */
+    cv::Point3f ComputeDisplacement(const cv::Point3f& pos_target_3d,
+                                    const cv::Point3f& pos_fingertip) const;
+
+    /** @brief Latest Δp from the most recent Update() [mm]. */
+    cv::Point3f GetDisplacement() const { return displacement_; }
 
     // ---- Stiffness profile K(theta) [N/mm] (Stage 2 calibration result) ------
     // 10 values aligned with CONSTANT_CALIBRATION_ANGLES_DEG. When valid and
@@ -327,7 +393,7 @@ private:
     // ---- Guidance output gating ('e'/'E') --------------------------------------
     bool guidanceOutputEnabled_ = true;
 
-    // ---- Last isTargetActive passed to Update() (for telemetry) ----------------
+    // ---- Target active flag (set by SetTarget, for PID gating + telemetry) ------
     bool isTargetActive_ = false;
 
     // ---- Manual tension override (pretensioning step 3/4) --------------------
@@ -336,6 +402,29 @@ private:
     // ---- Calibration force mode (Stage 2 stiffness calibration) --------------
     bool  calibrationForceMode_ = false;
     float calForce_x_ = 0.0f, calForce_y_ = 0.0f;
+
+    // ---- Setpoint pre-filter (first-order IIR, reset by ResetRamp) ------------
+    cv::Point2f posTargetSmoothed_     = {};
+    bool        posTargetSmoothedInit_ = false;
+    static constexpr float kSetpointTau_ = 0.05f;
+
+    // ---- Target inputs (stored by SetTarget, consumed in Update) ---------------
+    bool        targetMarkerActive_    = false;
+    cv::Point3f targetMarkerPosMm_     = {};
+    float       targetMarkerRollRad_   = 0.0f;
+    bool        targetCal3Complete_    = false;
+    cv::Point2f targetCal3Offset_      = {};
+    float       targetCal3RollRefRad_  = 0.0f;
+    float       targetDefaultOffsetMm_ = 0.0f;
+
+    // ---- Computed target offsets (set each Update, exposed via GetTargetOffsets) --
+    float targetOx_    = 0.0f;
+    float targetOy_    = 0.0f;
+    float targetCorrX_ = 0.0f;
+    float targetCorrY_ = 0.0f;
+
+    // ---- Fingertip-to-target displacement Δp (set each Update) -------------------
+    cv::Point3f displacement_ = {};
 
     // ---- Measured current/force (Stage 0, from amplifier-reported current) ---
     float measuredCurrent_A_ = 0.0f, measuredCurrent_B_ = 0.0f, measuredCurrent_C_ = 0.0f;

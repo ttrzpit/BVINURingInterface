@@ -196,6 +196,10 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { {45, 173}, InputState::GAIN_A,   InputState::SAME, "", KeyAction::ADJUST_GAIN_DEC },
     { {45, 173}, InputState::GAIN_B,   InputState::SAME, "", KeyAction::ADJUST_GAIN_DEC },
     { {45, 173}, InputState::GAIN_C,   InputState::SAME, "", KeyAction::ADJUST_GAIN_DEC },
+
+  // Set zero home postion for virtual fingertip
+  { {'Z'}, InputState::ANY, InputState::SAME, "Setting position as home.", KeyAction::SET_HOME_POSITION },
+
 };
 
 

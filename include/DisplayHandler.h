@@ -141,6 +141,14 @@ public:
     void SetVirtualFingertip(bool visible, cv::Point2i px = {});
 
     /**
+     * @brief Set the roll-corrected virtual target point in the operator display.
+     *        The green dot shows where the marker must appear in the camera image
+     *        for the fingertip to land on the fixed red circle after roll correction.
+     *        At zero roll it coincides with the principal point (image centre).
+     */
+    void SetVirtualTarget(bool visible, cv::Point2i px = {});
+
+    /**
      * @brief Set the frozen fingertip-at-touch marker for the operator display.
      *        Call with visible=true and the virtual fingertip pixel position
      *        recorded at the moment of a touchscreen contact in FITTS mode;
@@ -231,6 +239,9 @@ private:
 
     bool        virtualFingertipVisible_ = false;
     cv::Point2i virtualFingertipPx_      = {};
+
+    bool        virtualTargetVisible_ = false;
+    cv::Point2i virtualTargetPx_      = {};
 
     bool        touchFingertipVisible_ = false;
     cv::Point2i touchFingertipPx_      = {};

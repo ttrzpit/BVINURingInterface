@@ -376,9 +376,9 @@ int main() {
         // the sudden jump in position error doesn't snap the finger toward
         // the new target; force instead rises smoothly over ramp_duration_secs.
         if ( kb.activeTagId != prevActiveTagId ) {
-            controller.ResetRamp( nowSecs );
+            controller.ResetRamp( nowSecs );    // also resets the setpoint IIR filter
             prevActiveTagId = kb.activeTagId;
-            haveLastTargetCircle = false;    // clear stale camera-circle on target change
+            haveLastTargetCircle = false;
         }
 
         // f. Controller - runs every loop iteration so dt tracks wall-clock
@@ -408,32 +408,57 @@ int main() {
         // Once the participant has touched the screen for the current target,
         // guidance cues stop until a new target is loaded (fitts.OnNewTarget()
         // resets HasTouchSample() on the next 'r'/'m' target change).
-        bool guidanceSuppressedByTouch = ( kb.systemState == SystemState::FITTS && fitts.HasTouchSample() );
+        const bool guidanceSuppressedByTouch = ( kb.systemState == SystemState::FITTS && fitts.HasTouchSample() );
 
-        cv::Point2f pos_target = controller.GetVirtualPosition();
-        bool isTargetActive = false;
+        // Hand the active marker and calibration state to the controller.
+        // pos_target, roll compensation, and the IIR setpoint filter are all
+        // computed inside ControllerHandler::Update().
+        controller.SetTarget(
+            activeMarker != nullptr,
+            activeMarker ? activeMarker->positionMm : cv::Point3f{},
+            activeMarker ? activeMarker->rollRad    : 0.0f,
+            cal3.IsComplete(),
+            cv::Point2f{ cal3.GetFinalOffset().x, cal3.GetFinalOffset().y },
+            cal3.GetRollRef(),
+            cfg.target.offsetDefaultMm,
+            !guidanceSuppressedByTouch
+        );
+
+        // Project the target offsets into camera image pixels for operator display.
+        // The controller exposes (ox, oy, corrX, corrY) in mm; the camera intrinsics
+        // live here in main so the pixel maths stays outside the controller.
         if ( activeMarker ) {
-            float targetOffsetY = cal3.IsComplete() ? cal3.GetFinalOffset().y
-                                                    : cfg.target.offsetDefaultMm;
-
-            pos_target.x += activeMarker->positionMm.x;
-            pos_target.y += activeMarker->positionMm.y;
-            isTargetActive = !guidanceSuppressedByTouch;
-
-            // Project target circle onto the operator camera image and cache
-            // its position - persists on screen even when the marker briefly
-            // leaves the camera frame (haveLastTargetCircle stays true until
-            // the active tag changes). offsetPx > 0 moves the circle down
-            // (toward larger pixel-Y), matching the Y-up positionMm frame.
-            float depth = activeMarker->positionMm.z;
+            const auto tgtOfs        = controller.GetTargetOffsets();
+            const float ox           = tgtOfs.ox;
+            const float oy           = tgtOfs.oy;
+            const float corrX_screen = tgtOfs.corrX;
+            const float corrY_screen = tgtOfs.corrY;
+            const float depth        = activeMarker->positionMm.z;
             if ( depth > 1e-3f ) {
-                int offsetPx = static_cast<int>( std::round( cfg.camera.fy * targetOffsetY / depth ) );
-                int radiusPx = static_cast<int>( std::round(
+                int offsetXpx = static_cast<int>( std::round( cfg.camera.fx * ox / depth ) );
+                // oy is camera-frame Y-up; image Y points down, hence the negation
+                // (matches the virtualTargetPx Y term below).
+                int offsetYpx = static_cast<int>( std::round( -cfg.camera.fy * oy / depth ) );
+                int radiusPx  = static_cast<int>( std::round(
                     0.5 * ( cfg.camera.fx + cfg.camera.fy ) * cfg.target.radiusMm / depth ) );
-                lastTargetCirclePx = activeMarker->centerPx + cv::Point2i( 0, offsetPx );
-                lastTargetCircleRadiusPx = radiusPx;
-                haveLastTargetCircle = true;
+                lastTargetCirclePx        = activeMarker->centerPx + cv::Point2i( offsetXpx, offsetYpx );
+                lastTargetCircleRadiusPx  = radiusPx;
+                haveLastTargetCircle      = true;
+
+                // Green dot: image position where the marker must appear for the
+                // fingertip to land exactly on the red circle. At zero roll == principal point.
+                // positionMm.x = tvec[0]; positionMm.y = -tvec[1] (Y-up), so image Y is negated.
+                int cx = static_cast<int>( cfg.camera.cx );
+                int cy = static_cast<int>( cfg.camera.cy );
+                cv::Point2i virtualTargetPx(
+                    cx + static_cast<int>( std::round( cfg.camera.fx * ( corrX_screen - ox ) / depth ) ),
+                    cy - static_cast<int>( std::round( cfg.camera.fy * ( corrY_screen - oy ) / depth ) ) );
+                display.SetVirtualTarget( cal3.IsComplete(), virtualTargetPx );
+            } else {
+                display.SetVirtualTarget( false, {} );
             }
+        } else {
+            display.SetVirtualTarget( false, {} );
         }
 
         // Circle color: red (cal3 calibrated offset) or gray (default offset,
@@ -474,7 +499,15 @@ int main() {
         TeensyToPcPacket rxPkt = {};
         bool hasRxPkt = serial.GetLatestPacket( rxPkt );
         if ( hasRxPkt ) {
-            controller.Update( rxPkt, pos_target, isTargetActive, nowSecs, dt );
+            controller.Update( rxPkt, nowSecs, dt );
+        }
+
+        // Set home position ('Z' key) - records current encoder angles as the
+        // neutral home pose, identical to what PretensionHandler does at step 3.
+        if ( kb.pendingSetHomePosition ) {
+            controller.SetHomePosition( rxPkt );
+            keyboard.SetExternalStatus( "Home position recorded." );
+            keyboard.ClearSetHomePosition();
         }
 
         // Pretensioning - guided state machine (see PretensionHandler.h)
@@ -542,7 +575,7 @@ int main() {
         // connection + tensioning completeness + guidance enable.
         // Independent of PRETENSION/TENSION_ADJUST/CAL_ROM, which manage
         // controller output/manual-tension mode directly while active.
-        bool guidanceActive = isTargetActive && controller.IsOutputEnabled() && controller.IsGuidanceOutputEnabled();
+        bool guidanceActive = controller.IsTargetActive() && controller.IsOutputEnabled() && controller.IsGuidanceOutputEnabled();
 
         bool inOverrideMode = ( kb.systemState == SystemState::PRETENSION ||
                                 kb.systemState == SystemState::TENSION_ADJUST ||

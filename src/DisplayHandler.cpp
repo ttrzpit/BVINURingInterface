@@ -59,9 +59,9 @@ std::string FormatLastInputKey( int key ) {
 // Construction
 // =============================================================================
 
-DisplayHandler::DisplayHandler( const DisplayConfig &cfg,
-                                cv::Point2i principalPoint,
-                                const TelemetryConfig &telCfg,
+DisplayHandler::DisplayHandler( const DisplayConfig         &cfg,
+                                cv::Point2i                  principalPoint,
+                                const TelemetryConfig       &telCfg,
                                 const ControllerPanelConfig &controllerCfg )
     : cfg_( cfg ), telCfg_( telCfg ), controllerCfg_( controllerCfg ), principalPoint_( principalPoint ), cellW_( telCfg.width / telCfg.cols ), cellH_( telCfg.height / telCfg.rows ), matTelemetry_( telCfg.height, telCfg.width, CV_8UC3, Colors::Black ), controllerCellW_( controllerCfg.width / controllerCfg.cols ), controllerCellH_( controllerCfg.height / controllerCfg.rows ), matController_( controllerCfg.height, controllerCfg.width, CV_8UC3, Colors::Black ) {
     // ---- Operator display window --------------------------------------------
@@ -97,7 +97,7 @@ DisplayHandler::DisplayHandler( const DisplayConfig &cfg,
 // Operator display - public
 // =============================================================================
 
-void DisplayHandler::Update( const cv::Mat &frame,
+void DisplayHandler::Update( const cv::Mat                     &frame,
                              const std::vector<DetectedMarker> &markers,
                              const TouchState &touch, const KeyboardState &kb,
                              const SerialState &serial ) {
@@ -117,8 +117,8 @@ void DisplayHandler::Update( const cv::Mat &frame,
     if ( !frame.empty() ) {
         // Crop to configured dimensions before drawing overlays so that
         // overlay anchor points (e.g. bottom of frame) use the cropped size
-        int cropW = std::min( frame.cols, cfg_.width );
-        int cropH = std::min( frame.rows, cfg_.height );
+        int     cropW = std::min( frame.cols, cfg_.width );
+        int     cropH = std::min( frame.rows, cfg_.height );
         cv::Mat canvas = frame( cv::Rect( 0, 0, cropW, cropH ) ).clone();
 
         DrawCameraElements( canvas );
@@ -131,18 +131,25 @@ void DisplayHandler::Update( const cv::Mat &frame,
             cv::circle( canvas, targetCircleCenterPx_, targetCircleRadiusPx_, targetCircleColor_, 1 );
         }
 
+        if ( virtualTargetVisible_ ) {
+            // Green dot: where the marker must appear in the image for the
+            // fingertip to reach the fixed red circle after roll correction.
+            cv::circle( canvas, virtualTargetPx_, 6, Colors::GreMd, -1 );
+            cv::circle( canvas, virtualTargetPx_, 6, Colors::GreLt, 1 );
+        }
+
         if ( virtualFingertipVisible_ ) {
             const cv::Point2i &p = virtualFingertipPx_;
             cv::circle( canvas, p, 14, cv::Scalar( 255, 0, 255 ), 2 );    // magenta ring
             cv::circle( canvas, p, 3, cv::Scalar( 255, 0, 255 ), -1 );    // filled centre
-            // cv::putText(canvas, "FT", p + cv::Point2i(16, -12), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 0, 255), 1);
+            cv::putText( canvas, "FT", p + cv::Point2i( 16, -12 ), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar( 255, 0, 255 ), 1 );
         }
 
-        if ( touchFingertipVisible_ ) {
-            // Frozen fingertip position at the moment of the last touchscreen
-            // contact - stays until the next target is selected.
-            cv::circle( canvas, touchFingertipPx_, 3, Colors::BluMd, -1 );
-        }
+        // if ( touchFingertipVisible_ ) {
+        //     // Frozen fingertip position at the moment of the last touchscreen
+        //     // contact - stays until the next target is selected.
+        //     cv::circle( canvas, touchFingertipPx_, 3, Colors::BluMd, -1 );
+        // }
 
         DrawTelemetryBar( canvas, markers, touch, kb );
 
@@ -186,7 +193,7 @@ void DisplayHandler::AddHeadingCell( const std::string &text,
 void DisplayHandler::AddSubheadingCell( const std::string &text,
                                         const std::string &cellRef, int colSpan,
                                         int rowSpan, const std::string &align,
-                                        float fontSize,
+                                        float             fontSize,
                                         const cv::Scalar &fillColor,
                                         const cv::Scalar &textColor ) {
     DrawTelCell( text, cellRef, colSpan, rowSpan, align, fontSize, textColor,
@@ -328,8 +335,8 @@ void DisplayHandler::PopulateTelemetryPanel(
 
     // kb.userId > 0 ? std::to_string(kb.userId) : "--",
     // ---- Marker visibility -------------------------------------------------------
-    AddHeadingCell( "Marker Visibility", "F1", 8, 1, "center", headerFontSize );
-    AddHeadingCell( std::to_string( markers.size() ), "N1", 1, 1, "center",
+    AddHeadingCell( "Marker Visibility", "A1", 8, 1, "center", headerFontSize );
+    AddHeadingCell( std::to_string( markers.size() ), "I1", 1, 1, "center",
                     headerFontSize );
     // One cell per marker ID (1–45), 9 per row across columns A–I, rows 2–6.
     // Colour rules:
@@ -343,7 +350,7 @@ void DisplayHandler::PopulateTelemetryPanel(
     };
 
     for ( int id = 1; id <= 45; id++ ) {
-        std::string cellRef = std::string( 1, 'F' + ( id - 1 ) % 9 ) + std::to_string( 2 + ( id - 1 ) / 9 );
+        std::string cellRef = std::string( 1, 'A' + ( id - 1 ) % 9 ) + std::to_string( 2 + ( id - 1 ) / 9 );
 
         bool detected = isDetected( id );
         bool active = ( id == kb.activeTagId );
@@ -353,7 +360,7 @@ void DisplayHandler::PopulateTelemetryPanel(
 
         AddBodyCell( std::to_string( id ), cellRef, 1, 1, "center", bodyFontSize, fill, text );
     }
-    AddBorder( "F1", 9, 6, Colors::GraMd, 2 );
+    AddBorder( "A1", 9, 6, Colors::GraMd, 2 );
 
     // ---- Keyboard inputs -------------------
     // Row 8 spans 29 columns (S..AU, cols 18-46) to match the heading at S7.
@@ -454,7 +461,7 @@ void DisplayHandler::DrawTelCell( const std::string &text,
     int fontFace = ( style == CellStyle::HEADING ) ? cv::FONT_HERSHEY_DUPLEX
                                                    : cv::FONT_HERSHEY_SIMPLEX;
 
-    int baseLine = 0;
+    int      baseLine = 0;
     cv::Size textSz = cv::getTextSize( text, fontFace, fontSize, 1, &baseLine );
 
     // Vertical centre of the cell
@@ -514,6 +521,11 @@ void DisplayHandler::SetCal3State( bool isComplete, cv::Point3f offset, float ro
 void DisplayHandler::SetVirtualFingertip( bool visible, cv::Point2i px ) {
     virtualFingertipVisible_ = visible;
     virtualFingertipPx_ = px;
+}
+
+void DisplayHandler::SetVirtualTarget( bool visible, cv::Point2i px ) {
+    virtualTargetVisible_ = visible;
+    virtualTargetPx_ = px;
 }
 
 void DisplayHandler::SetTouchFingertip( bool visible, cv::Point2i px ) {
@@ -638,7 +650,7 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
     // contributing to PWM while a target is active), or ACTIVE (PWM output
     // for tensioning/other processes, no guidance contribution).
     std::string amplifierStateStr;
-    cv::Scalar amplifierColor;
+    cv::Scalar  amplifierColor;
     if ( !controllerTele_.outputEnabled ) {
         amplifierStateStr = "INACTIVE";
         amplifierColor = Colors::GraBk;
@@ -676,7 +688,25 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
     AddControllerBodyCell( controllerTele_.homeSet ? "SET" : "Not Set", "M3", 3, 1, "center", bodyFontSize, controllerTele_.homeSet ? Colors::GreBk : Colors::RedBk );                  // Home position recorded
     AddControllerBodyCell( cal1Boundary_.valid ? "SET" : "Not Set", "M4", 3, 1, "center", bodyFontSize, cal1Boundary_.valid ? Colors::GreBk : Colors::RedBk );                          // AROM boundary computed
     AddControllerBodyCell( controllerTele_.stiffnessValid ? "SET" : "Not Set", "M5", 3, 1, "center", bodyFontSize, controllerTele_.stiffnessValid ? Colors::GreBk : Colors::RedBk );    // Stiffness profile K(theta) computed
-    AddControllerBodyCell( cal3Complete_ ? "SET" : "Not Set", "M6", 3, 1, "center", bodyFontSize, cal3Complete_ ? Colors::GreBk : Colors::RedBk );                                      // Fingertip-to-camera offset computed
+                                                                                                                                                                                        // AddControllerBodyCell( cal3Complete_ ? "SET" : "Not Set", "M6", 3, 1, "center", bodyFontSize, cal3Complete_ ? Colors::GreBk : Colors::RedBk );                                      // Fingertip-to-camera offset computed
+    AddControllerBodyCell( cal3Complete_ ? fmtMm( cal3Offset_.x ) : "-", "M6", 1, 1, "center", 0.3f, cal3Complete_ ? Colors::GreBk : Colors::RedBk );                                   // Fingertip-to-camera offset computed
+    AddControllerBodyCell( cal3Complete_ ? fmtMm( cal3Offset_.y ) : "-", "N6", 1, 1, "center", 0.3f, cal3Complete_ ? Colors::GreBk : Colors::RedBk );                                   // Fingertip-to-camera offset computed
+    AddControllerBodyCell( cal3Complete_ ? fmtMm( cal3Offset_.z ) : "-", "O6", 1, 1, "center", 0.3f, cal3Complete_ ? Colors::GreBk : Colors::RedBk );                                   // Fingertip-to-camera offset computed
+
+    if ( cal3Complete_ ) {
+        //     std::ostringstream rollSS;
+        //     rollSS << std::fixed << std::setprecision(1) << cal3RollDeg_ << "\xc2\xb0";
+        //     AddControllerBodyCell(fmtMm(cal3Offset_.x), "H3", 2, 1, "center", bodyFontSize);
+        //     AddControllerBodyCell(fmtMm(cal3Offset_.y), "J3", 2, 1, "center", bodyFontSize);
+        //     AddControllerBodyCell(fmtMm(cal3Offset_.z), "L3", 2, 1, "center", bodyFontSize);
+        //     AddControllerBodyCell(rollSS.str(), "N3", 2, 1, "center", bodyFontSize);
+        // } else {
+        //     AddControllerBodyCell("[XX]", "H3", 2, 1, "center", bodyFontSize);
+        //     AddControllerBodyCell("[YY]", "J3", 2, 1, "center", bodyFontSize);
+        //     AddControllerBodyCell("[ZZ]", "L3", 2, 1, "center", bodyFontSize);
+        //     AddControllerBodyCell("[TH]", "N3", 2, 1, "center", bodyFontSize);
+    }
+
     AddControllerBorder( "A1", 15, 6, Colors::GraMd, 2 );
 
     // --- Target Telemetry Panel ----------------------------------------------------------------------------
@@ -717,13 +747,33 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
         AddControllerBodyCell( "--", "N9", 2, 1, "center", bodyFontSize );
     }
 
-    // Velocity - virtual fingertip velocity (low-pass filtered), no z-component
-    AddControllerSubheadingCell( "Velocity [mm/s]", "A10", 5, 1, "center", bodyFontSize );
-    AddControllerBodyCell( fmtMm( controllerTele_.vel_virtual.x ), "F10", 2, 1, "center", bodyFontSize );
-    AddControllerBodyCell( fmtMm( controllerTele_.vel_virtual.y ), "H10", 2, 1, "center", bodyFontSize );
-    AddControllerBodyCell( "--", "J10", 2, 1, "center", bodyFontSize );
-    AddControllerBodyCell( fmtMm( std::sqrt( controllerTele_.vel_virtual.x * controllerTele_.vel_virtual.x + controllerTele_.vel_virtual.y * controllerTele_.vel_virtual.y ) ), "L10", 2, 1, "center", bodyFontSize );
-    AddControllerBodyCell( "--", "N10", 2, 1, "center", bodyFontSize );
+    // Guiding Position - the displacement Δp = pos_target_3d − pos_fingertip [mm]
+    // computed by ControllerHandler's fingertip-to-target transform. This is the
+    // move that lands the fingertip on the target (the error to the actual guided
+    // target, offsets/roll compensation included). Δp.z is the depth to target.
+    AddControllerSubheadingCell( "Guiding Pos [mm]", "A10", 5, 1, "center", bodyFontSize );
+    if ( activeMarker ) {
+        const cv::Point3f dp = controllerTele_.displacement;
+        AddControllerBodyCell( fmtMm( dp.x ), "F10", 2, 1, "center", bodyFontSize );
+        AddControllerBodyCell( fmtMm( dp.y ), "H10", 2, 1, "center", bodyFontSize );
+        AddControllerBodyCell( fmtMm( dp.z ), "J10", 2, 1, "center", bodyFontSize );
+        AddControllerBodyCell( fmtMm( std::sqrt( dp.x * dp.x + dp.y * dp.y ) ), "L10", 2, 1, "center", bodyFontSize );                  // Rxy
+        AddControllerBodyCell( fmtMm( std::sqrt( dp.x * dp.x + dp.y * dp.y + dp.z * dp.z ) ), "N10", 2, 1, "center", bodyFontSize );    // Rxyz
+    } else {
+        AddControllerBodyCell( "--", "F10", 2, 1, "center", bodyFontSize );
+        AddControllerBodyCell( "--", "H10", 2, 1, "center", bodyFontSize );
+        AddControllerBodyCell( "--", "J10", 2, 1, "center", bodyFontSize );
+        AddControllerBodyCell( "--", "L10", 2, 1, "center", bodyFontSize );
+        AddControllerBodyCell( "--", "N10", 2, 1, "center", bodyFontSize );
+    }
+
+    // // Velocity - virtual fingertip velocity (low-pass filtered), no z-component
+    // AddControllerSubheadingCell( "Velocity [mm/s]", "A10", 5, 1, "center", bodyFontSize );
+    // AddControllerBodyCell( fmtMm( controllerTele_.vel_virtual.x ), "F10", 2, 1, "center", bodyFontSize );
+    // AddControllerBodyCell( fmtMm( controllerTele_.vel_virtual.y ), "H10", 2, 1, "center", bodyFontSize );
+    // AddControllerBodyCell( "--", "J10", 2, 1, "center", bodyFontSize );
+    // AddControllerBodyCell( fmtMm( std::sqrt( controllerTele_.vel_virtual.x * controllerTele_.vel_virtual.x + controllerTele_.vel_virtual.y * controllerTele_.vel_virtual.y ) ), "L10", 2, 1, "center", bodyFontSize );
+    // AddControllerBodyCell( "--", "N10", 2, 1, "center", bodyFontSize );
 
     // Accumulated Error - PID integral term (accumulated position error), no z-component
     AddControllerSubheadingCell( "Accumulated [mm]", "A11", 5, 1, "center", bodyFontSize );
@@ -802,7 +852,7 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
     AddControllerBodyCell( "--", "G20", 3, 1, "center", tableFontSize );
     AddControllerBodyCell( "--", "J20", 3, 1, "center", tableFontSize );
     AddControllerBodyCell( "--", "M20", 3, 1, "center", tableFontSize );
-    
+
     // Output - T_output = T_preload + T_deflection, clamped to [T_preload, tension_output_max]
     AddControllerSubheadingCell( "Output", "A21", 3, 3, "center", bodyFontSize );
     AddControllerSubheadingCell( "N", "D21", 3, 1, "center", tableFontSize );
@@ -931,22 +981,13 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
     AddControllerBodyCell( fmtMm( controllerTele_.dL.y * 1000.0f ), "J29", 3, 1, "center", bodyFontSize );
     AddControllerBodyCell( fmtMm( controllerTele_.dL.z * 1000.0f ), "M29", 3, 1, "center", bodyFontSize );
 
-    AddControllerSubheadingCell( "Virtual Position", "A45", 5, 1, "center", headerFontSize );
-    AddControllerBodyCell( fmtMm( controllerTele_.pos_virtual.x ), "F45", 5, 1, "center", headerFontSize );
-    AddControllerBodyCell( fmtMm( controllerTele_.pos_virtual.y ), "K45", 5, 1, "center", headerFontSize );
-
-    // const float tension[3] = { controllerTele_.tension.x, controllerTele_.tension.y, controllerTele_.tension.z };
-    // const float current[3] = { controllerTele_.current.x, controllerTele_.current.y, controllerTele_.current.z };
-    // const float pwm[3]     = { controllerTele_.pwm.x,     controllerTele_.pwm.y,     controllerTele_.pwm.z };
-
-    // for (int i = 0; i < 3; i++) {
-    //     AddControllerBodyCell(fmtNum2(tension[i]),       "J" + row, 2, 1, "center", tableFontSize);
-    //     AddControllerBodyCell(fmtNum2(current[i]),       "L" + row, 2, 1, "center", tableFontSize);
-    //     AddControllerBodyCell(std::to_string(static_cast<int>(pwm[i])), "N" + row, 2, 1, "center", tableFontSize);
+    AddControllerSubheadingCell( "Virtual Position", "A44", 5, 1, "center", headerFontSize );
+    AddControllerBodyCell( fmtMm( controllerTele_.pos_virtual.x ), "F44", 5, 1, "center", headerFontSize );
+    AddControllerBodyCell( fmtMm( controllerTele_.pos_virtual.y ), "K44", 5, 1, "center", headerFontSize );
 
     // Virtual Mapping Parameters
-    cv::Point2i center = cv::Point2i( 225, 1090 );
-    int radius = 200;
+    cv::Point2i center = cv::Point2i( 225, 1080 );
+    int         radius = 180;
 
     // const float pwm[3]     = { controllerTele_.pwm.x,     controllerTele_.pwm.y,     controllerTele_.pwm.z };
 
@@ -985,7 +1026,7 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
 
     // Virtual fingertip position - pos_virtual is in mm, screen y is flipped
     constexpr float kVirtualPlotPxPerMm = 10.0f;
-    cv::Point2i posPx = center + cv::Point2i(
+    cv::Point2i     posPx = center + cv::Point2i(
                                      static_cast<int>( controllerTele_.pos_virtual.x * kVirtualPlotPxPerMm ),
                                      static_cast<int>( -controllerTele_.pos_virtual.y * kVirtualPlotPxPerMm ) );
     cv::circle( matController_, posPx, 6, Colors::CyaMd, -1 );
@@ -1015,7 +1056,7 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
 
     // AROM boundary polygon - drawn once Cal1Handler has computed it
     if ( cal1Boundary_.valid ) {
-        constexpr int kBoundaryPlotPoints = 72;
+        constexpr int          kBoundaryPlotPoints = 72;
         std::vector<cv::Point> boundaryPts;
         boundaryPts.reserve( kBoundaryPlotPoints );
         for ( int i = 0; i < kBoundaryPlotPoints; i++ ) {
@@ -1070,20 +1111,17 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
     // Gesture indicator - green arrow (flick) or ring (confirm circle),
     // disappears after cooldownSecs / circleCooldownSecs
     if ( gestureIndicatorActive_ ) {
-        constexpr int kArrowHalfLen = 80;
-        cv::Point2i top = center + cv::Point2i( 0, -kArrowHalfLen );
-        cv::Point2i bottom = center + cv::Point2i( 0, kArrowHalfLen );
         if ( gestureEvent_ == GestureEvent::FLICK_UP ) {
-            cv::arrowedLine( matController_, bottom, top, Colors::GreMd, 4, cv::LINE_AA, 0, 0.3 );
+            cv::arrowedLine( matController_, center, center + cv::Point2i( 0, 80 ), Colors::GreMd, 4, cv::LINE_AA, 0, 0.3 );
         } else if ( gestureEvent_ == GestureEvent::FLICK_DOWN ) {
-            cv::arrowedLine( matController_, top, bottom, Colors::GreMd, 4, cv::LINE_AA, 0, 0.3 );
+            cv::arrowedLine( matController_, center, center + cv::Point2i( 0, -80 ), Colors::GreMd, 4, cv::LINE_AA, 0, 0.3 );
         } else if ( gestureEvent_ == GestureEvent::CONFIRM ) {
             cv::circle( matController_, center, 60, Colors::GreMd, 4, cv::LINE_AA );
         }
     }
 
     // Border
-    AddControllerBorder( "A24", 15, 22, Colors::GraMd, 2 );
+    AddControllerBorder( "A24", 15, 21, Colors::GraMd, 2 );
 }
 
 void DisplayHandler::DrawControllerCell( const std::string &text, const std::string &cellRef,
@@ -1104,7 +1142,7 @@ void DisplayHandler::DrawControllerCell( const std::string &text, const std::str
         fontFace = cv::FONT_HERSHEY_DUPLEX;
     }
 
-    int baseLine = 0;
+    int      baseLine = 0;
     cv::Size textSz = cv::getTextSize( text, fontFace, fontSize, 1, &baseLine );
 
     int textY = r.y + ( r.height + textSz.height ) / 2;
@@ -1146,6 +1184,23 @@ void DisplayHandler::DrawCameraElements( cv::Mat &frame ) {
 void DisplayHandler::DrawMarkerOverlays(
     cv::Mat &frame, const std::vector<DetectedMarker> &markers,
     int activeTagId ) {
+    // Top-left label: what the PID error is currently driving toward.
+    // Before Cal3: the offset terms cancel, so error = marker position only.
+    // After Cal3:  roll-compensated offset shifts the error target.
+    std::string targetLabel;
+    if ( activeTagId <= 0 ) {
+        targetLabel = "Target: None";
+    } else if ( cal3Complete_ ) {
+        targetLabel = "Target: Marker Center + Cal3 Offset";
+    } else {
+        targetLabel = "Target: Marker Center";
+    }
+    // Black shadow then white text for readability on any camera background.
+    cv::putText( frame, targetLabel, cv::Point( 11, 23 ), cv::FONT_HERSHEY_SIMPLEX,
+                 0.55, cv::Scalar( 0, 0, 0 ), 3 );
+    cv::putText( frame, targetLabel, cv::Point( 10, 22 ), cv::FONT_HERSHEY_SIMPLEX,
+                 0.55, Colors::White, 1 );
+
     for ( const auto &m : markers ) {
         if ( activeTagId > 0 && m.id == activeTagId ) {
             // Active tag: green outline square + ID label
@@ -1157,6 +1212,16 @@ void DisplayHandler::DrawMarkerOverlays(
             cv::putText( frame, "ID " + std::to_string( m.id ),
                          m.centerPx + cv::Point2i( 10, -10 ), cv::FONT_HERSHEY_SIMPLEX,
                          0.6, cv::Scalar( 0, 255, 0 ), 2 );
+
+            // Line from the error target (green dot) to the current marker center.
+            // The green dot (virtualTargetPx_) is where the marker must appear for
+            // error = 0, so this line directly shows the error vector in image space.
+            // Without Cal3 the dot sits at principalPoint_, so the line goes from
+            // the camera centre to the marker — the same as the raw marker displacement.
+            cv::Point2i lineFrom = ( cal3Complete_ && virtualTargetVisible_ )
+                                       ? virtualTargetPx_
+                                       : principalPoint_;
+            cv::line( frame, lineFrom, m.centerPx, Colors::GreMd, 2 );
 
         } else {
             // Non-active markers: small dot and ID text
@@ -1171,9 +1236,9 @@ void DisplayHandler::DrawMarkerOverlays(
 void DisplayHandler::DrawTelemetryBar(
     cv::Mat &frame, const std::vector<DetectedMarker> &markers,
     const TouchState &touch, const KeyboardState &kb ) {
-    const int x = 10;
+    const int   x = 10;
     const float font = 0.5f;
-    const auto col = cv::Scalar( 210, 210, 210 );
+    const auto  col = cv::Scalar( 210, 210, 210 );
 
     // Bottom line - marker count and touch state
     std::string touchStr = touch.isTouched

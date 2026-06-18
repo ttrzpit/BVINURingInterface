@@ -262,6 +262,10 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
             state_.pendingStiffnessGainToggle = true;
             break;
 
+        case KeyAction::SET_HOME_POSITION:
+            state_.pendingSetHomePosition = true;
+            break;
+
         case KeyAction::NONE:
         default:
             break;

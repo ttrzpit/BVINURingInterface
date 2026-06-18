@@ -128,7 +128,7 @@ void FittsTaskHandler::Update(const std::vector<DetectedMarker>& markers,
 
     // Touch sample - recorded on the rising edge while a target is active
     bool isTouchedNow = touch.isTouched;
-    if (isTouchedNow && !wasTouched_ && targetId_ > 0 && havePose) {
+    if (isTouchedNow && !wasTouched_ && targetId_ > 0 ) {
         const cv::Point2f targetPx = TargetCenterPx(rvec, tvec);
 
         // Touch position is already in touchscreen-local pixels - drawn

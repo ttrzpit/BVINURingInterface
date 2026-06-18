@@ -48,6 +48,7 @@ struct DetectedMarker {
     std::array<cv::Point2f, 4> cornersPx;  ///< Four corners, clockwise from top-left
     cv::Point3f                positionMm;  ///< 3D position relative to camera [mm]
     float                      rotationDeg;///< Rotation about the Y-axis [degrees]
+    float                      rollRad;    ///< In-plane rotation (rvec Z component) used for roll-corrected fingertip offset
 };
 
 

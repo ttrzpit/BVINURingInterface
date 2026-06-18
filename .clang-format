@@ -32,3 +32,6 @@ SpacesInParentheses: true
 SpacesInSquareBrackets: false
 SpaceAfterTemplateKeyword: true
 SpaceBeforeInheritanceColon: true
+
+# Indents
+AlignConsecutiveDeclarations: true

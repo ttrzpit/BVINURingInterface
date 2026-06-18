@@ -62,16 +62,73 @@ void ControllerHandler::SetHomePosition(const TeensyToPcPacket& rx) {
 
 
 // =============================================================================
+// SetTarget - store marker and calibration inputs for the next Update()
+// =============================================================================
+
+void ControllerHandler::SetTarget(
+    bool        markerActive,
+    cv::Point3f markerPosMm,
+    float       markerRollRad,
+    bool        cal3Complete,
+    cv::Point2f cal3Offset,
+    float       cal3RollRefRad,
+    float       defaultOffsetMm,
+    bool        guidanceActive)
+{
+    targetMarkerActive_    = markerActive;
+    targetMarkerPosMm_     = markerPosMm;
+    targetMarkerRollRad_   = markerRollRad;
+    targetCal3Complete_    = cal3Complete;
+    targetCal3Offset_      = cal3Offset;
+    targetCal3RollRefRad_  = cal3RollRefRad;
+    targetDefaultOffsetMm_ = defaultOffsetMm;
+    isTargetActive_        = markerActive && guidanceActive;
+}
+
+
+// =============================================================================
+// Fingertip-to-target positioning transform
+//
+// p_f = p_c + R(ψ_roll − ψ_roll_ref) · d        (fingertip = camera + rolled offset)
+// Δp  = p_t − p_f                                (move that lands fingertip on target)
+//
+// Pure geometry: the caller supplies all vectors in one consistent frame and is
+// responsible for the convention flags documented in ControllerHandler.h.
+// =============================================================================
+
+cv::Matx33f ControllerHandler::BuildRollCorrection(float roll_current, float roll_reference) const {
+    // Rotation about +Z (camera optical axis) by the roll delta. Acting on a
+    // vector's X/Y components, the Z component is left unchanged.
+    const float d = roll_current - roll_reference;
+    const float c = std::cos(d);
+    const float s = std::sin(d);
+    return cv::Matx33f( c, -s, 0.0f,
+                        s,  c, 0.0f,
+                        0.0f, 0.0f, 1.0f );
+}
+
+cv::Point3f ControllerHandler::ComputeFingertip(const cv::Point3f& pos_camera,
+                                                const cv::Matx33f& R_roll,
+                                                const cv::Point3f& offset_cam_to_fingertip) const {
+    const cv::Vec3f rotated = R_roll * cv::Vec3f( offset_cam_to_fingertip.x,
+                                                  offset_cam_to_fingertip.y,
+                                                  offset_cam_to_fingertip.z );
+    return pos_camera + cv::Point3f( rotated[0], rotated[1], rotated[2] );
+}
+
+cv::Point3f ControllerHandler::ComputeDisplacement(const cv::Point3f& pos_target_3d,
+                                                   const cv::Point3f& pos_fingertip) const {
+    return pos_target_3d - pos_fingertip;
+}
+
+
+// =============================================================================
 // Update - full Stage 0-4 pipeline, one call per control cycle
 // =============================================================================
 
 void ControllerHandler::Update(const TeensyToPcPacket& rx,
-                                cv::Point2f             pos_target,
-                                bool                    isTargetActive,
                                 double                  nowSecs,
                                 float                   dt) {
-
-    isTargetActive_ = isTargetActive;
 
     // ---- Stage 0: encoders -> q_abs -> r_eff -> dL -> virtual position -------
     const float countsToRad = CONSTANT_TWO_PI / static_cast<float>(cfg_.encoder_counts_per_rev);
@@ -89,6 +146,72 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
     dL_C_ = ComputeTendonLengthChange(q_abs_C_, q_home_C_);
 
     pos_virtual_ = ComputeVirtualPosition(dL_A_, dL_B_, dL_C_);
+
+    // ---- Target computation via the fingertip-to-target transform ------------
+    // Worked in the CAMERA frame that DetectedMarker::positionMm establishes
+    // (X right, Y up, Z = depth), with the camera at the origin (pos_camera = 0).
+    //   p_f = R_roll · d                          (fingertip = rolled offset)
+    //   p_t = markerPosMm + d                      (target point on the tag surface)
+    //   Δp  = p_t − p_f = markerPosMm + (d − R·d)  (displacement onto the target)
+    // Δp.xy is added to pos_virtual_ as the PID setpoint, so error = Δp.xy.
+    // See ControllerHandler.h for the convention flags on d and the roll source.
+    cv::Point2f pos_target_raw = pos_virtual_;
+    if ( targetMarkerActive_ ) {
+        // Fixed cam→fingertip offset and roll correction:
+        //   - After Cal3: calibrated offset, rolled by (roll_current − roll_ref).
+        //   - Before Cal3: default Y offset, no roll correction (R = I).
+        cv::Point3f offset;
+        cv::Matx33f R_roll;
+        if ( targetCal3Complete_ ) {
+            // Cal3 measures the offset in the screen-world frame (X right, Y DOWN,
+            // Z toward camera); its X,Y coincide with the OpenCV camera frame
+            // (also Y-down). positionMm uses a Y-UP camera frame, so negate Y to
+            // express the offset there. (Z is unused in-plane, set to 0.)
+            offset = cv::Point3f( targetCal3Offset_.x, -targetCal3Offset_.y, 0.0f );
+            // Roll the offset by +(roll_current - roll_reference) about +Z. In the
+            // Y-up frame this is the SAME physical R*d that
+            // FittsTaskHandler::VirtualFingertipPx computes in the Y-down frame
+            // (R(-d)*(x,y) with Y-down == R(+d)*(x,-y) with Y-up), so the guidance
+            // target and the FITTS fingertip cursor stay consistent. Verified
+            // against the operator's observed roll direction.
+            R_roll = BuildRollCorrection( targetMarkerRollRad_, targetCal3RollRefRad_ );
+        } else {
+            // Default offset is "below the camera" = -Y in the camera Y-up frame.
+            // R = I before Cal3, so this term cancels in (d - R*d) and only sets
+            // the displayed depth.
+            offset = cv::Point3f( 0.0f, -targetDefaultOffsetMm_, 0.0f );
+            R_roll = cv::Matx33f::eye();
+        }
+
+        const cv::Point3f pos_camera( 0.0f, 0.0f, 0.0f );
+        const cv::Point3f pos_fingertip = ComputeFingertip( pos_camera, R_roll, offset );
+        const cv::Point3f pos_target_3d = targetMarkerPosMm_ + offset;
+        displacement_ = ComputeDisplacement( pos_target_3d, pos_fingertip );
+
+        // Expose the offset components for main.cpp's camera-pixel projection.
+        // corrX/corrY are the rolled offset = pos_fingertip.xy (pos_camera = 0).
+        targetOx_    = offset.x;
+        targetOy_    = offset.y;
+        targetCorrX_ = pos_fingertip.x;
+        targetCorrY_ = pos_fingertip.y;
+
+        // PID setpoint: drive the virtual fingertip by the planar displacement.
+        pos_target_raw.x += displacement_.x;
+        pos_target_raw.y += displacement_.y;
+    } else {
+        displacement_ = {};
+        targetOx_ = targetOy_ = targetCorrX_ = targetCorrY_ = 0.0f;
+    }
+
+    // ---- Setpoint pre-filter: first-order IIR smooths sudden target jumps -----
+    if ( !posTargetSmoothedInit_ ) {
+        posTargetSmoothed_     = pos_target_raw;
+        posTargetSmoothedInit_ = true;
+    } else if ( dt > 1e-6f ) {
+        const float alpha  = dt / ( kSetpointTau_ + dt );
+        posTargetSmoothed_ += ( pos_target_raw - posTargetSmoothed_ ) * alpha;
+    }
+    const cv::Point2f pos_target = posTargetSmoothed_;
 
     // ---- Measured current/force (from amplifier-reported current) -----------
     measuredCurrent_A_ = static_cast<float>(rx.current_raw_A) * CONSTANT_CURRENT_RAW_TO_AMPS;
@@ -154,7 +277,7 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
             force_x_ *= scale;
             force_y_ *= scale;
         }
-    } else if (!isTargetActive || errMag < cfg_.position_tolerance) {
+    } else if (!isTargetActive_ || errMag < cfg_.position_tolerance) {
         // Deadband / no active target - decay the integrator toward zero and
         // command zero force. Stage 2 falls back to preload tensions.
         integral_ *= 0.95f;
@@ -231,8 +354,9 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
 // =============================================================================
 
 void ControllerHandler::ResetRamp(double nowSecs) {
-    rampStart_ = nowSecs;
-    rampValue_ = 0.0f;
+    rampStart_             = nowSecs;
+    rampValue_             = 0.0f;
+    posTargetSmoothedInit_ = false;
 }
 
 
@@ -245,6 +369,7 @@ ControllerTelemetry ControllerHandler::GetTelemetry() const {
     t.pos_virtual      = pos_virtual_;
     t.vel_virtual      = vel_filtered_;
     t.posErrorIntegral = integral_;
+    t.displacement     = displacement_;
     t.q_abs         = GetAbsoluteAngles();
     t.q_home        = GetHomeAngles();
     t.r_eff         = GetEffectiveRadii();
