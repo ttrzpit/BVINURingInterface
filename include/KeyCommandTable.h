@@ -227,8 +227,9 @@ inline const std::vector<NumericEntryFormat> kNumericEntryTable = {
     { InputState::MOT_PWM_C,   4, false, 0, 2047, InputState::MOT_PWM, KeyAction::SET_MOTOR_PWM, "Sending test pulse to motor [MOTOR]." },
     { InputState::MOT_PWM_ALL, 4, false, 0, 2047, InputState::MOT_PWM, KeyAction::SET_MOTOR_PWM, "Sending test pulse to motor [MOTOR]." },
 
-    // ACCURACY - nn (00-45) -> Fitts target marker
-    { InputState::FIT_ACT, 2, false, 0, 45, InputState::FIT_RUN, KeyAction::SET_FITTS_TARGET, "Active marker set to [MARKER_ID]." },
+    // ACCURACY - nnn (0-250) -> Fitts target marker (clamped to the board's fine
+    // target range in KeyboardHandler::ExecuteAction)
+    { InputState::FIT_ACT, 3, false, 0, 250, InputState::FIT_RUN, KeyAction::SET_FITTS_TARGET, "Active marker set to [MARKER_ID]." },
 
     // PRETENSION step 3/4 - n.n (0.0-10.0) -> tension setpoint [N] for [MOTOR]
     { InputState::TEN_SEL_A,   3, true, 0, 100, InputState::SAME, KeyAction::SET_TENSION, "" },

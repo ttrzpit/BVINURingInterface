@@ -198,13 +198,15 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
 
         case KeyAction::RANDOM_FITTS_TARGET: {
             static std::mt19937 rng{std::random_device{}()};
-            static std::uniform_int_distribution<int> dist(1, 45);
+            std::uniform_int_distribution<int> dist(fittsTargetIdMin_, fittsTargetIdMax_);
             state_.fittsTargetId = dist(rng);
             state_.activeTagId   = state_.fittsTargetId;
             break;
         }
 
         case KeyAction::SET_FITTS_TARGET:
+            if ( value < fittsTargetIdMin_ ) value = fittsTargetIdMin_;
+            if ( value > fittsTargetIdMax_ ) value = fittsTargetIdMax_;
             state_.fittsTargetId = value;
             state_.activeTagId   = value;
             break;

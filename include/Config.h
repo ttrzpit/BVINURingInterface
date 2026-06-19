@@ -135,6 +135,34 @@ struct ArucoCalibrationGridConfig {
     float markerExclusionMm = 20.0f; // Minimum margin from screen edge to nearest marker [mm]
 };
 
+// ---- Fitts Board (multi-scale touchscreen board - FITTS pointing task) ------
+// Two-level nested fiducial board with EXPLICIT placement (config.yaml
+// [fitts_board_assignments]). A dense grid of small "fine" markers (subset B)
+// provides close-range reference + the pointing targets; four large "coarse"
+// markers (subset A) provide a wide-baseline reference that stays visible from
+// far away or when the hand occludes the centre. All positions are marker
+// CENTRES in screen-plane mm (origin = screen top-left). The board uses
+// DICT_4X4_1000 (the fine grid alone can exceed 250 IDs). The fine grid is laid
+// out from the first marker's centre, stepping by (size + pad) centre-to-centre;
+// IDs run fineIdStart.. row-major, then the four coarse markers follow.
+
+struct FittsBoardConfig {
+    // Fine grid (subset B) - dense reference + pointing targets
+    float fineMarkerSizeMm = 8.0f;    // Side length of each fine marker [mm]
+    float finePadMm        = 8.0f;    // Gap between fine markers [mm] (pitch = size + pad)
+    float fineFirstXMm     = 31.5f;   // Centre X of the first (top-left) fine marker [mm]
+    float fineFirstYMm     = 36.23f;  // Centre Y of the first (top-left) fine marker [mm]
+    int   fineRows         = 15;      // Number of fine-grid rows
+    int   fineCols         = 27;      // Number of fine-grid columns
+    int   fineIdStart      = 1;       // First fine marker ID (0 reserved for "no target")
+
+    // Coarse perimeter (subset A) - four explicit marker CENTRES in screen mm.
+    // IDs follow the fine band: fineIdStart + fineRows*fineCols + (0..3).
+    float coarseMarkerSizeMm = 56.0f;
+    std::array<float, 4> coarseCenterXMm = {39.5f, 487.5f, 39.5f, 487.5f};
+    std::array<float, 4> coarseCenterYMm = {44.23f, 44.23f, 252.23f, 252.23f};
+};
+
 // ---- Touchscreen Monitor ----------------------------------------------------
 
 struct TouchscreenConfig {
@@ -273,6 +301,7 @@ class Config {
     ArucoDetectorConfig arucoDetector;  // Algorithm tuning params for the OpenCV detector
     ArucoDisplayConfig arucoDisplay;
     ArucoCalibrationGridConfig arucoCalGrid;
+    FittsBoardConfig fittsBoard;
     TouchscreenConfig touchscreen;
     DisplayConfig display;
     TelemetryConfig telemetry;

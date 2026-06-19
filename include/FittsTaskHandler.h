@@ -15,20 +15,22 @@
 // target is selected via OnNewTarget().
 // =============================================================================
 
+#include <array>
 #include <string>
 #include <vector>
 
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
 
-#include "ArucoHandler.h"   // DetectedMarker
+#include "ArucoHandler.h"        // DetectedMarker
 #include "Config.h"
-#include "TouchHandler.h"   // TouchState
+#include "FittsBoardLayout.h"    // FittsBoardLayout
+#include "TouchHandler.h"        // TouchState
 
 
 class FittsTaskHandler {
 public:
-    FittsTaskHandler(const ArucoDisplayConfig& displayCfg,
+    FittsTaskHandler(const FittsBoardConfig&   boardCfg,
                      const TouchscreenConfig&  touchCfg,
                      const CameraConfig&       camCfg);
 
@@ -56,6 +58,27 @@ public:
     bool        HasVirtualFingertip() const { return ftValid_; }
     cv::Point2i GetVirtualFingertipPx() const { return ftPx_; }
 
+    /**
+     * @brief Estimate the active target's camera-relative position + roll from
+     *        the board pose (solvePnP over whatever markers are visible), for
+     *        guidance when the target's own marker is not directly detected -
+     *        far away (coarse markers carry it) or lost up close (neighbouring
+     *        fine markers carry it). The target's location on the board is known
+     *        from the layout, so its position is recoverable from any pose.
+     * @param markers   Latest detections
+     * @param targetId  The active target marker ID
+     * @param posOut    Camera-relative target position [mm], Y-up (matches
+     *                  DetectedMarker::positionMm)
+     * @param rollOut   Camera roll [rad] (circular mean of visible board markers)
+     * @param cornersPxOut  Optional: the target marker's four corners projected
+     *                  into the camera image (for drawing the estimated outline)
+     * @return false if the target is unknown or the board pose could not be solved
+     */
+    bool EstimateTargetFromBoard(const std::vector<DetectedMarker>& markers,
+                                 int targetId,
+                                 cv::Point3f& posOut, float& rollOut,
+                                 std::array<cv::Point2f, 4>* cornersPxOut = nullptr) const;
+
     // ---- Touch sample (for ArucoHandler touchscreen overlay) ------------------
     bool               HasTouchSample() const { return sampleValid_; }
     cv::Point2i        GetTouchScreenPx() const { return touchScreenPx_; }
@@ -78,9 +101,9 @@ private:
     cv::Point2i VirtualFingertipPx(const cv::Vec3d& rvec, const cv::Vec3d& tvec,
                                    cv::Point3f d, float rollRefRad) const;
 
-    const ArucoDisplayConfig& displayCfg_;
     const TouchscreenConfig&  touchCfg_;
     const CameraConfig&       camCfg_;
+    FittsBoardLayout          layout_;
 
     int  targetId_   = 0;
     bool wasTouched_ = false;

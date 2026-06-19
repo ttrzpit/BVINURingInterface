@@ -88,7 +88,8 @@
 				11,
 				12,
 				13,
-				14
+				14,
+				15
 			]
 		},
 		{
@@ -510,7 +511,8 @@
 				11,
 				12,
 				13,
-				14
+				14,
+				15
 			]
 		}
 	],
@@ -568,6 +570,12 @@
 			"backtrace" : 1,
 			"compileGroupIndex" : 1,
 			"path" : "src/DisplayHandler.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/FittsBoardLayout.cpp",
 			"sourceGroupIndex" : 0
 		},
 		{

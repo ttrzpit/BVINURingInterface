@@ -84,13 +84,14 @@ int main() {
                         cfg.arucoDetector,
                         cfg.arucoDisplay,
                         cfg.arucoCalGrid,
+                        cfg.fittsBoard,
                         cfg.touchscreen,
                         cfg.camera.cameraMatrix,
                         cfg.camera.distCoeffs );
 
     TouchHandler touch( cfg.touchscreen );
     Cal3Handler cal3( cfg.touchscreen, cfg.camera, cfg.arucoCalGrid, cfg.cal3 );
-    FittsTaskHandler fitts( cfg.arucoDisplay, cfg.touchscreen, cfg.camera );
+    FittsTaskHandler fitts( cfg.fittsBoard, cfg.touchscreen, cfg.camera );
 
     ControllerHandler controller( cfg.controllerGains );
     PretensionHandler pretension( controller );
@@ -118,6 +119,8 @@ int main() {
     std::cout << "Main: See keyboard_reference.md for the full key command reference.\n\n";
 
     KeyboardHandler keyboard;
+    // Fitts targets are the fine-marker band of the multi-scale board.
+    keyboard.SetFittsTargetRange( aruco.GetFittsTargetIdMin(), aruco.GetFittsTargetIdMax() );
 
     double lastFrameTimestamp = -1.0;
 
@@ -130,6 +133,14 @@ int main() {
     SystemState prevState = SystemState::IDLE;
     InputState prevInputState = InputState::IDLE;
     int prevFittsTarget = 0;
+
+    // Board-pose fallback target (when the active marker isn't directly detected).
+    // Recomputed only on new frames (solvePnP is the expensive path) and reused
+    // between frames; invalidated as soon as the marker is directly re-acquired.
+    bool        fbTargetValid = false;
+    cv::Point3f fbTargetPosMm = {};
+    float       fbTargetRoll  = 0.0f;
+    std::array<cv::Point2f, 4> fbCorners = {};
     int prevActiveTagId = 0;    ///< Detects kb.activeTagId changes -> ramps guidance force on new targets
 
     // Last-known camera-side target-circle position (persists when activeMarker
@@ -211,6 +222,9 @@ int main() {
             if ( prevState == SystemState::CAL3 ) {
                 aruco.SetCalibrationGridVisible( false );
                 aruco.SetCalibrationDetection( false );    // Restore DICT_4X4_50
+            } else if ( prevState == SystemState::FITTS ) {
+                aruco.SetFittsBoardVisible( false );
+                aruco.SetFittsBoardDetection( false );      // Restore DICT_4X4_50
             } else {
                 aruco.SetGridVisible( false );
             }
@@ -223,8 +237,11 @@ int main() {
                 aruco.SetCalibrationGridVisible( true );
                 aruco.SetCalibrationDetection( true );    // Switch to DICT_4X4_250
             } else if ( kb.systemState == SystemState::FITTS ) {
-                // FITTS starts with a blank white screen - first target appears on 'r'
-                aruco.ShowBlankTouchscreen();
+                // FITTS: persistent multi-scale board (coarse perimeter + fine
+                // grid). The board is always shown; the active target is marked
+                // by the target-offset circle once selected via 'r'.
+                aruco.SetFittsBoardDetection( true );    // DICT_4X4_250, per-ID sizing
+                aruco.SetFittsBoardVisible( true );
                 fitts.Reset();
             }
             // IDLE and any other state - window already closed above
@@ -363,10 +380,11 @@ int main() {
             }
         }
 
-        // In FITTS state, show the selected target marker whenever it changes
+        // In FITTS state, arm the new target whenever it changes. The board is
+        // persistent (all markers stay shown); only the target-offset circle
+        // and the fitts task state move to the new target marker.
         if ( kb.systemState == SystemState::FITTS &&
              kb.fittsTargetId != prevFittsTarget && kb.fittsTargetId > 0 ) {
-            aruco.ShowSingleMarker( kb.fittsTargetId );
             fitts.OnNewTarget( kb.fittsTargetId );
             prevFittsTarget = kb.fittsTargetId;
         }
@@ -379,6 +397,9 @@ int main() {
             controller.ResetRamp( nowSecs );    // also resets the setpoint IIR filter
             prevActiveTagId = kb.activeTagId;
             haveLastTargetCircle = false;
+            // Tell the detection thread which marker needs full 3D pose - it
+            // skips pose for all others, keeping the dense board cheap.
+            aruco.SetActiveTagId( kb.activeTagId );
         }
 
         // f. Controller - runs every loop iteration so dt tracks wall-clock
@@ -405,18 +426,46 @@ int main() {
             }
         }
 
+        // Resolve the guidance target. Prefer the directly-detected active
+        // marker (most accurate, especially up close). If it isn't visible -
+        // too far for the fine target, or lost while veering off - fall back to
+        // the board pose computed from whatever markers ARE visible (coarse
+        // markers far away, neighbouring fine markers up close) plus the
+        // target's known board location, so guidance keeps pulling back toward
+        // the target instead of cutting out. The board-pose solve is the
+        // expensive path, so it is recomputed only on new frames and reused.
+        bool        haveTarget  = false;
+        cv::Point3f targetPosMm = {};
+        float       targetRoll  = 0.0f;
+        if ( activeMarker ) {
+            haveTarget    = true;
+            targetPosMm   = activeMarker->positionMm;
+            targetRoll    = activeMarker->rollRad;
+            fbTargetValid = false;    // direct lock re-acquired; drop stale fallback
+        } else if ( kb.systemState == SystemState::FITTS && kb.activeTagId > 0 ) {
+            if ( isNewFrame ) {
+                fbTargetValid = fitts.EstimateTargetFromBoard(
+                    markers, kb.activeTagId, fbTargetPosMm, fbTargetRoll, &fbCorners );
+            }
+            if ( fbTargetValid ) {
+                haveTarget  = true;
+                targetPosMm = fbTargetPosMm;
+                targetRoll  = fbTargetRoll;
+            }
+        }
+
         // Once the participant has touched the screen for the current target,
         // guidance cues stop until a new target is loaded (fitts.OnNewTarget()
         // resets HasTouchSample() on the next 'r'/'m' target change).
         const bool guidanceSuppressedByTouch = ( kb.systemState == SystemState::FITTS && fitts.HasTouchSample() );
 
-        // Hand the active marker and calibration state to the controller.
+        // Hand the resolved target and calibration state to the controller.
         // pos_target, roll compensation, and the IIR setpoint filter are all
         // computed inside ControllerHandler::Update().
         controller.SetTarget(
-            activeMarker != nullptr,
-            activeMarker ? activeMarker->positionMm : cv::Point3f{},
-            activeMarker ? activeMarker->rollRad    : 0.0f,
+            haveTarget,
+            targetPosMm,
+            targetRoll,
             cal3.IsComplete(),
             cv::Point2f{ cal3.GetFinalOffset().x, cal3.GetFinalOffset().y },
             cal3.GetRollRef(),
@@ -424,42 +473,71 @@ int main() {
             !guidanceSuppressedByTouch
         );
 
+        // Feed the resolved target position to the operator telemetry panel so
+        // the "Target Telemetry" readout tracks the target via the board-pose
+        // estimate when the marker itself isn't directly detected.
+        display.SetActiveTargetPosition( haveTarget, targetPosMm );
+
+        // When guidance is running on the board-pose estimate (target marker not
+        // directly detected), hand the projected outline to the operator view so
+        // the green box / ID / guidance line still draw at the estimated spot.
+        display.SetEstimatedActiveTarget( haveTarget && activeMarker == nullptr,
+                                          kb.activeTagId, fbCorners );
+
+        // Target marker centre in the camera image + its depth, for the
+        // operator-view overlays. Use the directly-detected marker when present;
+        // otherwise project the board-pose fallback position so the circle and
+        // guiding dot still show while the target marker is dropped out.
+        bool        haveTargetPx   = false;
+        cv::Point2i targetCenterPx = {};
+        float       targetDepth    = 0.0f;
+        if ( activeMarker ) {
+            haveTargetPx   = true;
+            targetCenterPx = activeMarker->centerPx;
+            targetDepth    = activeMarker->positionMm.z;
+        } else if ( haveTarget && targetPosMm.z > 1e-3f ) {
+            // positionMm is camera-frame Y-up; image Y points down, hence the
+            // negation on the Y projection term.
+            targetDepth    = targetPosMm.z;
+            targetCenterPx = cv::Point2i(
+                static_cast<int>( std::round( cfg.camera.cx + cfg.camera.fx * targetPosMm.x / targetDepth ) ),
+                static_cast<int>( std::round( cfg.camera.cy - cfg.camera.fy * targetPosMm.y / targetDepth ) ) );
+            haveTargetPx   = true;
+        }
+
         // Project the target offsets into camera image pixels for operator display.
         // The controller exposes (ox, oy, corrX, corrY) in mm; the camera intrinsics
         // live here in main so the pixel maths stays outside the controller.
-        if ( activeMarker ) {
+        if ( haveTargetPx && targetDepth > 1e-3f ) {
             const auto tgtOfs        = controller.GetTargetOffsets();
             const float ox           = tgtOfs.ox;
             const float oy           = tgtOfs.oy;
             const float corrX_screen = tgtOfs.corrX;
             const float corrY_screen = tgtOfs.corrY;
-            const float depth        = activeMarker->positionMm.z;
-            if ( depth > 1e-3f ) {
-                int offsetXpx = static_cast<int>( std::round( cfg.camera.fx * ox / depth ) );
-                // oy is camera-frame Y-up; image Y points down, hence the negation
-                // (matches the virtualTargetPx Y term below).
-                int offsetYpx = static_cast<int>( std::round( -cfg.camera.fy * oy / depth ) );
-                int radiusPx  = static_cast<int>( std::round(
-                    0.5 * ( cfg.camera.fx + cfg.camera.fy ) * cfg.target.radiusMm / depth ) );
-                lastTargetCirclePx        = activeMarker->centerPx + cv::Point2i( offsetXpx, offsetYpx );
-                lastTargetCircleRadiusPx  = radiusPx;
-                haveLastTargetCircle      = true;
+            const float depth        = targetDepth;
 
-                // Green dot = guiding position ("virtual marker"): where the marker
-                // centre must be steered so the fingertip lands on the target. It is
-                // the marker centre plus the roll-induced offset (d - R*d), so it is
-                // anchored to the tag and only shifts as the finger rolls (stable,
-                // since it no longer depends on the noisy single-marker pose).
-                // (ox,oy) and (corrX,corrY) are camera-frame Y-up mm; image Y is down.
-                const float guideOffX = ox - corrX_screen;          // (d - R*d).x
-                const float guideOffY = oy - corrY_screen;          // (d - R*d).y
-                cv::Point2i virtualTargetPx(
-                    activeMarker->centerPx.x + static_cast<int>( std::round( cfg.camera.fx * guideOffX / depth ) ),
-                    activeMarker->centerPx.y - static_cast<int>( std::round( cfg.camera.fy * guideOffY / depth ) ) );
-                display.SetVirtualTarget( cal3.IsComplete(), virtualTargetPx );
-            } else {
-                display.SetVirtualTarget( false, {} );
-            }
+            int offsetXpx = static_cast<int>( std::round( cfg.camera.fx * ox / depth ) );
+            // oy is camera-frame Y-up; image Y points down, hence the negation
+            // (matches the virtualTargetPx Y term below).
+            int offsetYpx = static_cast<int>( std::round( -cfg.camera.fy * oy / depth ) );
+            int radiusPx  = static_cast<int>( std::round(
+                0.5 * ( cfg.camera.fx + cfg.camera.fy ) * cfg.target.radiusMm / depth ) );
+            lastTargetCirclePx        = targetCenterPx + cv::Point2i( offsetXpx, offsetYpx );
+            lastTargetCircleRadiusPx  = radiusPx;
+            haveLastTargetCircle      = true;
+
+            // Green dot = guiding position ("virtual marker"): where the marker
+            // centre must be steered so the fingertip lands on the target. It is
+            // the marker centre plus the roll-induced offset (d - R*d), so it is
+            // anchored to the tag and only shifts as the finger rolls (stable,
+            // since it no longer depends on the noisy single-marker pose).
+            // (ox,oy) and (corrX,corrY) are camera-frame Y-up mm; image Y is down.
+            const float guideOffX = ox - corrX_screen;          // (d - R*d).x
+            const float guideOffY = oy - corrY_screen;          // (d - R*d).y
+            cv::Point2i virtualTargetPx(
+                targetCenterPx.x + static_cast<int>( std::round( cfg.camera.fx * guideOffX / depth ) ),
+                targetCenterPx.y - static_cast<int>( std::round( cfg.camera.fy * guideOffY / depth ) ) );
+            display.SetVirtualTarget( cal3.IsComplete(), virtualTargetPx );
         } else {
             display.SetVirtualTarget( false, {} );
         }

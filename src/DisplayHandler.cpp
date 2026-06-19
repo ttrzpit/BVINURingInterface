@@ -531,6 +531,18 @@ void DisplayHandler::SetControllerTelemetry( const ControllerTelemetry &tele ) {
     controllerTele_ = tele;
 }
 
+void DisplayHandler::SetActiveTargetPosition( bool valid, cv::Point3f posMm ) {
+    targetPosValid_ = valid;
+    targetPosMm_    = posMm;
+}
+
+void DisplayHandler::SetEstimatedActiveTarget( bool visible, int tagId,
+                                               const std::array<cv::Point2f, 4> &corners ) {
+    estTargetVisible_ = visible;
+    estTargetTagId_   = tagId;
+    estTargetCorners_ = corners;
+}
+
 void DisplayHandler::SetCal1State( bool recording, const std::vector<cv::Point2f> &samples,
                                    const AromBoundary &boundary ) {
     cal1Recording_ = recording;
@@ -711,23 +723,18 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
     AddControllerSubheadingCell( "z", "J8", 2, 1, "center", bodyFontSize );
     AddControllerSubheadingCell( "Rxy", "L8", 2, 1, "center", bodyFontSize );
     AddControllerSubheadingCell( "Rxyz", "N8", 2, 1, "center", bodyFontSize );
-    // Active marker position (pos_camera from solvePnP) - moved here from System Information
-    const DetectedMarker *activeMarker = nullptr;
-    if ( kb.activeTagId > 0 ) {
-        for ( const auto &m : markers ) {
-            if ( m.id == kb.activeTagId ) {
-                activeMarker = &m;
-                break;
-            }
-        }
-    }
+    // Active-target position (pos_camera). Resolved in main.cpp: the directly
+    // detected marker when visible, otherwise the board-pose estimate from the
+    // coarse markers (far) or neighbouring fine markers (near), so the readout
+    // tracks the target even when its own marker is dropped out.
+    const bool haveTarget = targetPosValid_;
 
     // Position
     AddControllerSubheadingCell( "Position [mm]", "A9", 5, 1, "center", bodyFontSize );
-    if ( activeMarker ) {
-        const float x = activeMarker->positionMm.x;
-        const float y = activeMarker->positionMm.y;
-        const float z = activeMarker->positionMm.z;
+    if ( haveTarget ) {
+        const float x = targetPosMm_.x;
+        const float y = targetPosMm_.y;
+        const float z = targetPosMm_.z;
         AddControllerBodyCell( fmtMm( x ), "F9", 2, 1, "center", bodyFontSize );
         AddControllerBodyCell( fmtMm( y ), "H9", 2, 1, "center", bodyFontSize );
         AddControllerBodyCell( fmtMm( z ), "J9", 2, 1, "center", bodyFontSize );
@@ -746,7 +753,7 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
     // move that lands the fingertip on the target (the error to the actual guided
     // target, offsets/roll compensation included). Δp.z is the depth to target.
     AddControllerSubheadingCell( "Guiding Pos [mm]", "A10", 5, 1, "center", bodyFontSize );
-    if ( activeMarker ) {
+    if ( haveTarget ) {
         const cv::Point3f dp = controllerTele_.displacement;
         AddControllerBodyCell( fmtMm( dp.x ), "F10", 2, 1, "center", bodyFontSize );
         AddControllerBodyCell( fmtMm( dp.y ), "H10", 2, 1, "center", bodyFontSize );
@@ -1195,9 +1202,14 @@ void DisplayHandler::DrawMarkerOverlays(
     cv::putText( frame, targetLabel, cv::Point( 10, 22 ), cv::FONT_HERSHEY_SIMPLEX,
                  0.55, Colors::White, 1 );
 
+    bool activeDrawn = false;
     for ( const auto &m : markers ) {
+        // Every detected tag: just a small green dot at its center. With the
+        // dense multi-scale Fitts board this keeps the view readable.
+        // cv::circle( frame, m.centerPx, 2, cv::Scalar( 0, 200, 0 ), cv::FILLED );
+
         if ( activeTagId > 0 && m.id == activeTagId ) {
-            // Active tag: green outline square + ID label
+            // Active tag: add the green outline square + ID label on top.
             std::vector<cv::Point> corners( 4 );
             for ( int k = 0; k < 4; k++ )
                 corners[k] = cv::Point( static_cast<int>( m.cornersPx[k].x ),
@@ -1215,14 +1227,33 @@ void DisplayHandler::DrawMarkerOverlays(
                                      ? virtualTargetPx_
                                      : m.centerPx;
             cv::line( frame, principalPoint_, lineTo, Colors::GreMd, 2 );
-
-        } else {
-            // Non-active markers: small dot and ID text
-            cv::circle( frame, m.centerPx, 6, cv::Scalar( 0, 200, 0 ), cv::FILLED );
-            cv::putText( frame, "ID " + std::to_string( m.id ),
-                         m.centerPx + cv::Point2i( 10, -10 ), cv::FONT_HERSHEY_SIMPLEX,
-                         0.6, cv::Scalar( 0, 200, 0 ), 2 );
+            activeDrawn = true;
         }
+    }
+
+    // Target marker not directly detected but estimated from the board pose
+    // (coarse markers far away / neighbours up close): draw the same green box /
+    // ID / guidance line at the estimated outline so the operator keeps the cue.
+    if ( !activeDrawn && estTargetVisible_ && estTargetTagId_ > 0 ) {
+        std::vector<cv::Point> corners( 4 );
+        cv::Point2f centerF( 0.f, 0.f );
+        for ( int k = 0; k < 4; k++ ) {
+            corners[k] = cv::Point( static_cast<int>( estTargetCorners_[k].x ),
+                                    static_cast<int>( estTargetCorners_[k].y ) );
+            centerF += estTargetCorners_[k];
+        }
+        cv::Point2i center( static_cast<int>( centerF.x / 4.f ),
+                            static_cast<int>( centerF.y / 4.f ) );
+
+        cv::polylines( frame, corners, true, cv::Scalar( 0, 255, 0 ), 2 );
+        cv::putText( frame, "ID " + std::to_string( estTargetTagId_ ),
+                     center + cv::Point2i( 10, -10 ), cv::FONT_HERSHEY_SIMPLEX,
+                     0.6, cv::Scalar( 0, 255, 0 ), 2 );
+
+        cv::Point2i lineTo = ( cal3Complete_ && virtualTargetVisible_ )
+                                 ? virtualTargetPx_
+                                 : center;
+        cv::line( frame, principalPoint_, lineTo, Colors::GreMd, 2 );
     }
 }
 

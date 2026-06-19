@@ -35,6 +35,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "Config.h"
+#include "FittsBoardLayout.h"
 
 
 // ---- Output type ------------------------------------------------------------
@@ -43,12 +44,12 @@
  * @brief Data for a single detected ArUco marker in a camera frame.
  */
 struct DetectedMarker {
-    int                        id;          ///< Marker ID from the dictionary
-    cv::Point2i                centerPx;    ///< Pixel-space centroid
-    std::array<cv::Point2f, 4> cornersPx;  ///< Four corners, clockwise from top-left
-    cv::Point3f                positionMm;  ///< 3D position relative to camera [mm]
-    float                      rotationDeg;///< Rotation about the Y-axis [degrees]
-    float                      rollRad;    ///< In-plane rotation (rvec Z component) used for roll-corrected fingertip offset
+    int                        id = 0;          ///< Marker ID from the dictionary
+    cv::Point2i                centerPx;        ///< Pixel-space centroid
+    std::array<cv::Point2f, 4> cornersPx;       ///< Four corners, clockwise from top-left
+    cv::Point3f                positionMm;       ///< 3D position relative to camera [mm] (only set for the active target)
+    float                      rotationDeg = 0.0f;  ///< Rotation about the Y-axis [degrees] (only set for the active target)
+    float                      rollRad = 0.0f;      ///< In-plane roll from the marker's top edge [rad]
 };
 
 
@@ -60,6 +61,7 @@ public:
                  const ArucoDetectorConfig&        detectorCfg,
                  const ArucoDisplayConfig&         displayCfg,
                  const ArucoCalibrationGridConfig& calGridCfg,
+                 const FittsBoardConfig&           fittsBoardCfg,
                  const TouchscreenConfig&          touchCfg,
                  const cv::Mat&                    camMatrix,
                  const cv::Mat&                    distCoeffs);
@@ -121,6 +123,34 @@ public:
     void ShowSingleMarker(int id);
 
     /**
+     * @brief Show or hide the multi-scale Fitts board on the touchscreen
+     *        (coarse perimeter markers + dense fine grid, DICT_4X4_1000).
+     *        The board is persistent - the active target is indicated by the
+     *        target-offset circle, not by hiding markers. Idempotent.
+     */
+    void SetFittsBoardVisible(bool visible);
+
+    /**
+     * @brief Switch detection for the multi-scale Fitts board.
+     *        true  → DICT_4X4_1000, IDs 0–board max, per-marker physical size
+     *                resolved from the board layout (coarse vs fine).
+     *        false → restore DICT_4X4_50 and the default ID range / marker size.
+     *        Thread-safe - takes effect on the next detection cycle.
+     */
+    void SetFittsBoardDetection(bool fitts);
+
+    /** @brief Set the active guidance target ID. The detection thread solves
+     *         full 3D pose only for this marker; pass 0 when no target is active.
+     *         Thread-safe - takes effect on the next detection cycle. */
+    void SetActiveTagId(int id) { activeTagId_.store(id); }
+
+    /** @brief Number of fine (pointing-target) markers on the Fitts board.
+     *         Target IDs span [GetFittsTargetIdMin(), that min + count - 1]. */
+    int GetFittsTargetCount() const { return fittsLayout_.FineCount(); }
+    int GetFittsTargetIdMin() const { return fittsLayout_.FineIdMin(); }
+    int GetFittsTargetIdMax() const { return fittsLayout_.FineIdMax(); }
+
+    /**
      * @brief Draw (or clear) the Fitts touch-sample overlay on top of the
      *        current Fitts target image: a red dot at the touch position
      *        plus two lines of error-readout text in the top-left corner.
@@ -149,9 +179,10 @@ public:
     void SetTargetOffsetCircle(bool visible, cv::Point2i centerPx, int radiusPx, cv::Scalar color);
 
     /**
-     * @brief Pixel-space center of the Fitts grid cell for marker `id`
-     *        (1-based, left-to-right top-to-bottom), in touchscreen-local
-     *        pixels. Returns {0,0} for id < 1.
+     * @brief Pixel-space center of the Fitts board marker `id`, in
+     *        touchscreen-local pixels. Resolved from the board layout (fine
+     *        target IDs and coarse IDs both work). Returns {0,0} if `id` is not
+     *        on the board.
      */
     cv::Point2i GetGridMarkerCenterPx(int id) const;
 
@@ -161,14 +192,14 @@ public:
      * @brief Show or hide the dense calibration grid on the touchscreen.
      *        Layout is auto-calculated from ArucoCalibrationGridConfig:
      *        markers are packed with fixed markerPadMm spacing inside the
-     *        markerExclusionMm boundary. Uses DICT_4X4_250 (IDs start at 0).
+     *        markerExclusionMm boundary. Uses DICT_4X4_1000 (IDs start at 0).
      *        Idempotent - safe to call repeatedly with the same value.
      */
     void SetCalibrationGridVisible(bool visible);
 
     /**
      * @brief Switch the detection dictionary and valid ID range.
-     *        true  → DICT_4X4_250, IDs 0–249 (Cal3 calibration grid)
+     *        true  → DICT_4X4_1000, IDs 0–999 (Cal3 calibration grid)
      *        false → DICT_4X4_50,  IDs from aruco_marker config (default)
      *        Thread-safe - takes effect on the next detection cycle.
      */
@@ -190,6 +221,7 @@ private:
     void        renderGridImage();
     cv::Point2i gridCellOrigin(int col, int row) const;
     void        renderCalibrationGridImage();
+    void        renderFittsBoardImage();
 
     /** @brief Redraw singleMarkerImage_ with the target-offset circle (if
      *         visible) and the Fitts touch overlay (if visible), then
@@ -202,6 +234,7 @@ private:
     ArucoDisplayConfig         displayCfg_;
     ArucoCalibrationGridConfig calGridCfg_;
     TouchscreenConfig          touchCfg_;
+    FittsBoardLayout           fittsLayout_;
     cv::Mat                    camMatrix_;
     cv::Mat                    distCoeffs_;
 
@@ -209,7 +242,7 @@ private:
     cv::aruco::Dictionary         dictionary_;       // DICT_4X4_50  - Fitts / default
     cv::aruco::DetectorParameters detectorParams_;
     cv::aruco::ArucoDetector      detector_;         // built from dictionary_
-    cv::aruco::ArucoDetector      calDetector_;      // built from calGridDictionary_ (DICT_4X4_250)
+    cv::aruco::ArucoDetector      calDetector_;      // built from calGridDictionary_ (DICT_4X4_1000)
 
     // Active detection mode - written from main thread, read from detect thread.
     // Atomics avoid the need for a mutex in the RunDetection() hot path.
@@ -217,11 +250,23 @@ private:
     std::atomic<int>  activeValidIdMin_{ 0 };
     std::atomic<int>  activeValidIdMax_{ 45 };
 
+    // When true, per-marker physical size is resolved from fittsLayout_ (coarse
+    // vs fine) during pose estimation instead of the single detectCfg_ size.
+    // Read on the detection thread; fittsLayout_ is immutable after construction.
+    std::atomic<bool> useFittsBoardSizes_{ false };
+
+    // ID of the active guidance target. The detection thread solves full 3D
+    // pose only for this marker (the only one whose pose is consumed), which
+    // keeps detection cheap on the dense Fitts board. 0 = none.
+    std::atomic<int> activeTagId_{ 0 };
+
     // ---- Display ------------------------------------------------------------
     cv::Mat markerGridImage_;
     bool    gridVisible_    = false;   // Fitts grid open/closed state
     cv::Mat calGridImage_;
     bool    calGridVisible_ = false;   // Calibration grid open/closed state
+    cv::Mat fittsBoardImage_;
+    bool    fittsBoardVisible_ = false;  // Multi-scale Fitts board open/closed state
     cv::Size calGridSize_   = {};      // Auto-calculated cols/rows for the calibration grid
 
     // Fitts touch-sample overlay - drawn on top of singleMarkerImage_
@@ -237,7 +282,7 @@ private:
     int         targetCircleRadiusPx_  = 0;
     cv::Scalar  targetCircleColor_     = { 0, 0, 255 };  // BGR, default red
 
-    // Calibration grid uses a larger dictionary (DICT_4X4_250) so it can
+    // Calibration grid uses a larger dictionary (DICT_4X4_1000) so it can
     // accommodate more markers than the Fitts grid (DICT_4X4_50).
     cv::aruco::Dictionary calGridDictionary_;
 

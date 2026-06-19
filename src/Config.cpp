@@ -124,6 +124,26 @@ bool Config::load(const std::string& filepath) {
         acal["marker_exclusion_mm"] >> arucoCalGrid.markerExclusionMm;
     }
 
+    // ---- Fitts board (explicit multi-scale placement) ------------------------
+    cv::FileNode fb = fs["fitts_board_assignments"];
+    if (!fb.empty()) {
+        fb["fine_marker_size_mm"]    >> fittsBoard.fineMarkerSizeMm;
+        fb["fine_marker_pad_mm"]     >> fittsBoard.finePadMm;
+        fb["fine_marker_first_x_mm"] >> fittsBoard.fineFirstXMm;
+        fb["fine_marker_first_y_mm"] >> fittsBoard.fineFirstYMm;
+        fb["fine_marker_rows"]       >> fittsBoard.fineRows;
+        fb["fine_marker_cols"]       >> fittsBoard.fineCols;
+        fb["coarse_marker_size_mm"]  >> fittsBoard.coarseMarkerSizeMm;
+        fb["coarse_marker_x1"]       >> fittsBoard.coarseCenterXMm[0];
+        fb["coarse_marker_y1"]       >> fittsBoard.coarseCenterYMm[0];
+        fb["coarse_marker_x2"]       >> fittsBoard.coarseCenterXMm[1];
+        fb["coarse_marker_y2"]       >> fittsBoard.coarseCenterYMm[1];
+        fb["coarse_marker_x3"]       >> fittsBoard.coarseCenterXMm[2];
+        fb["coarse_marker_y3"]       >> fittsBoard.coarseCenterYMm[2];
+        fb["coarse_marker_x4"]       >> fittsBoard.coarseCenterXMm[3];
+        fb["coarse_marker_y4"]       >> fittsBoard.coarseCenterYMm[3];
+    }
+
     // ---- Touchscreen --------------------------------------------------------
     cv::FileNode ts = fs["touchscreen"];
     if (!ts.empty()) {
@@ -250,6 +270,8 @@ bool Config::load(const std::string& filepath) {
     std::cout << "Config:       ArUco grid " << arucoDisplay.cols << "x"
               << arucoDisplay.rows << ", IDs [" << arucoMarker.validIdMin
               << ", " << arucoMarker.validIdMax << "]\n";
+    std::cout << "Config:       Fitts board fine " << fittsBoard.fineMarkerSizeMm
+              << " mm / coarse " << fittsBoard.coarseMarkerSizeMm << " mm\n";
     return true;
 }
 

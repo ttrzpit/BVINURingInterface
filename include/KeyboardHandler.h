@@ -228,12 +228,21 @@ class KeyboardHandler {
     }
 
     /** @brief Set the active Fitts target ID directly (e.g. from a flick
-     *         gesture during FITTS), clamped to [1, 45]. Mirrors SET_FITTS_TARGET. */
+     *         gesture during FITTS), clamped to the board's target range.
+     *         Mirrors SET_FITTS_TARGET. */
     void SetFittsTargetId( int id ) {
-        if ( id < 1 ) id = 1;
-        if ( id > 45 ) id = 45;
+        if ( id < fittsTargetIdMin_ ) id = fittsTargetIdMin_;
+        if ( id > fittsTargetIdMax_ ) id = fittsTargetIdMax_;
         state_.fittsTargetId = id;
         state_.activeTagId = id;
+    }
+
+    /** @brief Configure the inclusive Fitts target ID range (the fine-marker
+     *         band of the multi-scale board). Drives random target selection
+     *         ('r') and the flick-step clamp. Defaults to [1, 45]. */
+    void SetFittsTargetRange( int minId, int maxId ) {
+        fittsTargetIdMin_ = minId;
+        fittsTargetIdMax_ = maxId;
     }
 
    private:
@@ -267,4 +276,6 @@ class KeyboardHandler {
     KeyboardState state_;
     std::string   inputBuffer_;                        // In-progress numeric entry (mirrors state_.inputBuffer)
     InputState    preGainState_ = InputState::IDLE;    // inputState to restore on EXIT_GAIN_MODE
+    int           fittsTargetIdMin_ = 1;               // Fitts target range (set from the board layout)
+    int           fittsTargetIdMax_ = 45;
 };

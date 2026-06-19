@@ -18,6 +18,7 @@
 // window event system for ALL windows.
 // =============================================================================
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -161,6 +162,20 @@ public:
     /** @brief Cache the latest controller telemetry for the controller panel. */
     void SetControllerTelemetry(const ControllerTelemetry &tele);
 
+    /** @brief Cache the resolved active-target position (camera-relative, Y-up
+     *         mm) for the target-telemetry panel. Valid even when the target
+     *         marker is not directly detected and its position is estimated from
+     *         the board pose (coarse markers far away / neighbours up close). */
+    void SetActiveTargetPosition(bool valid, cv::Point3f posMm);
+
+    /** @brief Provide the active target's estimated outline (4 corners projected
+     *         from the board pose) for the operator view, used to draw the green
+     *         box / ID / guidance line when the target marker is not directly
+     *         detected. Pass visible=false when the marker is detected directly
+     *         (the detection draws its own outline) or no target is active. */
+    void SetEstimatedActiveTarget(bool visible, int tagId,
+                                  const std::array<cv::Point2f, 4> &corners);
+
     // ---- Controller panel ---------------------------------------------------
 
     void ClearController();
@@ -242,6 +257,16 @@ private:
 
     bool        virtualTargetVisible_ = false;
     cv::Point2i virtualTargetPx_      = {};
+
+    // Resolved active-target position (direct detection or board-pose estimate)
+    bool        targetPosValid_ = false;
+    cv::Point3f targetPosMm_    = {};
+
+    // Estimated active-target outline (board-pose projection) for the operator
+    // view when the target marker is not directly detected.
+    bool                       estTargetVisible_ = false;
+    int                        estTargetTagId_   = 0;
+    std::array<cv::Point2f, 4> estTargetCorners_ = {};
 
     bool        touchFingertipVisible_ = false;
     cv::Point2i touchFingertipPx_      = {};

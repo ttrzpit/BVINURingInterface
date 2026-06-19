@@ -12,7 +12,7 @@
 aruco_marker:
    marker_size_mm: 20.0   # Physical side length of ring markers [mm] - used for pose estimation
    valid_id_min: 0        # Discard detected markers with ID below this
-   valid_id_max: 46       # Discard detected markers with ID above this
+   valid_id_max: 200       # Discard detected markers with ID above this
 
 
 # ---- ArUco Detector Algorithm Parameters ------------------------------------
@@ -156,6 +156,33 @@ cal3:
    max_samples:   10     # Number of touches required to complete calibration
 
 
+# ---- Fitts board (explicit multi-scale placement for the FITTS task) ----------
+# Two-level nested fiducial board in DICT_4X4_1000. All positions are marker
+# CENTRES in screen-plane mm (origin = screen top-left):
+#   - fine markers (subset B): dense grid laid out from the first marker's
+#     centre, stepping by (size + pad) centre-to-centre over rows x cols. These
+#     are the close-range reference AND the pointing targets; IDs run 1.. row-major.
+#   - coarse markers (subset A): four large markers at the explicit centres
+#     below, drawn on top of the fine grid; IDs follow the fine band.
+# NOTE: fine cells under a coarse marker are overdrawn (won't decode); avoid
+# selecting those as targets, or ask to auto-skip them.
+fitts_board_assignments:
+   fine_marker_size_mm:       8.0      # Fine marker side length [mm]
+   fine_marker_pad_mm:        8.0      # Gap between fine markers [mm] (pitch = size + pad = 16 mm)
+   fine_marker_first_x_mm:    31.50    # First marker center x-coordinate [mm]
+   fine_marker_first_y_mm:    36.23    # First marker center y-coordinate [mm]  
+   fine_marker_rows:          15       # Number of rows
+   fine_marker_cols:          30       # Number of columns
+   coarse_marker_size_mm:     56.0     # Coarse marker side length [mm]
+   coarse_marker_x1:          39.5     # Coarse marker 1 center x-coordinate [mm]
+   coarse_marker_y1:          44.5     # Coarse marker 1 center x-coordinate [mm]
+   coarse_marker_x2:          487.5    # Coarse marker 1 center x-coordinate [mm]
+   coarse_marker_y2:          44.5     # Coarse marker 1 center x-coordinate [mm]
+   coarse_marker_x3:          39.5     # Coarse marker 1 center x-coordinate [mm]
+   coarse_marker_y3:          252.23   # Coarse marker 1 center x-coordinate [mm]
+   coarse_marker_x4:          487.5    # Coarse marker 1 center x-coordinate [mm]
+   coarse_marker_y4:          252.23   # Coarse marker 1 center x-coordinate [mm]
+   
 # ---- Fitts target circle ------------------------------------------------------
 # radius_mm         : Drawn target circle radius [mm]
 # offset_default_mm : Default Y offset (below the tag center) shown as a gray
