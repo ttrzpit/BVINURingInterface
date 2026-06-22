@@ -157,6 +157,55 @@ bool FittsTaskHandler::EstimateTargetFromBoard(const std::vector<DetectedMarker>
     return true;
 }
 
+bool FittsTaskHandler::GetTargetFullPose(const std::vector<DetectedMarker>& markers,
+                                         int targetId, cv::Point3f& posMmOut,
+                                         cv::Vec4f& quatXyzwOut, bool& detectedOut) const {
+    const FittsMarker* fm = layout_.Find(targetId);
+    if (!fm) return false;
+
+    detectedOut = false;
+    for (const auto& m : markers)
+        if (m.id == targetId) { detectedOut = true; break; }
+
+    cv::Vec3d rvec, tvec;
+    if (!ComputeArucoPose(markers, rvec, tvec) || tvec[2] <= 1e-6) return false;
+
+    cv::Mat R;
+    cv::Rodrigues(rvec, R);
+
+    // Target marker centre (board mm) -> camera frame: C = R*P + t.
+    const double cx = (fm->xPx + fm->sizePx * 0.5) * touchCfg_.mmPerPixel;
+    const double cy = (fm->yPx + fm->sizePx * 0.5) * touchCfg_.mmPerPixel;
+    cv::Mat P = (cv::Mat_<double>(3, 1) << cx, cy, 0.0);
+    cv::Mat C = R * P + cv::Mat(tvec);
+    posMmOut = cv::Point3f(static_cast<float>(C.at<double>(0)),
+                           static_cast<float>(C.at<double>(1)),
+                           static_cast<float>(C.at<double>(2)));
+
+    // Rotation matrix (board->camera) -> quaternion (x,y,z,w).
+    const double m00 = R.at<double>(0,0), m01 = R.at<double>(0,1), m02 = R.at<double>(0,2);
+    const double m10 = R.at<double>(1,0), m11 = R.at<double>(1,1), m12 = R.at<double>(1,2);
+    const double m20 = R.at<double>(2,0), m21 = R.at<double>(2,1), m22 = R.at<double>(2,2);
+    const double tr = m00 + m11 + m22;
+    double qw, qx, qy, qz;
+    if (tr > 0.0) {
+        double s = std::sqrt(tr + 1.0) * 2.0;
+        qw = 0.25 * s; qx = (m21 - m12) / s; qy = (m02 - m20) / s; qz = (m10 - m01) / s;
+    } else if (m00 > m11 && m00 > m22) {
+        double s = std::sqrt(1.0 + m00 - m11 - m22) * 2.0;
+        qw = (m21 - m12) / s; qx = 0.25 * s; qy = (m01 + m10) / s; qz = (m02 + m20) / s;
+    } else if (m11 > m22) {
+        double s = std::sqrt(1.0 + m11 - m00 - m22) * 2.0;
+        qw = (m02 - m20) / s; qx = (m01 + m10) / s; qy = 0.25 * s; qz = (m12 + m21) / s;
+    } else {
+        double s = std::sqrt(1.0 + m22 - m00 - m11) * 2.0;
+        qw = (m10 - m01) / s; qx = (m02 + m20) / s; qy = (m12 + m21) / s; qz = 0.25 * s;
+    }
+    quatXyzwOut = cv::Vec4f(static_cast<float>(qx), static_cast<float>(qy),
+                            static_cast<float>(qz), static_cast<float>(qw));
+    return true;
+}
+
 cv::Point2f FittsTaskHandler::TargetCenterPx(const cv::Vec3d& rvec, const cv::Vec3d& tvec) const {
     const FittsMarker* fm = layout_.Find(targetId_);
     if (!fm) return {};

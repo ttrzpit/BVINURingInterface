@@ -22,12 +22,15 @@
 //   ESC key or SIGINT (Ctrl-C) → sets g_running = false → clean thread join
 // =============================================================================
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <csignal>
 #include <deque>
 #include <iostream>
+#include <random>
 #include <string>
+#include <vector>
 
 #include "ArucoHandler.h"
 #include "Cal1Handler.h"
@@ -45,6 +48,7 @@
 #include "PretensionHandler.h"
 #include "SerialHandler.h"
 #include "TouchHandler.h"
+#include "TrialLogger.h"
 
 // Global shutdown flag - written by SIGINT handler, read by the main loop
 static volatile bool g_running = true;
@@ -92,6 +96,7 @@ int main() {
     TouchHandler touch( cfg.touchscreen );
     Cal3Handler cal3( cfg.touchscreen, cfg.camera, cfg.arucoCalGrid, cfg.cal3 );
     FittsTaskHandler fitts( cfg.fittsBoard, cfg.touchscreen, cfg.camera );
+    TrialLogger      trialLogger;
 
     ControllerHandler controller( cfg.controllerGains );
     PretensionHandler pretension( controller );
@@ -121,6 +126,8 @@ int main() {
     KeyboardHandler keyboard;
     // Fitts targets are the fine-marker band of the multi-scale board.
     keyboard.SetFittsTargetRange( aruco.GetFittsTargetIdMin(), aruco.GetFittsTargetIdMax() );
+    // Manual entry ('m' key) can also reach coarse markers for testing.
+    keyboard.SetFittsBoardMaxId( aruco.GetFittsBoardMaxId() );
 
     double lastFrameTimestamp = -1.0;
 
@@ -141,6 +148,12 @@ int main() {
     cv::Point3f fbTargetPosMm = {};
     float       fbTargetRoll  = 0.0f;
     std::array<cv::Point2f, 4> fbCorners = {};
+
+    // Trial logging + distance-stratified target selection state.
+    std::mt19937 targetRng{ std::random_device{}() };
+    int          distanceBandCursor = 0;   // cycles 0..numDistanceBands-1
+    double       trialStartSecs      = 0.0; // loop clock at the active trial's start
+    bool         prevLogTouched      = false;
     int prevActiveTagId = 0;    ///< Detects kb.activeTagId changes -> ramps guidance force on new targets
 
     // Last-known camera-side target-circle position (persists when activeMarker
@@ -148,6 +161,13 @@ int main() {
     cv::Point2i lastTargetCirclePx = {};
     int lastTargetCircleRadiusPx = 0;
     bool haveLastTargetCircle = false;
+
+    // Active-target outline frozen at the trial-ending touch, drawn as a magenta
+    // reference box until the next target is selected (fitts.HasTouchSample()).
+    std::array<cv::Point2f, 4> touchedTargetCorners = {};
+    bool                       touchedTargetBoxValid = false;
+    bool                       prevFittsTouchSample  = false;
+
     bool cal3CompletionHandled = false;
     bool cal2ProfileApplied = false;    ///< Set once Cal2's K(theta) has been applied to the controller
     PcToTeensyPacket lastTxPkt = {};    // Pending TX values updated each frame - sent by TX thread at 200 Hz
@@ -278,6 +298,7 @@ int main() {
             if ( prevState == SystemState::FITTS ) {
                 prevFittsTarget = 0;
                 prevActiveTagId = 0;
+                trialLogger.Cancel();    // drop any in-progress capture on FITTS exit
             }
             prevState = kb.systemState;
         }
@@ -378,6 +399,70 @@ int main() {
                 controller.SetStiffnessProfile( cal2.GetStiffnessProfile() );
                 cal2ProfileApplied = true;
             }
+        }
+
+        // 'L' - toggle the trial logger (prime / disarm; cancel + discard if
+        // pressed mid-capture).
+        if ( kb.pendingLoggingToggle ) {
+            trialLogger.TogglePrimed();
+            keyboard.ClearLoggingToggle();
+        }
+
+        // 'r' - distance-stratified random target. Bands of distance (from the
+        // PREVIOUS target's position) are cycled for an even spread; a target is
+        // picked uniformly within the current band, never repeating the previous.
+        // The very first target after entering FITTS is uniform-random.
+        if ( kb.pendingRandomTarget ) {
+            const auto& sel = aruco.GetFittsSelectableTargetIds();
+            if ( !sel.empty() ) {
+                const int prevId  = kb.fittsTargetId;
+                const float mmpp  = cfg.touchscreen.mmPerPixel;
+                int nextId = sel[0];
+
+                if ( prevId <= 0 || aruco.GetGridMarkerCenterPx( prevId ) == cv::Point2i{} ) {
+                    nextId = sel[ std::uniform_int_distribution<int>( 0, (int)sel.size() - 1 )( targetRng ) ];
+                } else {
+                    const cv::Point2i pPx = aruco.GetGridMarkerCenterPx( prevId );
+                    float dmin = 1e9f, dmax = 0.0f;
+                    std::vector<std::pair<int, float>> cand;
+                    for ( int id : sel ) {
+                        if ( id == prevId ) continue;
+                        const cv::Point2i cPx = aruco.GetGridMarkerCenterPx( id );
+                        const float dx = ( cPx.x - pPx.x ) * mmpp;
+                        const float dy = ( cPx.y - pPx.y ) * mmpp;
+                        const float d  = std::sqrt( dx * dx + dy * dy );
+                        cand.push_back( { id, d } );
+                        dmin = std::min( dmin, d );
+                        dmax = std::max( dmax, d );
+                    }
+                    const int   nBands = std::max( 1, cfg.fittsBoard.numDistanceBands );
+                    const int   band   = distanceBandCursor % nBands;
+                    distanceBandCursor = ( distanceBandCursor + 1 ) % nBands;
+                    const float w  = ( dmax - dmin ) / nBands;
+                    const float lo = dmin + band * w;
+                    const float hi = ( band == nBands - 1 ) ? dmax + 1.0f : lo + w;
+                    std::vector<int> inBand;
+                    for ( auto& pr : cand )
+                        if ( pr.second >= lo && pr.second <= hi ) inBand.push_back( pr.first );
+                    if ( inBand.empty() )
+                        for ( auto& pr : cand ) inBand.push_back( pr.first );  // fallback: any
+                    if ( !inBand.empty() )
+                        nextId = inBand[ std::uniform_int_distribution<int>( 0, (int)inBand.size() - 1 )( targetRng ) ];
+                }
+
+                keyboard.SetFittsTargetId( nextId );
+                keyboard.SetExternalStatus( "Active marker set to " + std::to_string( nextId ) + "." );
+                // If logging is primed, this 'r' also begins the trial capture.
+                if ( trialLogger.IsPrimed() ) {
+                    trialLogger.SetUserId( kb.activeUserId );
+                    trialLogger.StartTrial( nextId );
+                    trialStartSecs = nowSecs;
+                    // Sync prevLogTouched so a touch already in progress at trial
+                    // start is not immediately detected as the finish rising edge.
+                    prevLogTouched = touchState.isTouched;
+                }
+            }
+            keyboard.ClearRandomTarget();
         }
 
         // In FITTS state, arm the new target whenever it changes. The board is
@@ -505,38 +590,30 @@ int main() {
             haveTargetPx   = true;
         }
 
-        // Project the target offsets into camera image pixels for operator display.
-        // The controller exposes (ox, oy, corrX, corrY) in mm; the camera intrinsics
-        // live here in main so the pixel maths stays outside the controller.
+        // Operator-display cues for the new "fingerpad onto the marker centre"
+        // target. The controller exposes the rolled cam->fingertip offset
+        // (corrX, corrY) in camera-frame Y-up mm; intrinsics live here so the
+        // pixel maths stays outside the controller.
         if ( haveTargetPx && targetDepth > 1e-3f ) {
             const auto tgtOfs        = controller.GetTargetOffsets();
-            const float ox           = tgtOfs.ox;
-            const float oy           = tgtOfs.oy;
-            const float corrX_screen = tgtOfs.corrX;
-            const float corrY_screen = tgtOfs.corrY;
+            const float corrX_screen = tgtOfs.corrX;   // (R*d).x
+            const float corrY_screen = tgtOfs.corrY;   // (R*d).y
             const float depth        = targetDepth;
 
-            int offsetXpx = static_cast<int>( std::round( cfg.camera.fx * ox / depth ) );
-            // oy is camera-frame Y-up; image Y points down, hence the negation
-            // (matches the virtualTargetPx Y term below).
-            int offsetYpx = static_cast<int>( std::round( -cfg.camera.fy * oy / depth ) );
             int radiusPx  = static_cast<int>( std::round(
                 0.5 * ( cfg.camera.fx + cfg.camera.fy ) * cfg.target.radiusMm / depth ) );
-            lastTargetCirclePx        = targetCenterPx + cv::Point2i( offsetXpx, offsetYpx );
+            // Target circle = the fingerpad landing target = the marker centre.
+            lastTargetCirclePx        = targetCenterPx;
             lastTargetCircleRadiusPx  = radiusPx;
             haveLastTargetCircle      = true;
 
-            // Green dot = guiding position ("virtual marker"): where the marker
-            // centre must be steered so the fingertip lands on the target. It is
-            // the marker centre plus the roll-induced offset (d - R*d), so it is
-            // anchored to the tag and only shifts as the finger rolls (stable,
-            // since it no longer depends on the noisy single-marker pose).
-            // (ox,oy) and (corrX,corrY) are camera-frame Y-up mm; image Y is down.
-            const float guideOffX = ox - corrX_screen;          // (d - R*d).x
-            const float guideOffY = oy - corrY_screen;          // (d - R*d).y
+            // Green dot = guiding position ("virtual marker"): the image point the
+            // marker centre must be steered onto so the fingerpad lands on it -
+            // i.e. the current fingertip position = principal point + the rolled
+            // offset R*d. (corrX, corrY) are camera-frame Y-up mm; image Y is down.
             cv::Point2i virtualTargetPx(
-                targetCenterPx.x + static_cast<int>( std::round( cfg.camera.fx * guideOffX / depth ) ),
-                targetCenterPx.y - static_cast<int>( std::round( cfg.camera.fy * guideOffY / depth ) ) );
+                static_cast<int>( std::round( cfg.camera.cx + cfg.camera.fx * corrX_screen / depth ) ),
+                static_cast<int>( std::round( cfg.camera.cy - cfg.camera.fy * corrY_screen / depth ) ) );
             display.SetVirtualTarget( cal3.IsComplete(), virtualTargetPx );
         } else {
             display.SetVirtualTarget( false, {} );
@@ -559,20 +636,12 @@ int main() {
         // before Cal3 completes (gray). Visible whenever an active target is
         // set and no touch has been recorded yet for this target.
         if ( kb.systemState == SystemState::FITTS && circlesActive && kb.fittsTargetId > 0 ) {
+            // Target ring sits ON the marker centre now (the fingerpad's landing
+            // target); the cal3 offset is applied in the guidance geometry, not
+            // as a visible offset from the tag.
             cv::Point2i markerCenterPx = aruco.GetGridMarkerCenterPx( kb.fittsTargetId );
-            cv::Point2i offsetPx;
-            if ( cal3.IsComplete() ) {
-                cv::Point3f offsetMm = cal3.GetFinalOffset();
-                offsetPx = cv::Point2i(
-                    static_cast<int>( std::round( offsetMm.x * cfg.touchscreen.pixelsPerMm ) ),
-                    static_cast<int>( std::round( offsetMm.y * cfg.touchscreen.pixelsPerMm ) ) );
-            } else {
-                offsetPx = cv::Point2i(
-                    0, static_cast<int>( std::round( cfg.target.offsetDefaultMm * cfg.touchscreen.pixelsPerMm ) ) );
-            }
-            cv::Point2i circleCenterPx = markerCenterPx + offsetPx;
             int radiusPx = static_cast<int>( std::round( cfg.target.radiusMm * cfg.touchscreen.pixelsPerMm ) );
-            aruco.SetTargetOffsetCircle( true, circleCenterPx, radiusPx, targetCircleColor );
+            aruco.SetTargetOffsetCircle( true, markerCenterPx, radiusPx, targetCircleColor );
         } else {
             aruco.SetTargetOffsetCircle( false, {}, 0, targetCircleColor );
         }
@@ -770,11 +839,64 @@ int main() {
                 fitts.Update( markers, touchState, cal3.IsComplete(),
                               cal3.GetFinalOffset(), cal3.GetRollRef() );
                 display.SetTouchFingertip( fitts.HasTouchFingertip(), fitts.GetTouchFingertipPx() );
+
+                // Freeze the active-target outline at the trial-ending touch
+                // (rising edge of HasTouchSample), so a magenta reference box
+                // marks the just-acquired target until the next one loads. Prefer
+                // the directly-detected marker; fall back to the board estimate.
+                const bool fittsTouchSample = fitts.HasTouchSample();
+                if ( fittsTouchSample && !prevFittsTouchSample ) {
+                    if ( activeMarker ) {
+                        for ( int k = 0; k < 4; k++ ) touchedTargetCorners[k] = activeMarker->cornersPx[k];
+                        touchedTargetBoxValid = true;
+                    } else if ( fbTargetValid ) {
+                        touchedTargetCorners = fbCorners;
+                        touchedTargetBoxValid = true;
+                    } else {
+                        touchedTargetBoxValid = false;
+                    }
+                }
+                prevFittsTouchSample = fittsTouchSample;
+                display.SetTouchedTargetBox( touchedTargetBoxValid && fittsTouchSample, touchedTargetCorners );
                 aruco.SetFittsOverlay( fitts.HasTouchSample(), fitts.GetTouchScreenPx(),
                                        fitts.GetErrorLine1(), fitts.GetErrorLine2() );
+
+                // Magenta reference outline around the target marker on the
+                // touchscreen once the trial-ending touch is registered, kept
+                // until the next target is selected (HasTouchSample resets then).
+                aruco.SetTargetOutline( fitts.HasTouchSample(), kb.fittsTargetId );
+
+                // Trial logging - one row per camera frame while a capture runs.
+                if ( trialLogger.IsActive() ) {
+                    cv::Point3f tpos; cv::Vec4f tquat; bool tDetected = false;
+                    if ( fitts.GetTargetFullPose( markers, kb.fittsTargetId, tpos, tquat, tDetected ) ) {
+                        const auto tele = controller.GetTelemetry();
+                        TrialSample s;
+                        s.tSecs    = nowSecs - trialStartSecs;
+                        s.targetId = kb.fittsTargetId;
+                        s.detected = tDetected ? 1 : 0;
+                        s.tx = tpos.x; s.ty = tpos.y; s.tz = tpos.z;
+                        s.qx = tquat[0]; s.qy = tquat[1]; s.qz = tquat[2]; s.qw = tquat[3];
+                        s.pwmA = tele.outputPwm.x; s.pwmB = tele.outputPwm.y; s.pwmC = tele.outputPwm.z;
+                        trialLogger.AddSample( s );
+                    }
+                    // End the trial on touchscreen contact (rising edge).
+                    if ( touchState.isTouched && !prevLogTouched ) {
+                        std::string saved = trialLogger.FinishTrial( (float)touchState.position.x,
+                                                                     (float)touchState.position.y,
+                                                                     cfg.touchscreen.mmPerPixel );
+                        if ( !saved.empty() )
+                            keyboard.SetExternalStatus( "Log file saved as " + saved );
+                    }
+                }
+                prevLogTouched = touchState.isTouched;
             } else {
                 display.SetTouchFingertip( false );
                 aruco.SetFittsOverlay( false, {}, "", "" );
+                aruco.SetTargetOutline( false, 0 );
+                display.SetTouchedTargetBox( false, touchedTargetCorners );
+                touchedTargetBoxValid = false;
+                prevFittsTouchSample  = false;
             }
         }
 
@@ -786,6 +908,7 @@ int main() {
             display.SetCal2State( kb.inputState == InputState::CAL_STI && !cal2.IsComplete(),
                                   cal2.GetCurrentHeadingIndex() );
             display.SetGestureIndicator( gesture.IsIndicatorActive( nowSecs ), gesture.GetLastGesture() );
+            display.SetLoggingStatus( trialLogger.IsPrimed(), trialLogger.IsActive() );
 
             // Pair the displayed image with the frame the current marker
             // detection was computed from, so the overlay never drifts

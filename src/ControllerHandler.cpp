@@ -150,9 +150,10 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
     // ---- Target computation via the fingertip-to-target transform ------------
     // Worked in the CAMERA frame that DetectedMarker::positionMm establishes
     // (X right, Y up, Z = depth), with the camera at the origin (pos_camera = 0).
-    //   p_f = R_roll · d                          (fingertip = rolled offset)
-    //   p_t = markerPosMm + d                      (target point on the tag surface)
-    //   Δp  = p_t − p_f = markerPosMm + (d − R·d)  (displacement onto the target)
+    //   p_f = R_roll · d                  (fingertip = rolled cam->fingertip offset)
+    //   p_t = markerPosMm                  (target point = the marker CENTRE)
+    //   Δp  = p_t − p_f = markerPosMm − R·d (displacement to land the fingerpad
+    //                                        ON the marker centre)
     // Δp.xy is added to pos_virtual_ as the PID setpoint, so error = Δp.xy.
     // See ControllerHandler.h for the convention flags on d and the roll source.
     cv::Point2f pos_target_raw = pos_virtual_;
@@ -185,7 +186,9 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
 
         const cv::Point3f pos_camera( 0.0f, 0.0f, 0.0f );
         const cv::Point3f pos_fingertip = ComputeFingertip( pos_camera, R_roll, offset );
-        const cv::Point3f pos_target_3d = targetMarkerPosMm_ + offset;
+        // Target is the marker CENTRE itself: drive the fingerpad onto the tag,
+        // using the cal3 offset (rolled) purely as the camera->fingertip geometry.
+        const cv::Point3f pos_target_3d = targetMarkerPosMm_;
         displacement_ = ComputeDisplacement( pos_target_3d, pos_fingertip );
 
         // Expose the offset components for main.cpp's camera-pixel projection.
@@ -456,7 +459,7 @@ cv::Point2f ControllerHandler::ComputeVirtualPosition(float dL_A, float dL_B, fl
 // =============================================================================
 
 float ControllerHandler::InterpolateStiffness(float thetaRad) const {
-    constexpr int N = CONSTANT_CALIBRATION_ANGLE_COUNT;
+    constexpr int N = CONSTANT_CALIBRATION_ANGLES_COUNT;
 
     float theta = thetaRad;
     while (theta < 0.0f)             theta += CONSTANT_TWO_PI;
@@ -632,7 +635,7 @@ void ControllerHandler::SetCalibrationForce(float fx, float fy) {
     calForce_y_ = fy;
 }
 
-void ControllerHandler::SetStiffnessProfile(const std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT>& kTheta) {
+void ControllerHandler::SetStiffnessProfile(const std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT>& kTheta) {
     stiffness_profile_     = kTheta;
     stiffnessProfileValid_ = true;
 }

@@ -1,5 +1,7 @@
 #include "ArucoHandler.h"
 
+#include "Colors.h"
+
 #include <cmath>
 #include <iomanip>
 #include <iostream>
@@ -326,13 +328,31 @@ void ArucoHandler::SetTargetOffsetCircle(bool visible, cv::Point2i centerPx, int
     RedrawTouchscreenOverlay();
 }
 
+void ArucoHandler::SetTargetOutline(bool visible, int targetId) {
+    if (visible == targetOutlineVisible_ && targetId == targetOutlineId_) {
+        return;  // No change - avoid redundant redraw
+    }
+    targetOutlineVisible_ = visible;
+    targetOutlineId_      = targetId;
+
+    RedrawTouchscreenOverlay();
+}
+
 void ArucoHandler::RedrawTouchscreenOverlay() {
     if (singleMarkerImage_.empty()) return;
 
     cv::Mat img = singleMarkerImage_.clone();
 
     if (targetCircleVisible_) {
-        cv::circle(img, targetCirclePx_, targetCircleRadiusPx_, targetCircleColor_, 2);  // hollow
+        // cv::circle(img, targetCirclePx_, targetCircleRadiusPx_, targetCircleColor_, 2);  // hollow
+    }
+
+    // Magenta reference outline around the just-touched target marker.
+    if (targetOutlineVisible_) {
+        if (const FittsMarker* fm = fittsLayout_.Find(targetOutlineId_)) {
+            cv::rectangle(img, cv::Rect(fm->xPx, fm->yPx, fm->sizePx, fm->sizePx),
+                          Colors::MagMd, 3);
+        }
     }
 
     if (fittsOverlayVisible_) {

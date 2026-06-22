@@ -168,6 +168,9 @@ public:
      *         the board pose (coarse markers far away / neighbours up close). */
     void SetActiveTargetPosition(bool valid, cv::Point3f posMm);
 
+    /** @brief Trial-logging status for the operator panel indicator. */
+    void SetLoggingStatus(bool primed, bool active);
+
     /** @brief Provide the active target's estimated outline (4 corners projected
      *         from the board pose) for the operator view, used to draw the green
      *         box / ID / guidance line when the target marker is not directly
@@ -175,6 +178,12 @@ public:
      *         (the detection draws its own outline) or no target is active. */
     void SetEstimatedActiveTarget(bool visible, int tagId,
                                   const std::array<cv::Point2f, 4> &corners);
+
+    /** @brief Provide the active target's outline (4 corners) frozen at the
+     *         moment of the trial-ending touchscreen contact. Drawn as a magenta
+     *         reference box marking the target that was just acquired, until the
+     *         next target is selected. Pass visible=false to hide it. */
+    void SetTouchedTargetBox(bool visible, const std::array<cv::Point2f, 4> &corners);
 
     // ---- Controller panel ---------------------------------------------------
 
@@ -262,11 +271,18 @@ private:
     bool        targetPosValid_ = false;
     cv::Point3f targetPosMm_    = {};
 
+    // Trial-logging status indicator
+    bool        loggingPrimed_ = false;
+    bool        loggingActive_ = false;
+
     // Estimated active-target outline (board-pose projection) for the operator
     // view when the target marker is not directly detected.
     bool                       estTargetVisible_ = false;
     int                        estTargetTagId_   = 0;
     std::array<cv::Point2f, 4> estTargetCorners_ = {};
+
+    bool                       touchedBoxVisible_ = false;
+    std::array<cv::Point2f, 4> touchedBoxCorners_ = {};
 
     bool        touchFingertipVisible_ = false;
     cv::Point2i touchFingertipPx_      = {};

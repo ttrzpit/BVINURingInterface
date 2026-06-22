@@ -27,11 +27,13 @@
 
 /** @brief One marker placed on the Fitts board, in touchscreen pixels. */
 struct FittsMarker {
-    int  id;      ///< Marker ID (DICT_4X4_250)
+    int  id;      ///< Marker ID (DICT_4X4_1000)
     int  xPx;     ///< Top-left X in touchscreen pixels
     int  yPx;     ///< Top-left Y in touchscreen pixels
     int  sizePx;  ///< Side length in pixels (as rendered)
     bool coarse;  ///< true = coarse perimeter marker, false = fine grid marker
+    int  row;     ///< Fine-grid row index (0-based); -1 for coarse markers
+    int  col;     ///< Fine-grid column index (0-based); -1 for coarse markers
 };
 
 
@@ -55,9 +57,15 @@ public:
     /** @brief Largest ID present on the board - used for the valid detection range. */
     int MaxId() const { return maxId_; }
 
+    /** @brief Fine marker IDs eligible as random targets: interior of the grid
+     *         (border rows/cols excluded per config) and not overdrawn by a
+     *         coarse marker. Every ID here is a fully rendered, surrounded target. */
+    const std::vector<int>& SelectableTargetIds() const { return selectableIds_; }
+
 private:
     FittsBoardConfig         cfg_;
     std::vector<FittsMarker> markers_;
+    std::vector<int>         selectableIds_;
     int                      fineCount_ = 0;
     int                      maxId_     = 0;
 };

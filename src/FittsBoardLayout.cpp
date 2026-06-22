@@ -44,6 +44,11 @@ FittsBoardLayout::FittsBoardLayout(const FittsBoardConfig& cfg,
     // so every fine ID [FineIdMin, FineIdMax] is a fully rendered, usable target.
     const float pitchMm = cfg_.fineMarkerSizeMm + cfg_.finePadMm;
 
+    const int loRow = cfg_.selectBorderRows;
+    const int hiRow = cfg_.fineRows - 1 - cfg_.selectBorderRows;
+    const int loCol = cfg_.selectBorderCols;
+    const int hiCol = cfg_.fineCols - 1 - cfg_.selectBorderCols;
+
     int id = cfg_.fineIdStart;
     for (int r = 0; r < cfg_.fineRows; r++) {
         for (int c = 0; c < cfg_.fineCols; c++) {
@@ -57,7 +62,13 @@ FittsBoardLayout::FittsBoardLayout(const FittsBoardConfig& cfg,
             }
             if (collides) continue;
 
-            markers_.push_back({id++, x, y, fSz, false});
+            markers_.push_back({id, x, y, fSz, false, r, c});
+
+            // Interior markers (border rows/cols excluded) are valid targets.
+            if (r >= loRow && r <= hiRow && c >= loCol && c <= hiCol)
+                selectableIds_.push_back(id);
+
+            id++;
             fineCount_++;
         }
     }
@@ -66,7 +77,7 @@ FittsBoardLayout::FittsBoardLayout(const FittsBoardConfig& cfg,
     // coarse IDs don't shift when the skip count changes.
     int coarseId = cfg_.fineIdStart + cfg_.fineRows * cfg_.fineCols;
     for (int i = 0; i < 4; i++) {
-        markers_.push_back({coarseId++, coarseRect[i].x, coarseRect[i].y, cSz, true});
+        markers_.push_back({coarseId++, coarseRect[i].x, coarseRect[i].y, cSz, true, -1, -1});
     }
 
     for (const auto& m : markers_) maxId_ = std::max(maxId_, m.id);

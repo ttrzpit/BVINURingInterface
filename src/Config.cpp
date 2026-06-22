@@ -142,6 +142,9 @@ bool Config::load(const std::string& filepath) {
         fb["coarse_marker_y3"]       >> fittsBoard.coarseCenterYMm[2];
         fb["coarse_marker_x4"]       >> fittsBoard.coarseCenterXMm[3];
         fb["coarse_marker_y4"]       >> fittsBoard.coarseCenterYMm[3];
+        if (!fb["select_border_rows"].empty()) fb["select_border_rows"] >> fittsBoard.selectBorderRows;
+        if (!fb["select_border_cols"].empty()) fb["select_border_cols"] >> fittsBoard.selectBorderCols;
+        if (!fb["num_distance_bands"].empty()) fb["num_distance_bands"] >> fittsBoard.numDistanceBands;
     }
 
     // ---- Touchscreen --------------------------------------------------------

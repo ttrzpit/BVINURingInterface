@@ -196,17 +196,19 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
             state_.pendingMotorTest.pwm    = static_cast<uint16_t>(value);
             break;
 
-        case KeyAction::RANDOM_FITTS_TARGET: {
-            static std::mt19937 rng{std::random_device{}()};
-            std::uniform_int_distribution<int> dist(fittsTargetIdMin_, fittsTargetIdMax_);
-            state_.fittsTargetId = dist(rng);
-            state_.activeTagId   = state_.fittsTargetId;
+        case KeyAction::RANDOM_FITTS_TARGET:
+            // The distance-stratified pick needs marker positions, which live in
+            // main with the board layout - just flag the request here.
+            state_.pendingRandomTarget = true;
             break;
-        }
+
+        case KeyAction::TOGGLE_LOGGING:
+            state_.pendingLoggingToggle = true;
+            break;
 
         case KeyAction::SET_FITTS_TARGET:
             if ( value < fittsTargetIdMin_ ) value = fittsTargetIdMin_;
-            if ( value > fittsTargetIdMax_ ) value = fittsTargetIdMax_;
+            if ( value > fittsBoardMaxId_  ) value = fittsBoardMaxId_;
             state_.fittsTargetId = value;
             state_.activeTagId   = value;
             break;

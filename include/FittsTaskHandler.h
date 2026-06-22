@@ -79,6 +79,20 @@ public:
                                  cv::Point3f& posOut, float& rollOut,
                                  std::array<cv::Point2f, 4>* cornersPxOut = nullptr) const;
 
+    /**
+     * @brief Full 6-DOF pose of the target marker in the camera frame (OpenCV
+     *        convention, Y-down), from a board solvePnP over all visible markers
+     *        - for per-frame trial logging. During a trial the finger is close
+     *        and many fine markers are visible, so this pose is well-conditioned.
+     * @param posMmOut     Target marker centre, camera frame [mm]
+     * @param quatXyzwOut  Quaternion (x,y,z,w) of the board->camera rotation
+     * @param detectedOut  True if the target marker itself was detected this frame
+     * @return false if the target is unknown or the board pose could not be solved
+     */
+    bool GetTargetFullPose(const std::vector<DetectedMarker>& markers, int targetId,
+                           cv::Point3f& posMmOut, cv::Vec4f& quatXyzwOut,
+                           bool& detectedOut) const;
+
     // ---- Touch sample (for ArucoHandler touchscreen overlay) ------------------
     bool               HasTouchSample() const { return sampleValid_; }
     cv::Point2i        GetTouchScreenPx() const { return touchScreenPx_; }

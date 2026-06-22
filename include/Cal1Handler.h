@@ -25,7 +25,7 @@
 #include "ControllerHandler.h"
 
 
-constexpr int kAromBoundaryPoints = CONSTANT_CALIBRATION_ANGLE_COUNT;
+constexpr int kAromBoundaryPoints = CONSTANT_CALIBRATION_ANGLES_COUNT;
 
 // ---- AROM boundary -----------------------------------------------------------
 // kAromBoundaryPoints (angle, radius) control points plus periodic cubic

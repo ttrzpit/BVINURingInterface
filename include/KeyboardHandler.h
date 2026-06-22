@@ -113,6 +113,7 @@ enum class KeyAction {
     SET_ROBOT_IDLE,
     SET_ROBOT_READY,
     TOGGLE_STIFFNESS_GAIN,
+    TOGGLE_LOGGING,
 };
 
 // ---- Motor test request -----------------------------------------------------
@@ -166,6 +167,8 @@ struct KeyboardState {
     RobotStateRequest    pendingRobotStateRequest = RobotStateRequest::NONE;    ///< One-shot: 'e'/'E' pressed
     bool                 pendingStiffnessGainToggle = false;                    ///< One-shot: 'k' pressed (toggle K(theta) application)
     bool                 pendingSetHomePosition = false;                        ///< One-shot: 'Z' pressed (record current encoder pose as home)
+    bool                 pendingRandomTarget = false;                           ///< One-shot: 'r' pressed - main picks the (distance-stratified) target
+    bool                 pendingLoggingToggle = false;                          ///< One-shot: 'L' pressed - main toggles the trial logger
     std::string          inputBuffer;                                           ///< Numeric value currently being typed
     std::string          outputBuffer;                                          ///< Display text for the last executed command
 };
@@ -217,6 +220,12 @@ class KeyboardHandler {
     /** @brief Clear the set-home-position request after main.cpp has acted on it. */
     void ClearSetHomePosition() { state_.pendingSetHomePosition = false; }
 
+    /** @brief Clear the one-shot 'r' random-target request (main consumed it). */
+    void ClearRandomTarget() { state_.pendingRandomTarget = false; }
+
+    /** @brief Clear the one-shot 'L' logging-toggle request (main consumed it). */
+    void ClearLoggingToggle() { state_.pendingLoggingToggle = false; }
+
     /**
      * @brief Force the input state directly (bypassing the key-table dispatch),
      *        re-deriving systemState. Used e.g. by PretensionHandler's
@@ -244,6 +253,11 @@ class KeyboardHandler {
         fittsTargetIdMin_ = minId;
         fittsTargetIdMax_ = maxId;
     }
+
+    /** @brief Set the board-wide maximum marker ID (includes coarse markers).
+     *         Used as the upper clamp for manual ID entry ('m' key) so coarse
+     *         marker IDs are reachable. Defaults to fittsTargetIdMax_. */
+    void SetFittsBoardMaxId( int maxId ) { fittsBoardMaxId_ = maxId; }
 
    private:
     /** @brief Route digit/decimal/Backspace/Enter keys while inputState expects
@@ -278,4 +292,5 @@ class KeyboardHandler {
     InputState    preGainState_ = InputState::IDLE;    // inputState to restore on EXIT_GAIN_MODE
     int           fittsTargetIdMin_ = 1;               // Fitts target range (set from the board layout)
     int           fittsTargetIdMax_ = 45;
+    int           fittsBoardMaxId_  = 45;              // Board-wide max (includes coarse) for manual entry
 };

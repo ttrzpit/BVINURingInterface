@@ -3,7 +3,7 @@
 // =============================================================================
 // Cal2Handler.h - Calibration Stage 2: Finger Deflection Stiffness
 //
-// For each of the CONSTANT_CALIBRATION_ANGLE_COUNT calibration headings
+// For each of the CONSTANT_CALIBRATION_ANGLES_COUNT calibration headings
 // (CONSTANT_CALIBRATION_ANGLES_DEG), commands an open-loop force ramp via
 // ControllerHandler's calibration force mode: ramp up at cfg_.forceRampRate
 // until the AROM boundary (Cal1Handler, AromBoundary::RadiusAtAngle()) is
@@ -78,9 +78,9 @@ public:
 
     /** @brief K(theta) values aligned with CONSTANT_CALIBRATION_ANGLES_DEG,
      *         meaningful once IsComplete() is true. */
-    std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT> GetStiffnessProfile() const;
+    std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT> GetStiffnessProfile() const;
 
-    const std::array<Cal2HeadingResult, CONSTANT_CALIBRATION_ANGLE_COUNT>& GetResults() const { return results_; }
+    const std::array<Cal2HeadingResult, CONSTANT_CALIBRATION_ANGLES_COUNT>& GetResults() const { return results_; }
 
     /** @brief Index into CONSTANT_CALIBRATION_ANGLES_DEG for the heading
      *         currently being measured, or -1 before the first Update(). */
@@ -107,7 +107,7 @@ private:
     // both projected onto the heading direction.
     std::vector<cv::Point2f> rampSamples_;
 
-    std::array<Cal2HeadingResult, CONSTANT_CALIBRATION_ANGLE_COUNT> results_ = {};
+    std::array<Cal2HeadingResult, CONSTANT_CALIBRATION_ANGLES_COUNT> results_ = {};
 
     std::string status_ = "Stiffness: waiting to start.";
 };

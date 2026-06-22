@@ -141,7 +141,7 @@ controller:
 
 # ---- Calibration Stage 1 timing (AROM) ---------------------------------------
 cal1:
-   record_secs: 10.0     # Duration of the AROM circle-tracing recording [s]
+   record_secs: 5.0     # Duration of the AROM circle-tracing recording [s]
 
 # ---- Calibration Stage 2 timing (Stiffness) ------------------------------------
 cal2:
@@ -182,6 +182,10 @@ fitts_board_assignments:
    coarse_marker_y3:          252.23   # Coarse marker 1 center x-coordinate [mm]
    coarse_marker_x4:          487.5    # Coarse marker 1 center x-coordinate [mm]
    coarse_marker_y4:          252.23   # Coarse marker 1 center x-coordinate [mm]
+   # ---- Random target selection ----
+   select_border_rows:        1        # Exclude this many fine rows at the top & bottom from random selection
+   select_border_cols:        1        # Exclude this many fine cols at the left & right from random selection
+   num_distance_bands:        5        # Distance bands cycled for an even spread of movement distances
    
 # ---- Fitts target circle ------------------------------------------------------
 # radius_mm         : Drawn target circle radius [mm]

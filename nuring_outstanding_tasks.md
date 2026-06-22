@@ -14,6 +14,7 @@ Rank 3 = Lowest priority
 [X]      | 1    | Cal1Handler        | Implement calibration 1 handler (measuring finger active range of motion)
 [X]      | 1    | Cal1Handler        | Show virtual points being captured on the little virtualXY window
 [X]      | 1    | Cal1Handler        | Check if r_pulley_effective can drop below 2.5; ensure that when tendon is fully extended, r_pulley_eff is set at 2.5
+[X]      | 2    | Cal1Handler        | Allow manual centering by pressing [Z]
 [ ]      | 3    | Cal1Handler        | Implement "soft centering": if fingertip has stationary for X seconds, set that as new virtual fingertip zero
 ---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
 [X]      | 1    | Cal2Handler        | Implement calibration 2 handler (finger deflection stiffness)
@@ -21,10 +22,10 @@ Rank 3 = Lowest priority
 [ ]      | 2    | Cal2Handler        | Implement camera-based ground truth for virtual XY estimation
 ---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
 [X]      | 1    | Cal3Handler        | Implement fingertip-to-camera offset calibration measurement
-[ ]      | 2    | Cal3Handler        | Confirm calibration 3 is accurate
+[X]      | 2    | Cal3Handler        | Confirm calibration 3 is accurate
 [ ]      | 2    | Cal3Handler        | Display calibration status
 [ ]      | 2    | Cal3Handler        | Display calibrated fingertip position
-[ ]      | 1    | Cal3Handler        | Allow for toggle of fingertip-to-camera offset
+[ ]      | 3    | Cal3Handler        | Allow for toggle of fingertip-to-camera offset
 ---------|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------
 [ ]      | 3    | CameraHandler      | Test "auto-calibration" tool to find optimal camera settings for ArUco detection
 [ ]      | 3    | CameraHandler      | Test "auto-calibration" tool to find optimal detector settings for ArUco detectionand 

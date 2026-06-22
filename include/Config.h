@@ -161,6 +161,15 @@ struct FittsBoardConfig {
     float coarseMarkerSizeMm = 56.0f;
     std::array<float, 4> coarseCenterXMm = {39.5f, 487.5f, 39.5f, 487.5f};
     std::array<float, 4> coarseCenterYMm = {44.23f, 44.23f, 252.23f, 252.23f};
+
+    // ---- Target selection (random Fitts target) -----------------------------
+    // Exclude this many fine rows/cols around the grid border from random target
+    // selection, so a chosen target always has neighbouring markers on all sides
+    // for a stable board pose. Distance-stratified picking divides the reachable
+    // distance range into this many bands, cycled for an even spread.
+    int selectBorderRows = 1;
+    int selectBorderCols = 1;
+    int numDistanceBands = 5;
 };
 
 // ---- Touchscreen Monitor ----------------------------------------------------

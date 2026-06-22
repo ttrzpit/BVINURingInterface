@@ -128,7 +128,7 @@ void DisplayHandler::Update( const cv::Mat                     &frame,
             // FITTS target - active tag center offset "under" by the Cal3 Y
             // offset (or the default before Cal3 completes). Color is red
             // (cal3 complete) or gray (default position, not yet calibrated).
-            cv::circle( canvas, targetCircleCenterPx_, targetCircleRadiusPx_, targetCircleColor_, 1 );
+            // cv::circle( canvas, targetCircleCenterPx_, targetCircleRadiusPx_, targetCircleColor_, 1 );
         }
 
         if ( virtualTargetVisible_ ) {
@@ -328,10 +328,12 @@ void DisplayHandler::PopulateTelemetryPanel(
     // AddBorder("A7", 5, 2, Colors::GraMd, 2);
 
     // kb.userId > 0 ? std::to_string(kb.userId) : "--",
+
+
+
     // ---- Marker visibility -------------------------------------------------------
-    AddHeadingCell( "Marker Visibility", "A1", 8, 1, "center", headerFontSize );
-    AddHeadingCell( std::to_string( markers.size() ), "I1", 1, 1, "center",
-                    headerFontSize );
+    AddHeadingCell( "Marker Visibility", "A1", 12, 1, "center", headerFontSize );
+    // AddHeadingCell( std::to_string( markers.size() ), "L1", 1, 1, "center", headerFontSize );
     // One cell per marker ID (1–45), 9 per row across columns A–I, rows 2–6.
     // Colour rules:
     //   active marker   → dark green background, white text
@@ -343,18 +345,84 @@ void DisplayHandler::PopulateTelemetryPanel(
         return false;
     };
 
-    for ( int id = 1; id <= 45; id++ ) {
-        std::string cellRef = std::string( 1, 'A' + ( id - 1 ) % 9 ) + std::to_string( 2 + ( id - 1 ) / 9 );
+    int pad = 13;
+    int xStart = 16;
+    int yStart = 55;
+    int r = 4;
 
-        bool detected = isDetected( id );
-        bool active = ( id == kb.activeTagId );
+    // Corner cells overlap coarse marker guard zones and have no fine marker.
+    // The guard boundary at row=3 is a pixel-exact touch (area=0), so row 3 is NOT skipped.
+    auto isFineSkipped = []( int col, int row ) -> bool {
+        return ( col <= 2 || col >= 27 ) && ( row <= 2 || row >= 12 );
+    };
+    // Returns the fine marker ID (1-based, row-major) for (col, row), or -1 if skipped.
+    auto fineMarkerId = [&isFineSkipped]( int col, int row ) -> int {
+        if ( isFineSkipped( col, row ) ) return -1;
+        int id = 1;
+        for ( int rr = 0; rr < 15; rr++ ) {
+            for ( int cc = 0; cc < 30; cc++ ) {
+                if ( rr == row && cc == col ) return id;
+                if ( !isFineSkipped( cc, rr ) ) id++;
+            }
+        }
+        return -1;
+    };
 
-        cv::Scalar fill = active ? Colors::GreBk : Colors::GraBk;
-        cv::Scalar text = detected ? Colors::White : Colors::GraMd;
+    auto markerColor = [&]( int id ) -> cv::Scalar {
+        if ( id == kb.activeTagId ) return isDetected( id ) ? Colors::GreMd : Colors::GraWt;
+        return isDetected( id ) ? Colors::GreDk : Colors::GraMd;
+    };
 
-        AddBodyCell( std::to_string( id ), cellRef, 1, 1, "center", bodyFontSize, fill, text );
+    // Top 3 fine rows
+    for ( int i = 3; i < 27; i++ ) {
+        for ( int j = 0; j < 3; j++ ) {
+            cv::circle( matTelemetry_, cv::Point( xStart + ( i * pad ), yStart + ( j * pad ) ), r, markerColor( fineMarkerId( i, j ) ), -1 );
+        }
     }
-    AddBorder( "A1", 9, 6, Colors::GraMd, 2 );
+    // Middle 9 fine rows
+    for ( int i = 0; i < 30; i++ ) {
+        for ( int j = 0; j < 9; j++ ) {
+            cv::circle( matTelemetry_, cv::Point( xStart + ( i * pad ), ( yStart + ( pad * 3 ) + ( j * pad ) ) ), r, markerColor( fineMarkerId( i, j + 3 ) ), -1 );
+        }
+    }
+    // Bottom 3 fine rows
+    for ( int i = 3; i < 27; i++ ) {
+        for ( int j = 12; j < 15; j++ ) {
+            cv::circle( matTelemetry_, cv::Point( xStart + ( i * pad ), yStart + ( j * pad ) ), r, markerColor( fineMarkerId( i, j ) ), -1 );
+        }
+    }
+    // Corner coarse markers — IDs follow the fine band: 1 + fineRows*fineCols + (0..3)
+    const int coarseIdBase = 1 + 15 * 30;  // = 451; matches FittsBoardLayout coarse ID assignment
+    cv::circle( matTelemetry_, cv::Point( 30, 68 ),   10, isDetected( coarseIdBase + 0 ) ? Colors::GreDk : Colors::GraMd, -1 );
+    cv::circle( matTelemetry_, cv::Point( 379, 68 ),  10, isDetected( coarseIdBase + 1 ) ? Colors::GreDk : Colors::GraMd, -1 );
+    cv::circle( matTelemetry_, cv::Point( 30, 225 ),  10, isDetected( coarseIdBase + 2 ) ? Colors::GreDk : Colors::GraMd, -1 );
+    cv::circle( matTelemetry_, cv::Point( 379, 225 ), 10, isDetected( coarseIdBase + 3 ) ? Colors::GreDk : Colors::GraMd, -1 );
+
+    // for ( int j = 0; j < 15; j++ ) {
+    //     cv::circle( matTelemetry_, cv::Point( xStart, yStart + ( j * pad ) ), 3, Colors::GraMd, -1 );
+    // }
+    // for ( int id = 1; id <= 45; id++ ) {
+    //     std::string cellRef = std::string( 1, 'A' + ( id - 1 ) % 9 ) + std::to_string( 2 + ( id - 1 ) / 9 );
+
+    //     bool detected = isDetected( id );1
+    //     bool active = ( id == kb.activeTagId );
+
+    //     cv::Scalar fill = active ? Colors::GreBk : Colors::GraBk;
+    //     cv::Scalar text = detected ? Colors::White : Colors::GraMd;
+
+    //     AddBodyCell( std::to_string( id ), cellRef, 1, 1, "center", bodyFontSize, fill, text );
+    // }
+    AddBorder( "A1", 12, 8, Colors::GraMd, 2 );
+
+    // ---- Trial logging status -----------------------------------------------
+    // REC (red) = capturing; PRIMED (green) = armed, next 'r' starts capture;
+    // OFF (gray) = idle.
+    AddHeadingCell( "Trial Logging", "M1", 6, 1, "center", headerFontSize );
+    std::string logStr = loggingActive_ ? "REC" : ( loggingPrimed_ ? "PRIMED" : "OFF" );
+    cv::Scalar  logFill = loggingActive_ ? Colors::GreDk
+                                         : ( loggingPrimed_ ? Colors::GreBk : Colors::GraBk );
+    AddBodyCell( logStr, "M2", 6, 1, "center", bodyFontSize, logFill );
+    AddBorder( "M1", 6, 2, Colors::GraMd, 2 );
 
     // ---- Keyboard inputs -------------------
     // Row 8 spans 29 columns (S..AU, cols 18-46) to match the heading at S7.
@@ -533,14 +601,24 @@ void DisplayHandler::SetControllerTelemetry( const ControllerTelemetry &tele ) {
 
 void DisplayHandler::SetActiveTargetPosition( bool valid, cv::Point3f posMm ) {
     targetPosValid_ = valid;
-    targetPosMm_    = posMm;
+    targetPosMm_ = posMm;
+}
+
+void DisplayHandler::SetLoggingStatus( bool primed, bool active ) {
+    loggingPrimed_ = primed;
+    loggingActive_ = active;
 }
 
 void DisplayHandler::SetEstimatedActiveTarget( bool visible, int tagId,
                                                const std::array<cv::Point2f, 4> &corners ) {
     estTargetVisible_ = visible;
-    estTargetTagId_   = tagId;
+    estTargetTagId_ = tagId;
     estTargetCorners_ = corners;
+}
+
+void DisplayHandler::SetTouchedTargetBox( bool visible, const std::array<cv::Point2f, 4> &corners ) {
+    touchedBoxVisible_ = visible;
+    touchedBoxCorners_ = corners;
 }
 
 void DisplayHandler::SetCal1State( bool recording, const std::vector<cv::Point2f> &samples,
@@ -1041,18 +1119,13 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
             cv::circle( matController_, samplePx, 2, Colors::YelMd, -1 );
         }
         // Calibration angles
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_000_X * radius, -CONSTANT_UNIT_VECTOR_CAL_000_Y * radius ), Colors::MagDk, 1 );    // Cal 000°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_035_X * radius, -CONSTANT_UNIT_VECTOR_CAL_035_Y * radius ), Colors::MagDk, 1 );    // Cal 035°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_060_X * radius, -CONSTANT_UNIT_VECTOR_CAL_060_Y * radius ), Colors::MagDk, 1 );    // Cal 060°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_090_X * radius, -CONSTANT_UNIT_VECTOR_CAL_090_Y * radius ), Colors::MagDk, 1 );    // Cal 090°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_120_X * radius, -CONSTANT_UNIT_VECTOR_CAL_120_Y * radius ), Colors::MagDk, 1 );    // Cal 120°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_145_X * radius, -CONSTANT_UNIT_VECTOR_CAL_145_Y * radius ), Colors::MagDk, 1 );    // Cal 145°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_180_X * radius, -CONSTANT_UNIT_VECTOR_CAL_180_Y * radius ), Colors::MagDk, 1 );    // Cal 180°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_210_X * radius, -CONSTANT_UNIT_VECTOR_CAL_210_Y * radius ), Colors::MagDk, 1 );    // Cal 210°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_240_X * radius, -CONSTANT_UNIT_VECTOR_CAL_240_Y * radius ), Colors::MagDk, 1 );    // Cal 240°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_270_X * radius, -CONSTANT_UNIT_VECTOR_CAL_270_Y * radius ), Colors::MagDk, 1 );    // Cal 270°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_300_X * radius, -CONSTANT_UNIT_VECTOR_CAL_300_Y * radius ), Colors::MagDk, 1 );    // Cal 300°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_330_X * radius, -CONSTANT_UNIT_VECTOR_CAL_330_Y * radius ), Colors::MagDk, 1 );    // Cal 330°
+        for ( int i = 0; i < CONSTANT_CALIBRATION_ANGLES_COUNT; i++ ) {
+            float rad = CONSTANT_CALIBRATION_ANGLES_DEG[i] * DEG_TO_RAD;
+            cv::line( matController_, center,
+                      center + cv::Point2i( static_cast<int>( std::cos( rad ) * radius ),
+                                            static_cast<int>( -std::sin( rad ) * radius ) ),
+                      Colors::MagDk, 1 );
+        }
     }
 
     // AROM boundary polygon - drawn once Cal1Handler has computed it
@@ -1074,19 +1147,14 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
     // measured (cal2HeadingIdx_, index into CONSTANT_CALIBRATION_ANGLES_DEG)
     // is drawn in MagMd; all other headings stay MagDk.
     if ( cal2Recording_ ) {
-        auto calAngleColor = [this]( int idx ) { return idx == cal2HeadingIdx_ ? Colors::MagMd : Colors::MagDk; };
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_000_X * radius, -CONSTANT_UNIT_VECTOR_CAL_000_Y * radius ), calAngleColor( 0 ), 1 );     // Cal 000°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_035_X * radius, -CONSTANT_UNIT_VECTOR_CAL_035_Y * radius ), calAngleColor( 1 ), 1 );     // Cal 035°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_060_X * radius, -CONSTANT_UNIT_VECTOR_CAL_060_Y * radius ), calAngleColor( 2 ), 1 );     // Cal 060°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_090_X * radius, -CONSTANT_UNIT_VECTOR_CAL_090_Y * radius ), calAngleColor( 3 ), 1 );     // Cal 090°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_120_X * radius, -CONSTANT_UNIT_VECTOR_CAL_120_Y * radius ), calAngleColor( 4 ), 1 );     // Cal 120°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_145_X * radius, -CONSTANT_UNIT_VECTOR_CAL_145_Y * radius ), calAngleColor( 5 ), 1 );     // Cal 145°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_180_X * radius, -CONSTANT_UNIT_VECTOR_CAL_180_Y * radius ), calAngleColor( 6 ), 1 );     // Cal 180°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_210_X * radius, -CONSTANT_UNIT_VECTOR_CAL_210_Y * radius ), calAngleColor( 7 ), 1 );     // Cal 210°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_240_X * radius, -CONSTANT_UNIT_VECTOR_CAL_240_Y * radius ), calAngleColor( 8 ), 1 );     // Cal 240°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_270_X * radius, -CONSTANT_UNIT_VECTOR_CAL_270_Y * radius ), calAngleColor( 9 ), 1 );     // Cal 270°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_300_X * radius, -CONSTANT_UNIT_VECTOR_CAL_300_Y * radius ), calAngleColor( 10 ), 1 );    // Cal 300°
-        cv::line( matController_, center, center + cv::Point2i( CONSTANT_UNIT_VECTOR_CAL_330_X * radius, -CONSTANT_UNIT_VECTOR_CAL_330_Y * radius ), calAngleColor( 11 ), 1 );    // Cal 330°
+        for ( int i = 0; i < CONSTANT_CALIBRATION_ANGLES_COUNT; i++ ) {
+            float      rad   = CONSTANT_CALIBRATION_ANGLES_DEG[i] * DEG_TO_RAD;
+            cv::Scalar color = ( i == cal2HeadingIdx_ ) ? Colors::MagMd : Colors::MagDk;
+            cv::line( matController_, center,
+                      center + cv::Point2i( static_cast<int>( std::cos( rad ) * radius ),
+                                            static_cast<int>( -std::sin( rad ) * radius ) ),
+                      color, 1 );
+        }
     }
 
     // Stiffness profile polygon - drawn once Cal2Handler has produced K(theta).
@@ -1097,8 +1165,8 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
                                         controllerTele_.stiffnessProfile.end() );
         if ( kMax > 0.0f ) {
             std::vector<cv::Point> stiffnessPts;
-            stiffnessPts.reserve( CONSTANT_CALIBRATION_ANGLE_COUNT );
-            for ( int i = 0; i < CONSTANT_CALIBRATION_ANGLE_COUNT; i++ ) {
+            stiffnessPts.reserve( CONSTANT_CALIBRATION_ANGLES_COUNT );
+            for ( int i = 0; i < CONSTANT_CALIBRATION_ANGLES_COUNT; i++ ) {
                 float theta = CONSTANT_CALIBRATION_ANGLES_DEG[i] * DEG_TO_RAD;
                 float r = ( controllerTele_.stiffnessProfile[i] / kMax ) * radius;
                 stiffnessPts.emplace_back( center + cv::Point2i(
@@ -1236,7 +1304,7 @@ void DisplayHandler::DrawMarkerOverlays(
     // ID / guidance line at the estimated outline so the operator keeps the cue.
     if ( !activeDrawn && estTargetVisible_ && estTargetTagId_ > 0 ) {
         std::vector<cv::Point> corners( 4 );
-        cv::Point2f centerF( 0.f, 0.f );
+        cv::Point2f            centerF( 0.f, 0.f );
         for ( int k = 0; k < 4; k++ ) {
             corners[k] = cv::Point( static_cast<int>( estTargetCorners_[k].x ),
                                     static_cast<int>( estTargetCorners_[k].y ) );
@@ -1254,6 +1322,16 @@ void DisplayHandler::DrawMarkerOverlays(
                                  ? virtualTargetPx_
                                  : center;
         cv::line( frame, principalPoint_, lineTo, Colors::GreMd, 2 );
+    }
+
+    // Magenta reference box: the target marker that was active at the moment of
+    // the trial-ending touch, frozen until the next target loads.
+    if ( touchedBoxVisible_ ) {
+        std::vector<cv::Point> corners( 4 );
+        for ( int k = 0; k < 4; k++ )
+            corners[k] = cv::Point( static_cast<int>( touchedBoxCorners_[k].x ),
+                                    static_cast<int>( touchedBoxCorners_[k].y ) );
+        cv::polylines( frame, corners, true, Colors::MagMd, 2 );
     }
 }
 

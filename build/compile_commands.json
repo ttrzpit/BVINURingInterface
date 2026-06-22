@@ -94,5 +94,11 @@
   "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/TouchHandler.cpp.o -c /home/tom/Code/BVINURingInterface/src/TouchHandler.cpp",
   "file": "/home/tom/Code/BVINURingInterface/src/TouchHandler.cpp",
   "output": "CMakeFiles/BVINURingInterface.dir/src/TouchHandler.cpp.o"
+},
+{
+  "directory": "/home/tom/Code/BVINURingInterface/build",
+  "command": "/usr/bin/g++ -I/home/tom/Code/BVINURingInterface/include -isystem /usr/local/include/opencv4 -O3 -DNDEBUG -std=c++17 -o CMakeFiles/BVINURingInterface.dir/src/TrialLogger.cpp.o -c /home/tom/Code/BVINURingInterface/src/TrialLogger.cpp",
+  "file": "/home/tom/Code/BVINURingInterface/src/TrialLogger.cpp",
+  "output": "CMakeFiles/BVINURingInterface.dir/src/TrialLogger.cpp.o"
 }
 ]

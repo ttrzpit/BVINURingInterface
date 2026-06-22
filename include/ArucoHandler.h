@@ -149,6 +149,15 @@ public:
     int GetFittsTargetCount() const { return fittsLayout_.FineCount(); }
     int GetFittsTargetIdMin() const { return fittsLayout_.FineIdMin(); }
     int GetFittsTargetIdMax() const { return fittsLayout_.FineIdMax(); }
+    /** @brief Largest marker ID on the board (includes coarse markers). Used
+     *         to allow manual target entry of coarse IDs for testing. */
+    int GetFittsBoardMaxId()  const { return fittsLayout_.MaxId(); }
+
+    /** @brief Fine marker IDs eligible as random targets (interior of the grid,
+     *         border rows/cols excluded). */
+    const std::vector<int>& GetFittsSelectableTargetIds() const {
+        return fittsLayout_.SelectableTargetIds();
+    }
 
     /**
      * @brief Draw (or clear) the Fitts touch-sample overlay on top of the
@@ -177,6 +186,11 @@ public:
      *                  complete, Colors::GraMd for the uncalibrated default)
      */
     void SetTargetOffsetCircle(bool visible, cv::Point2i centerPx, int radiusPx, cv::Scalar color);
+
+    /** @brief Show/hide a magenta reference outline around the target marker
+     *         (by Fitts layout id) on the touchscreen, drawn once the trial-ending
+     *         touch is registered and kept until the next target is selected. */
+    void SetTargetOutline(bool visible, int targetId);
 
     /**
      * @brief Pixel-space center of the Fitts board marker `id`, in
@@ -281,6 +295,11 @@ private:
     cv::Point2i targetCirclePx_        = {};
     int         targetCircleRadiusPx_  = 0;
     cv::Scalar  targetCircleColor_     = { 0, 0, 255 };  // BGR, default red
+
+    // Magenta reference outline around the just-touched target marker, drawn on
+    // the touchscreen from the trial-ending touch until the next target loads.
+    bool        targetOutlineVisible_  = false;
+    int         targetOutlineId_       = 0;
 
     // Calibration grid uses a larger dictionary (DICT_4X4_1000) so it can
     // accommodate more markers than the Fitts grid (DICT_4X4_50).

@@ -15,7 +15,7 @@
 Cal2Handler::Cal2Handler( const ControllerHandler& controller, const AromBoundary& aromBoundary,
                           const Cal2Config& cfg )
     : controller_( controller ), aromBoundary_( aromBoundary ), cfg_( cfg ) {
-    for ( int i = 0; i < CONSTANT_CALIBRATION_ANGLE_COUNT; i++ ) {
+    for ( int i = 0; i < CONSTANT_CALIBRATION_ANGLES_COUNT; i++ ) {
         results_[i].theta = CONSTANT_CALIBRATION_ANGLES_DEG[i] * DEG_TO_RAD;
     }
 }
@@ -28,7 +28,7 @@ void Cal2Handler::Reset() {
     }
 
     results_ = {};
-    for ( int i = 0; i < CONSTANT_CALIBRATION_ANGLE_COUNT; i++ ) {
+    for ( int i = 0; i < CONSTANT_CALIBRATION_ANGLES_COUNT; i++ ) {
         results_[i].theta = CONSTANT_CALIBRATION_ANGLES_DEG[i] * DEG_TO_RAD;
     }
 
@@ -79,7 +79,7 @@ void Cal2Handler::Update( double nowSecs ) {
 
                 const Cal2HeadingResult& r = results_[headingIdx_];
                 std::cout << std::fixed << std::setprecision( 3 )
-                          << "Cal2: " << ( headingIdx_ + 1 ) << "/" << CONSTANT_CALIBRATION_ANGLE_COUNT
+                          << "Cal2: " << ( headingIdx_ + 1 ) << "/" << CONSTANT_CALIBRATION_ANGLES_COUNT
                           << " theta=" << ( r.theta * RAD_TO_DEG ) << " deg"
                           << "  K(theta)=" << r.stiffness_kP << " N/mm"
                           << "  samples=" << r.rampUpSamples
@@ -96,7 +96,7 @@ void Cal2Handler::Update( double nowSecs ) {
         case Phase::WAIT: {
             commandedMag = 0.0f;
             if ( elapsed >= cfg_.releaseWaitSecs ) {
-                if ( headingIdx_ + 1 < CONSTANT_CALIBRATION_ANGLE_COUNT ) {
+                if ( headingIdx_ + 1 < CONSTANT_CALIBRATION_ANGLES_COUNT ) {
                     StartHeading( headingIdx_ + 1, nowSecs );
                 } else {
                     phase_ = Phase::DONE;
@@ -104,7 +104,7 @@ void Cal2Handler::Update( double nowSecs ) {
 
                     std::cout << "Cal2: === STIFFNESS CALIBRATION COMPLETE ===\n"
                               << std::fixed << std::setprecision( 3 );
-                    for ( int i = 0; i < CONSTANT_CALIBRATION_ANGLE_COUNT; i++ ) {
+                    for ( int i = 0; i < CONSTANT_CALIBRATION_ANGLES_COUNT; i++ ) {
                         const Cal2HeadingResult& res = results_[i];
                         std::cout << "Cal2:   theta=" << ( res.theta * RAD_TO_DEG ) << " deg"
                                   << "  K(theta)=" << res.stiffness_kP << " N/mm"
@@ -125,7 +125,7 @@ void Cal2Handler::Update( double nowSecs ) {
     if ( phase_ != Phase::DONE ) {
         std::ostringstream ss;
         ss << std::fixed << std::setprecision( 1 );
-        ss << "Stiffness " << ( headingIdx_ + 1 ) << "/" << CONSTANT_CALIBRATION_ANGLE_COUNT
+        ss << "Stiffness " << ( headingIdx_ + 1 ) << "/" << CONSTANT_CALIBRATION_ANGLES_COUNT
            << " (" << ( theta * RAD_TO_DEG ) << " deg): ";
         switch ( phase_ ) {
             case Phase::RAMP_UP:
@@ -183,9 +183,9 @@ void Cal2Handler::FitStiffness( int index ) {
     r.valid = true;
 }
 
-std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT> Cal2Handler::GetStiffnessProfile() const {
-    std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT> profile = {};
-    for ( int i = 0; i < CONSTANT_CALIBRATION_ANGLE_COUNT; i++ ) {
+std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT> Cal2Handler::GetStiffnessProfile() const {
+    std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT> profile = {};
+    for ( int i = 0; i < CONSTANT_CALIBRATION_ANGLES_COUNT; i++ ) {
         profile[i] = results_[i].stiffness_kP;
     }
     return profile;

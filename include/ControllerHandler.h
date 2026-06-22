@@ -86,7 +86,7 @@ struct ControllerTelemetry {
                                          ///< lands the fingertip on the target (camera frame, Y-up, Z=depth).
                                          ///< Δp.xy equals the PID position error; Δp.z is depth_to_target.
     cv::Point2f measuredForce;          ///< Measured force from amplifier current [N]
-    std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT> stiffnessProfile; ///< K(theta) [N/mm]
+    std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT> stiffnessProfile; ///< K(theta) [N/mm]
     bool        stiffnessValid;         ///< True once Cal2Handler has produced K(theta)
     bool        stiffnessGainEnabled;   ///< True when K(theta) is added on top of gainTune
 
@@ -257,13 +257,13 @@ public:
     // enabled, periodic linear interpolation of this profile at the current
     // error heading is added on top of the custom-tuned gain (gainTune) in
     // Stage 1.
-    void SetStiffnessProfile(const std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT>& kTheta);
+    void SetStiffnessProfile(const std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT>& kTheta);
     bool HasStiffnessProfile() const { return stiffnessProfileValid_; }
 
     void SetStiffnessGainEnabled(bool enabled) { stiffnessGainEnabled_ = enabled; }
     bool IsStiffnessGainEnabled() const { return stiffnessGainEnabled_; }
 
-    std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT> GetStiffnessProfile() const { return stiffness_profile_; }
+    std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT> GetStiffnessProfile() const { return stiffness_profile_; }
 
     // ---- Direction-dependent gain tuning ('G' key) ---------------------------
     // gainTune_A/B/C are the custom-tuned proportional gain, one of the two
@@ -431,7 +431,7 @@ private:
     float measuredForce_x_ = 0.0f, measuredForce_y_ = 0.0f;
 
     // ---- Stiffness profile K(theta) [N/mm] (Stage 2 calibration result) ------
-    std::array<float, CONSTANT_CALIBRATION_ANGLE_COUNT> stiffness_profile_ = {};
+    std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT> stiffness_profile_ = {};
     bool stiffnessProfileValid_ = false;
     bool stiffnessGainEnabled_  = true;
 
