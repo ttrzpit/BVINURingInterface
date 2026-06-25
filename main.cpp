@@ -31,6 +31,7 @@
 #include <iostream>
 #include <random>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "ArucoHandler.h"
@@ -177,6 +178,10 @@ int main() {
     // falls back to the normal picker). Refreshed on every FITTS entry.
     std::vector<int> randomPoolRemaining;
     bool             randomPoolExhaustedNotified = false;
+    // Memory of which markers a random 'r' pick has already used this Fitts
+    // sequence, so the same marker is never pulled twice. Cleared on every 'F'
+    // (FITTS entry below); auto-restarts once every selectable target is used.
+    std::unordered_set<int> usedRandomTargets;
     PcToTeensyPacket lastTxPkt = {};    // Pending TX values updated each frame - sent by TX thread at 200 Hz
 
     // Controller - dt is measured between loop iterations, independent of camera frame rate
@@ -203,6 +208,9 @@ int main() {
         //    OpenCV windows responsive. The result is fed to KeyboardHandler
         //    which manages multi-character commands and the quit flag.
         int key = display.PollKey();
+        // Gate Fitts entry ('F') on all three calibrations being complete - if
+        // not, ProcessKey diverts to the (p)roceed/(r)eturn confirmation prompt.
+        keyboard.SetCalibrationsComplete( cal1.IsComplete() && cal2.IsComplete() && cal3.IsComplete() );
         keyboard.ProcessKey( key );
         const KeyboardState& kb = keyboard.GetState();
         if ( kb.quitRequested ) break;
@@ -292,6 +300,9 @@ int main() {
                 // Refresh the manual random-target debug pool for this session.
                 randomPoolRemaining         = cfg.accuracyTrials.randomPool;
                 randomPoolExhaustedNotified = false;
+                // Clear the random-target memory so a fresh Fitts sequence can
+                // reuse every marker exactly once before any repeats.
+                usedRandomTargets.clear();
             }
             // IDLE and any other state - window already closed above
 
@@ -471,6 +482,17 @@ int main() {
             }
         }
 
+        // Once the logging-prime flow has set the user ID, it lands in the LOG
+        // state - a dead end with no commands of its own, so it would block the
+        // IDLE-gated commands ('F', 'C', ...). Drop back to the default IDLE state
+        // to wait for the next input, mirroring how the guided tensioning returns
+        // to IDLE after its final step. (LOG_UID, the live user-ID prompt, is left
+        // alone so the operator can still type; an 'L' armed mid-task never enters
+        // LOG, so this won't disturb a running FITTS/calibration.)
+        if ( kb.inputState == InputState::LOG ) {
+            keyboard.SetInputState( InputState::IDLE );
+        }
+
         // 'r' - distance-stratified random target. Bands of distance (from the
         // PREVIOUS target's position) are cycled for an even spread; a target is
         // picked uniformly within the current band, never repeating the previous.
@@ -498,14 +520,27 @@ int main() {
                         randomPoolExhaustedNotified = true;
                     }
 
+                    // Restrict to markers not yet used this sequence (the no-repeat
+                    // memory). Once every selectable target has been used, restart
+                    // the memory so the task keeps running.
+                    std::vector<int> avail;
+                    avail.reserve( sel.size() );
+                    for ( int id : sel )
+                        if ( !usedRandomTargets.count( id ) ) avail.push_back( id );
+                    if ( avail.empty() ) {
+                        std::cout << "All Fitts targets used - resetting random-target memory." << std::endl;
+                        usedRandomTargets.clear();
+                        avail = sel;
+                    }
+
                     if ( prevId <= 0 || aruco.GetGridMarkerCenterPx( prevId ) == cv::Point2i{} ) {
-                        nextId = sel[ std::uniform_int_distribution<int>( 0, (int)sel.size() - 1 )( targetRng ) ];
+                        nextId = avail[ std::uniform_int_distribution<int>( 0, (int)avail.size() - 1 )( targetRng ) ];
                     } else {
                         const cv::Point2i pPx = aruco.GetGridMarkerCenterPx( prevId );
                         float dmin = 1e9f, dmax = 0.0f;
                         std::vector<std::pair<int, float>> cand;
-                        for ( int id : sel ) {
-                            if ( id == prevId ) continue;
+                        for ( int id : avail ) {
+                            if ( id == prevId ) continue;    // never repeat the immediately previous target
                             const cv::Point2i cPx = aruco.GetGridMarkerCenterPx( id );
                             const float dx = ( cPx.x - pPx.x ) * mmpp;
                             const float dy = ( cPx.y - pPx.y ) * mmpp;
@@ -514,21 +549,31 @@ int main() {
                             dmin = std::min( dmin, d );
                             dmax = std::max( dmax, d );
                         }
-                        const int   nBands = std::max( 1, cfg.fittsBoard.numDistanceBands );
-                        const int   band   = distanceBandCursor % nBands;
-                        distanceBandCursor = ( distanceBandCursor + 1 ) % nBands;
-                        const float w  = ( dmax - dmin ) / nBands;
-                        const float lo = dmin + band * w;
-                        const float hi = ( band == nBands - 1 ) ? dmax + 1.0f : lo + w;
-                        std::vector<int> inBand;
-                        for ( auto& pr : cand )
-                            if ( pr.second >= lo && pr.second <= hi ) inBand.push_back( pr.first );
-                        if ( inBand.empty() )
-                            for ( auto& pr : cand ) inBand.push_back( pr.first );  // fallback: any
-                        if ( !inBand.empty() )
-                            nextId = inBand[ std::uniform_int_distribution<int>( 0, (int)inBand.size() - 1 )( targetRng ) ];
+                        if ( cand.empty() ) {
+                            // Only unused target left was prevId itself - just take it.
+                            nextId = avail[ std::uniform_int_distribution<int>( 0, (int)avail.size() - 1 )( targetRng ) ];
+                        } else {
+                            const int   nBands = std::max( 1, cfg.fittsBoard.numDistanceBands );
+                            const int   band   = distanceBandCursor % nBands;
+                            distanceBandCursor = ( distanceBandCursor + 1 ) % nBands;
+                            const float w  = ( dmax - dmin ) / nBands;
+                            const float lo = dmin + band * w;
+                            const float hi = ( band == nBands - 1 ) ? dmax + 1.0f : lo + w;
+                            std::vector<int> inBand;
+                            for ( auto& pr : cand )
+                                if ( pr.second >= lo && pr.second <= hi ) inBand.push_back( pr.first );
+                            if ( inBand.empty() )
+                                for ( auto& pr : cand ) inBand.push_back( pr.first );  // fallback: any
+                            if ( !inBand.empty() )
+                                nextId = inBand[ std::uniform_int_distribution<int>( 0, (int)inBand.size() - 1 )( targetRng ) ];
+                        }
                     }
                 }
+
+                // Record this pick so it isn't pulled again until the sequence is
+                // restarted ('F') or the memory auto-resets on exhaustion. Covers
+                // both the debug-pool and whole-board paths.
+                usedRandomTargets.insert( nextId );
 
                 keyboard.SetFittsTargetId( nextId );
                 keyboard.SetExternalStatus( "Active marker set to " + std::to_string( nextId ) + "." );
@@ -545,6 +590,22 @@ int main() {
                     const cv::Point3f ftOff = cal3.GetFinalOffset();
                     trialLogger.SetTrialMeta( tScreenXmm, tScreenYmm,
                                               ftOff.x, ftOff.y, ftOff.z, cal3.IsComplete() );
+
+                    // Calibration metadata for offline reconstruction (MATLAB):
+                    // the Cal1 AROM envelope spline control points and the Cal2
+                    // stiffness measurements, plus the calibration headings.
+                    const AromBoundary& arom = cal1.GetBoundary();
+                    const auto          stiff = controller.GetStiffnessProfile();
+                    trialLogger.SetCalibrationMeta(
+                        std::vector<float>( CONSTANT_CALIBRATION_ANGLES_DEG,
+                                            CONSTANT_CALIBRATION_ANGLES_DEG + CONSTANT_CALIBRATION_ANGLES_COUNT ),
+                        arom.valid,
+                        std::vector<float>( arom.theta.begin(),  arom.theta.end() ),
+                        std::vector<float>( arom.radius.begin(), arom.radius.end() ),
+                        std::vector<float>( arom.accel.begin(),  arom.accel.end() ),
+                        controller.HasStiffnessProfile(),
+                        std::vector<float>( stiff.begin(), stiff.end() ) );
+
                     // Sync prevLogTouched so a touch already in progress at trial
                     // start is not immediately detected as the finish rising edge.
                     prevLogTouched = touchState.isTouched;
@@ -802,13 +863,19 @@ int main() {
             keyboard.SetExternalStatus( pretension.GetTensionAdjustStatus() );
         }
 
-        // Direction-dependent gain tuning ('G' key) - adjusts gainTune_A/B/C,
-        // the custom-tuned proportional gain (seeded from gain_kP). Combined
-        // with K(theta) (when enabled), these are the two terms that form
-        // kP_effective (Stage 1). Works alongside normal operation; does not
-        // gate output or manual tension mode.
-        if ( kb.inputState == InputState::GAIN_ALL || kb.inputState == InputState::GAIN_A ||
-             kb.inputState == InputState::GAIN_B || kb.inputState == InputState::GAIN_C ) {
+        // Direction-dependent gain tuning - 'P' adjusts gainTune_A/B/C (the
+        // custom-tuned proportional gain, seeded from gain_kP, combined with
+        // K(theta) to form kP_effective); 'I' adjusts iGainTune_A/B/C (the
+        // custom-tuned integral gain, seeded from gain_kI, forming kI_effective
+        // for the Stage 1 endgame integrator). Both overlays work alongside
+        // normal operation; neither gates output or manual tension mode.
+        if ( IsIGainTuneInputState( kb.inputState ) ) {
+            if ( kb.pendingGainAdjust.active ) {
+                controller.AdjustIGainTune( kb.pendingGainAdjust.motor, kb.pendingGainAdjust.deltaGain );
+                keyboard.ClearGainAdjust();
+            }
+            keyboard.SetExternalStatus( controller.GetIGainTuneStatus() );
+        } else if ( IsGainTuneInputState( kb.inputState ) ) {
             if ( kb.pendingGainAdjust.active ) {
                 controller.AdjustGainTune( kb.pendingGainAdjust.motor, kb.pendingGainAdjust.deltaGain );
                 keyboard.ClearGainAdjust();
@@ -953,7 +1020,7 @@ int main() {
                 }
                 prevFittsTouchSample = fittsTouchSample;
                 display.SetTouchedTargetBox( touchedTargetBoxValid && fittsTouchSample, touchedTargetCorners );
-                aruco.SetFittsOverlay( fitts.HasTouchSample(), fitts.GetTouchScreenPx(),
+                aruco.SetFittsOverlay( fitts.HasTouchSample(), fitts.GetTouchScreenPx(), kb.fittsTargetId,
                                        fitts.GetErrorLine1(), fitts.GetErrorLine2() );
 
                 // Magenta reference outline around the target marker on the
@@ -979,6 +1046,9 @@ int main() {
                         s.detected = tDetected ? 1 : 0;
                         s.tx = tpos.x; s.ty = tpos.y; s.tz = tpos.z;
                         s.dx = tdisp.x; s.dy = tdisp.y; s.dz = tdisp.z;
+                        // Virtual fingertip = target - Δp (camera frame Y-up): the
+                        // system's estimate of the fingertip point, logged per frame.
+                        s.vx = tpos.x - tdisp.x; s.vy = tpos.y - tdisp.y;
                         s.qx = tquat[0]; s.qy = tquat[1]; s.qz = tquat[2]; s.qw = tquat[3];
                         s.pwmA = tele.outputPwm.x; s.pwmB = tele.outputPwm.y; s.pwmC = tele.outputPwm.z;
                         trialLogger.AddSample( s );
@@ -995,7 +1065,7 @@ int main() {
                 prevLogTouched = touchState.isTouched;
             } else {
                 display.SetTouchFingertip( false );
-                aruco.SetFittsOverlay( false, {}, "", "" );
+                aruco.SetFittsOverlay( false, {}, 0, "", "" );
                 aruco.SetTargetOutline( false, 0 );
                 display.SetTouchedTargetBox( false, touchedTargetCorners );
                 touchedTargetBoxValid = false;

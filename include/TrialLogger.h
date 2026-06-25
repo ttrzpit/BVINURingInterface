@@ -35,6 +35,7 @@ struct TrialSample {
     int    detected;  ///< 1 = target marker seen directly, 0 = estimated from others
     float  tx, ty, tz;        ///< Target marker centre, camera frame Y-up [mm]
     float  dx, dy, dz;        ///< Fingertip-compensated displacement Δp = target - fingertip [mm] (->0 on touch)
+    float  vx, vy;            ///< Virtual fingertip position = target - Δp, camera frame Y-up [mm]
     float  qx, qy, qz, qw;    ///< Quaternion (x,y,z,w) of board->camera rotation (OpenCV Y-down)
     float  pwmA, pwmB, pwmC;  ///< Commanded motor PWM (0=full … 2047=off)
 };
@@ -67,6 +68,23 @@ public:
      *  @param hasOffset  False if Cal3 was never run - offset is logged as 0,0,0. */
     void SetTrialMeta(float targetScreenXmm, float targetScreenYmm,
                       float ftOffX, float ftOffY, float ftOffZ, bool hasOffset);
+
+    /** @brief Set session-level calibration metadata written into every trial
+     *         header, so MATLAB can recreate the AROM envelope spline and the
+     *         Cal2 stiffness polygon offline. Safe to call once per trial start.
+     *  @param calibAnglesDeg  CONSTANT_CALIBRATION_ANGLES_DEG (the N headings).
+     *  @param aromValid       False -> control-point arrays written as []:
+     *  @param cpTheta,cpRadius,cpAccel  AROM boundary periodic-cubic-spline control
+     *         points (theta [rad], radius [mm], 2nd-derivatives) - AromBoundary.
+     *  @param stiffnessValid  False -> stiffness array written as [].
+     *  @param stiffness       Cal2 K(theta) per heading [N/mm]. */
+    void SetCalibrationMeta(std::vector<float> calibAnglesDeg,
+                            bool aromValid,
+                            std::vector<float> cpTheta,
+                            std::vector<float> cpRadius,
+                            std::vector<float> cpAccel,
+                            bool stiffnessValid,
+                            std::vector<float> stiffness);
 
     /** @brief Append one per-frame row (no-op unless a capture is active). */
     void AddSample(const TrialSample& s);
@@ -106,4 +124,13 @@ private:
     float ftOffY_ = 0.0f;
     float ftOffZ_ = 0.0f;
     bool  hasFtOffset_ = false;       // false -> offset written as 0,0,0
+
+    // ---- Calibration metadata (set via SetCalibrationMeta) -------------------
+    std::vector<float> calibAnglesDeg_;             // CONSTANT_CALIBRATION_ANGLES_DEG
+    bool               aromValid_      = false;     // false -> control points written as []
+    std::vector<float> cpTheta_;                    // AROM spline control points: theta [rad]
+    std::vector<float> cpRadius_;                   //   radius [mm]
+    std::vector<float> cpAccel_;                    //   2nd-derivatives
+    bool               stiffnessValid_ = false;     // false -> stiffness written as []
+    std::vector<float> stiffness_;                  // Cal2 K(theta) [N/mm]
 };

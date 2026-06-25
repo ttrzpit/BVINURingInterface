@@ -293,7 +293,16 @@ struct SerialConfig {
 struct ControllerConfig {
     float gain_kP             = 1.0f;    // Proportional gain [N/mm]
     float gain_kD             = 0.0f;    // Derivative gain [N·s/mm]
-    float gain_kI             = 0.0f;    // Integral gain [N/(mm·s)]
+    float gain_kI             = 0.0f;    // Integral gain [N/(mm·s)] - seeds the per-direction iGainTune
+    // ---- Gated ("endgame") integrator -------------------------------------
+    // The integrator only winds up when the finger is within
+    // integral_enable_radius_mm of the target AND slower than
+    // integral_enable_speed_mm_s (the final settling phase, where a constant
+    // bias such as gravity/friction shows up). Outside that window the
+    // integral decays by integral_leak each frame to bleed stale windup.
+    float integral_enable_radius_mm  = 30.0f;  // Wind up only within this error radius [mm]
+    float integral_enable_speed_mm_s = 40.0f;  // Wind up only below this finger speed [mm/s]
+    float integral_leak              = 0.97f;  // Per-frame decay of the integral while not winding up
     float deflection_force_max = 5.0f;   // Maximum allowable guidance deflection force magnitude [N]
     float tension_preload_min   = 0.1f;  // T_preload_min: minimum preload tension per motor [N]
     float tension_preload_max   = 2.0f;  // T_preload_max: maximum preload tension per motor [N]

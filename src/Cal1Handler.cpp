@@ -104,7 +104,7 @@ void Cal1Handler::ComputeBoundary() {
             continue;
         }
         std::sort(binRadii[i].begin(), binRadii[i].end());
-        int idx = static_cast<int>(std::lround(0.95 * (binRadii[i].size() - 1)));
+        int idx = static_cast<int>(std::lround(0.85 * (binRadii[i].size() - 1)));
         boundary_.radius[i] = binRadii[i][idx];
     }
 

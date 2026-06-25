@@ -274,6 +274,10 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
         kPEffective_ += stiffnessGainValue_;
     }
 
+    // Live integral gain: the custom-tuned iGainTune (seeded from gain_kI,
+    // adjustable via 'I') interpolated at the current error heading.
+    kIEffective_ = InterpolateIGainTune(errorAngle);
+
     if (calibrationForceMode_) {
         // Stage 2 stiffness calibration - open-loop force command from
         // SetCalibrationForce(), PID bypassed entirely.
@@ -293,13 +297,28 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
         force_x_ = 0.0f;
         force_y_ = 0.0f;
     } else {
-        integral_.x += error.x * dt;
-        integral_.y += error.y * dt;
+        // Conditional "endgame" integrator: only wind up when the finger is
+        // close to the target AND moving slowly - the final settling phase
+        // where a constant bias (gravity, friction) shows up. Keeps the
+        // ballistic approach from causing windup/overshoot. The X error crosses
+        // zero so it integrates to ~0; only the persistent Y bias accumulates,
+        // which is exactly what cancels the systematic "fingertip below target"
+        // error. Outside the window the integral leaks toward zero.
+        const float speed = std::sqrt(vel_filtered_.x * vel_filtered_.x +
+                                      vel_filtered_.y * vel_filtered_.y);
+        const bool inEndgame = errMag < cfg_.integral_enable_radius_mm
+                            && speed  < cfg_.integral_enable_speed_mm_s;
+        if (inEndgame) {
+            integral_.x += error.x * dt;
+            integral_.y += error.y * dt;
+        } else {
+            integral_ *= cfg_.integral_leak;
+        }
 
         // Bug #6 fix: anti-windup clamp derived from the K_i budget
-        // (±0.5 * F_max / K_i), not an arbitrary 2x F_max.
-        if (cfg_.gain_kI > 1e-6f) {
-            float intClamp = 0.5f * cfg_.deflection_force_max / cfg_.gain_kI;
+        // (±0.5 * F_max / K_i), using the live direction-interpolated kI.
+        if (kIEffective_ > 1e-6f) {
+            float intClamp = 0.5f * cfg_.deflection_force_max / kIEffective_;
             integral_.x = std::clamp(integral_.x, -intClamp, intClamp);
             integral_.y = std::clamp(integral_.y, -intClamp, intClamp);
         } else {
@@ -308,8 +327,8 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
 
         // Bug #1 fix: D-term uses vel_filtered_.y for force_y_ (old code used
         // vel.x for both axes).
-        force_x_ = kPEffective_ * error.x - cfg_.gain_kD * vel_filtered_.x + cfg_.gain_kI * integral_.x;
-        force_y_ = kPEffective_ * error.y - cfg_.gain_kD * vel_filtered_.y + cfg_.gain_kI * integral_.y;
+        force_x_ = kPEffective_ * error.x - cfg_.gain_kD * vel_filtered_.x + kIEffective_ * integral_.x;
+        force_y_ = kPEffective_ * error.y - cfg_.gain_kD * vel_filtered_.y + kIEffective_ * integral_.y;
 
         // Bug #2 fix / item #9: the old code suppressed Fy entirely whenever
         // |Fx| > 1.5*|Fy| (a +-34 degree dead band around the X axis):
@@ -366,6 +385,9 @@ void ControllerHandler::ResetRamp(double nowSecs) {
     rampStart_             = nowSecs;
     rampValue_             = 0.0f;
     posTargetSmoothedInit_ = false;
+    // Start each new target with a clean integrator so a previous target's
+    // accumulated endgame bias doesn't carry over into the new approach.
+    integral_              = {};
 }
 
 
@@ -398,6 +420,22 @@ ControllerTelemetry ControllerHandler::GetTelemetry() const {
                          static_cast<float>(CurrentToPwm(preloadCurrent_C)) };
     }
 
+    // Integral component: the task-space force contributed by the integrator
+    // (kI_effective * integral), allocated to per-motor tension via W_pinv and
+    // run through the same Tension->Current->PWM pipeline as deflectionForcePwm
+    // (magnitude only; I=0 maps to CONSTANT_PWM_OFF).
+    {
+        float fIx = kIEffective_ * integral_.x;
+        float fIy = kIEffective_ * integral_.y;
+        t.integralForce = { fIx, fIy };
+        float tiA = W_pinv_[0][0] * fIx + W_pinv_[1][0] * fIy;
+        float tiB = W_pinv_[0][1] * fIx + W_pinv_[1][1] * fIy;
+        float tiC = W_pinv_[0][2] * fIx + W_pinv_[1][2] * fIy;
+        t.integralPwm = { static_cast<float>(CurrentToPwm(TensionToCurrent(std::abs(tiA), r_eff_A_))),
+                          static_cast<float>(CurrentToPwm(TensionToCurrent(std::abs(tiB), r_eff_B_))),
+                          static_cast<float>(CurrentToPwm(TensionToCurrent(std::abs(tiC), r_eff_C_))) };
+    }
+
     // T_deflection per motor (signed) - computed in Stage 2 (ComputeTensionOutputs).
     t.deflectionForce = { tension_deflection_A_, tension_deflection_B_, tension_deflection_C_ };
 
@@ -424,6 +462,7 @@ ControllerTelemetry ControllerHandler::GetTelemetry() const {
     t.stiffnessGainEnabled = stiffnessGainEnabled_;
     t.stiffnessGain        = stiffnessGainValue_;
     t.gainTune             = GetGainTune();
+    t.iGainTune            = GetIGainTune();
     return t;
 }
 
@@ -491,7 +530,7 @@ float ControllerHandler::InterpolateStiffness(float thetaRad) const {
 // motor angles (35deg/145deg/270deg), mirroring InterpolateStiffness above.
 // =============================================================================
 
-float ControllerHandler::InterpolateGainTune(float thetaRad) const {
+float ControllerHandler::InterpolateMotorProfile(float thetaRad, float vA, float vB, float vC) const {
     float theta = thetaRad;
     while (theta < 0.0f)             theta += CONSTANT_TWO_PI;
     while (theta >= CONSTANT_TWO_PI) theta -= CONSTANT_TWO_PI;
@@ -500,18 +539,26 @@ float ControllerHandler::InterpolateGainTune(float thetaRad) const {
         // Wrap-around segment: motor C -> motor A (through 0 deg)
         float a0 = MOTOR_ANGLE_C_RAD - CONSTANT_TWO_PI;
         float t  = (theta - a0) / (MOTOR_ANGLE_A_RAD - a0);
-        return gainTune_C_ + t * (gainTune_A_ - gainTune_C_);
+        return vC + t * (vA - vC);
     } else if (theta < MOTOR_ANGLE_B_RAD) {
         float t = (theta - MOTOR_ANGLE_A_RAD) / (MOTOR_ANGLE_B_RAD - MOTOR_ANGLE_A_RAD);
-        return gainTune_A_ + t * (gainTune_B_ - gainTune_A_);
+        return vA + t * (vB - vA);
     } else if (theta < MOTOR_ANGLE_C_RAD) {
         float t = (theta - MOTOR_ANGLE_B_RAD) / (MOTOR_ANGLE_C_RAD - MOTOR_ANGLE_B_RAD);
-        return gainTune_B_ + t * (gainTune_C_ - gainTune_B_);
+        return vB + t * (vC - vB);
     } else {
         float a1 = MOTOR_ANGLE_A_RAD + CONSTANT_TWO_PI;
         float t  = (theta - MOTOR_ANGLE_C_RAD) / (a1 - MOTOR_ANGLE_C_RAD);
-        return gainTune_C_ + t * (gainTune_A_ - gainTune_C_);
+        return vC + t * (vA - vC);
     }
+}
+
+float ControllerHandler::InterpolateGainTune(float thetaRad) const {
+    return InterpolateMotorProfile(thetaRad, gainTune_A_, gainTune_B_, gainTune_C_);
+}
+
+float ControllerHandler::InterpolateIGainTune(float thetaRad) const {
+    return InterpolateMotorProfile(thetaRad, iGainTune_A_, iGainTune_B_, iGainTune_C_);
 }
 
 
@@ -538,9 +585,39 @@ void ControllerHandler::AdjustGainTune(char motor, float deltaGain) {
 std::string ControllerHandler::GetGainTuneStatus() const {
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(2);
-    ss << "Gain tune (custom kP, combined with K(theta) for kP_effective): A=" << gainTune_A_
+    ss << "Proportional gain tune (custom kP): A=" << gainTune_A_
        << "  B=" << gainTune_B_ << "  C=" << gainTune_C_
-       << " -- [a/b/c/d] select motor, +/- = +/-0.1. Press [grave] to exit.";
+       << " -- [a/b/c/d] select motor, +/- = +/-0.01. Press [Enter], [P], or [grave] to exit.";
+    return ss.str();
+}
+
+
+void ControllerHandler::AdjustIGainTune(char motor, float deltaGain) {
+    constexpr float kIGainTuneMin = 0.0f;
+    constexpr float kIGainTuneMax = 2.0f;
+
+    auto adjust = [&](float& g) { g = std::clamp(g + deltaGain, kIGainTuneMin, kIGainTuneMax); };
+
+    switch (motor) {
+        case 'A': adjust(iGainTune_A_); break;
+        case 'B': adjust(iGainTune_B_); break;
+        case 'C': adjust(iGainTune_C_); break;
+        case 'D':
+        default:
+            adjust(iGainTune_A_);
+            adjust(iGainTune_B_);
+            adjust(iGainTune_C_);
+            break;
+    }
+}
+
+
+std::string ControllerHandler::GetIGainTuneStatus() const {
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(3);
+    ss << "Integral gain tune (custom kI): A=" << iGainTune_A_
+       << "  B=" << iGainTune_B_ << "  C=" << iGainTune_C_
+       << " -- [a/b/c/d] select motor, +/- = +/-0.005. Press [Enter], [I], or [grave] to exit.";
     return ss.str();
 }
 

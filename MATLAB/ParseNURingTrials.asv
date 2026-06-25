@@ -215,9 +215,10 @@ function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
     fingertip_offset_x_mm       = cellfun(@(r) r.header.fingertip_offset_x_mm, rows);
     fingertip_offset_y_mm       = cellfun(@(r) r.header.fingertip_offset_y_mm, rows);
     fingertip_offset_z_mm       = cellfun(@(r) r.header.fingertip_offset_z_mm, rows);
-    completion_time_s           = cellfun(@(r) r.header.completion_time_s, rows);
+    completion_time_s           = cellfun(@(r) r.header.completion_time_s, rows, 'UniformOutput', false);
     endpoint_error_x_mm         = cellfun(@(r) r.header.endpoint_error_x_mm, rows);
     endpoint_error_y_mm         = cellfun(@(r) r.header.endpoint_error_y_mm, rows);
+    endpoint_error_z_mm         = cellfun(@(r) r.header.endpoint_error_z_mm, rows);
     h_filename    = string(cellfun(@(r) r.filename, rows, 'UniformOutput', false));
     h_filepath    = string(cellfun(@(r) r.filepath, rows, 'UniformOutput', false));
 
@@ -225,7 +226,7 @@ function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
         target_screen_position_x_mm, target_screen_position_y_mm, ...
         fingertip_offset_x_mm, fingertip_offset_y_mm, fingertip_offset_z_mm, ...
         completion_time_s, ...
-        endpoint_error_x_mm, endpoint_error_y_mm, ...
+        endpoint_error_x_mm, endpoint_error_y_mm, endpoint_error_z_mm,...
         h_filename, h_filepath);
     headers.Properties.VariableNames{1} = 'trial_key';
     headers.Properties.VariableNames{end-1} = 'filename';
@@ -394,7 +395,8 @@ function header = parseTrialHeader(headerLines)
         'fingertip_offset_z_mm', NaN, ...
         'completion_time_s',     NaN, ...
         'endpoint_error_x_mm',   NaN, ...
-        'endpoint_error_y_mm',   NaN);
+        'endpoint_error_y_mm',   NaN, ...
+        'endpoint_error_z_mm',   NaN);
 
     for i = 1:numel(headerLines)
         line = strtrim(headerLines{i});
@@ -431,6 +433,8 @@ function header = parseTrialHeader(headerLines)
                     header.fingertip_offset_y_mm = -vals(2);
                     header.fingertip_offset_z_mm = vals(3);
                 end
+            case 'completion_time'
+                header.completion_time_s = val(;
             case 'endpoint_error_mm'
                 vals = parseBracketedNumericList(val);
                 if numel(vals) >= 3
@@ -535,12 +539,13 @@ function T = emptyHeadersTable()
     completion_time_s           = [];
     endpoint_error_x_mm         = []; 
     endpoint_error_y_mm         = []; 
+    endpoint_error_z_mm         = []; 
     filename                    = string([]);
     filepath                    = string([]);
     T = table(trial_key, user_id, target_id, ...
         target_screen_position_x_mm, target_screen_position_y_mm, ...
         fingertip_offset_x_mm, fingertip_offset_y_mm, fingertip_offset_z_mm, ...
-        completion_time_s, endpoint_error_x_mm, endpoint_error_y_mm, ...
+        completion_time_s, endpoint_error_x_mm, endpoint_error_y_mm, endpoint_error_z_mm,...
         filename, filepath);
 end
 

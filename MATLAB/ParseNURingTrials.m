@@ -32,8 +32,21 @@ function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
     %       fingertip_offset_x_mm          (double)
     %       fingertip_offset_y_mm          (double)
     %       fingertip_offset_z_mm          (double)
+    %       completion_time_s              (double)
+    %       endpoint_error_x_mm            (double)
+    %       endpoint_error_y_mm            (double)
+    %       endpoint_error_z_mm            (double)
     %       filename                       (string)
     %       filepath                       (string)
+    %
+    %   After each participant's block of trial rows, HEADERS also
+    %   contains two synthetic summary rows -- one with the MEAN, one with
+    %   the MEDIAN, of that participant's completion_time_s,
+    %   endpoint_error_x_mm, and endpoint_error_y_mm (endpoint_error_z_mm
+    %   and all other fields are left NaN/blank on these rows, since they
+    %   aren't aggregated). Summary rows are identified by
+    %   target_id == "MEAN" / "MEDIAN" and can be excluded with e.g.:
+    %       headers(~ismember(headers.target_id, ["MEAN","MEDIAN"]), :)
     %
     %   TRIALS - one row per trial file (same as before, plus trial_key):
     %       trial_key        (string)   - "u<user_id>_t<target_id>", shared
@@ -53,7 +66,7 @@ function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
     %   and variables:
     %       target_id, detected, tx_mm, ty_mm, tz_mm, dx_mm, dy_mm, dz_mm,
     %       qx, qy, qz, qw, pwm_a, pwm_b, pwm_c,
-    %       touch_x_px, touch_y_px, touch_x_mm, touch_y_mm
+    %       virtual_x_mm, virtual_y_mm, touch_x_mm, touch_y_mm
     %   Empty touch_* fields are read as NaN.
     %
     %   HEADERS and TRIALS can be cross-referenced directly via trial_key,
@@ -215,7 +228,7 @@ function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
     fingertip_offset_x_mm       = cellfun(@(r) r.header.fingertip_offset_x_mm, rows);
     fingertip_offset_y_mm       = cellfun(@(r) r.header.fingertip_offset_y_mm, rows);
     fingertip_offset_z_mm       = cellfun(@(r) r.header.fingertip_offset_z_mm, rows);
-    completion_time_s           = cellfun(@(r) r.header.completion_time_s, rows, 'UniformOutput', false);
+    completion_time_s           = cellfun(@(r) r.header.completion_time_s, rows);
     endpoint_error_x_mm         = cellfun(@(r) r.header.endpoint_error_x_mm, rows);
     endpoint_error_y_mm         = cellfun(@(r) r.header.endpoint_error_y_mm, rows);
     endpoint_error_z_mm         = cellfun(@(r) r.header.endpoint_error_z_mm, rows);
@@ -234,12 +247,18 @@ function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
 
     headers = sortrows(headers, {'user_id', 'target_id'});
 
+    % Add two summary rows (mean, then median) after each participant's
+    % block of trials, covering completion_time_s, endpoint_error_x_mm,
+    % and endpoint_error_y_mm.
+    headers = appendParticipantSummaryRows(headers);
+
     % ---------------------------------------------------------------------
     % Build per-participant summary table: User | Qty | Trials
     % ---------------------------------------------------------------------
     summary = buildSummaryTable(trials);
     disp(summary);
 
+    disp(headers);
     disp ("ParseNURingTrials: Data parsed.") ;
 
 end
@@ -311,12 +330,12 @@ function row = parseOneTrialFile(fpath)
             'dx_mm','dy_mm','dz_mm',...
             'qx','qy','qz','qw',...
             'pwm_a','pwm_b','pwm_c', ...
-            'touch_x_px','touch_y_px','touch_x_mm','touch_y_mm'}, 'double');
+            'virtual_x_mm','virtual_y_mm','touch_x_mm','touch_y_mm'}, 'double');
         opts = setvartype(opts, {'target_id','detected'}, 'int16');
 
         % Treat blanks in numeric columns as NaN (default behavior for
         % double columns in detectImportOptions, but set explicitly).
-        touchVars = {'touch_x_px','touch_y_px','touch_x_mm','touch_y_mm'};
+        touchVars = {'virtual_x_mm','virtual_y_mm','touch_x_mm','touch_y_mm'};
         for v = 1:numel(touchVars)
             if any(strcmp(opts.VariableNames, touchVars{v}))
                 opts = setvaropts(opts, touchVars{v}, 'TreatAsMissing', '');
@@ -378,12 +397,15 @@ end
 
 function header = parseTrialHeader(headerLines)
     %PARSETRIALHEADER Parse "key: value" lines from a {HEADER} block.
-    %   Recognizes scalar fields (user_id, target_id) and the two known
+    %   Recognizes scalar fields (user_id, target_id) and the known
     %   bracketed-array fields, which get split into named components:
     %       target_screen_position_mm: [x, y]
     %           -> target_screen_position_x_mm, target_screen_position_y_mm
     %       fingertip_offset: [x, y, z]
     %           -> fingertip_offset_x_mm, fingertip_offset_y_mm, fingertip_offset_z_mm
+    %       endpoint_error_mm: [x, y, z]
+    %           -> endpoint_error_x_mm, endpoint_error_y_mm, endpoint_error_z_mm
+    %   plus the scalar field completion_time -> completion_time_s.
 
     header = struct( ...
         'user_id', "", ...
@@ -434,7 +456,10 @@ function header = parseTrialHeader(headerLines)
                     header.fingertip_offset_z_mm = vals(3);
                 end
             case 'completion_time'
-                header.completion_time_s = double(val);
+                if iscell(val)
+                    val = val{1};
+                end
+                header.completion_time_s = str2double(val);
             case 'endpoint_error_mm'
                 vals = parseBracketedNumericList(val);
                 if numel(vals) >= 3
@@ -457,10 +482,13 @@ function vals = parseBracketedNumericList(str)
     parts = strsplit(str, ',');
     vals = str2double(strtrim(parts));
 end
-
+        
 function meta = parseTrialFilename(name)
-    %PARSETRIALFILENAME Parse "PID-MMddyyyy-HHmmss-TARGET" filename (no ext).
-    tok = regexp(name, '^(?<pid>\d+)-(?<date>\d{8})-(?<time>\d{6})-(?<target>\d+)$', 'names');
+    %PARSETRIALFILENAME Parse "PID-MMddyyyy-HHmmss-TARGET" filename (no
+    %ext). ORIGINAL
+    % tok = regexp(name, '^(?<pid>\d+)-(?<date>\d{8})-(?<time>\d{6})-(?<target>\d+)$', 'names');
+    %PARSETRIALFILENAME Parse "PID-TARGET-MMddyyyy-HHmmss" filename (no ext).
+    tok = regexp(name, '^(?<pid>\d+)-(?<target>\d+)-(?<date>\d{8})-(?<time>\d{6})$', 'names');
     if isempty(tok)
         error('Filename "%s" does not match expected PID-MMddyyyy-HHmmss-TARGET pattern', name);
     end
@@ -509,6 +537,69 @@ function summary = buildSummaryTable(trials)
     end
 
     summary = table(User, Qty, Trials);
+end
+
+function headers = appendParticipantSummaryRows(headers)
+    %APPENDPARTICIPANTSUMMARYROWS Insert two summary rows after each
+    %   participant's block of trials in the (already user_id/target_id
+    %   sorted) headers table: one row of means, one row of medians, each
+    %   covering completion_time_s, endpoint_error_x_mm, and
+    %   endpoint_error_y_mm (endpoint_error_z_mm and all other fields are
+    %   left NaN/blank on these synthetic rows, since they aren't
+    %   aggregated). The summary rows are identified by target_id ==
+    %   "MEAN" / "MEDIAN" (and a matching trial_key suffix), so they can be
+    %   filtered out later with e.g.:
+    %       headers(~ismember(headers.target_id, ["MEAN","MEDIAN"]), :)
+
+    if isempty(headers)
+        return;
+    end
+
+    uniqueUsers = unique(headers.user_id, 'stable'); % preserve sorted block order
+    blocks = cell(numel(uniqueUsers), 1);
+
+    for i = 1:numel(uniqueUsers)
+        u = uniqueUsers(i);
+        sub = headers(headers.user_id == u, :);
+
+        meanCT = mean(sub.completion_time_s, 'omitnan');
+        meanEX = mean(sub.endpoint_error_x_mm, 'omitnan');
+        meanEY = mean(sub.endpoint_error_y_mm, 'omitnan');
+
+        medCT  = median(sub.completion_time_s, 'omitnan');
+        medEX  = median(sub.endpoint_error_x_mm, 'omitnan');
+        medEY  = median(sub.endpoint_error_y_mm, 'omitnan');
+
+        meanRow   = makeSummaryRow(sub(1,:), u, "MEAN",   meanCT, meanEX, meanEY);
+        medianRow = makeSummaryRow(sub(1,:), u, "MEDIAN", medCT,  medEX,  medEY);
+
+        blocks{i} = [sub; meanRow; medianRow];
+    end
+
+    headers = vertcat(blocks{:});
+end
+
+function row = makeSummaryRow(templateRow, userId, label, completionTime, errX, errY)
+    %MAKESUMMARYROW Build a single synthetic headers-table row (same
+    %   schema as templateRow) holding an aggregate (mean/median) value for
+    %   completion_time_s/endpoint_error_x_mm/endpoint_error_y_mm, with
+    %   every other field left NaN/blank and target_id/trial_key marked
+    %   with LABEL ("MEAN" or "MEDIAN") so the row is identifiable.
+    row = templateRow;
+    row.trial_key   = sprintf('u%s_%s', userId, label);
+    row.user_id     = userId;
+    row.target_id   = string(label);
+    row.target_screen_position_x_mm = NaN;
+    row.target_screen_position_y_mm = NaN;
+    row.fingertip_offset_x_mm       = NaN;
+    row.fingertip_offset_y_mm       = NaN;
+    row.fingertip_offset_z_mm       = NaN;
+    row.completion_time_s   = completionTime;
+    row.endpoint_error_x_mm = errX;
+    row.endpoint_error_y_mm = errY;
+    row.endpoint_error_z_mm = NaN;
+    row.filename = "";
+    row.filepath = "";
 end
 
 function T = emptyTrialsTable()

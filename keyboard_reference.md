@@ -90,20 +90,25 @@ Display Text            Text to display after command entered
 
 
 
-## GAIN TUNING INPUTS ["GAIN_ALL" / "GAIN_A" / "GAIN_B" / "GAIN_C"]
+## GAIN TUNING INPUTS ["GAIN_ALL" / "GAIN_A" / "GAIN_B" / "GAIN_C" / "IGAIN_ALL" / "IGAIN_A" / "IGAIN_B" / "IGAIN_C"]
+Two parallel overlays: `P` tunes the per-motor proportional gain (`gainTune`), `I` tunes the per-motor integral gain (`iGainTune`). Both use the identical input pattern below ('a/b/c/d' select a motor's direction, '+/-' nudge, 'P'/'I'/Enter exit).
  Command   | KeyID    | Description                                     | Required Input State       | New Input State         | Display Text            
 -----------|----------|-------------------------------------------------|----------------------------|-------------------------|-------------------------------------------------------------------------------
- `G`       | 71       | "Open gain tuning (all motors)"                  | ANY (not already tuning)   | GAIN_ALL                | "Gain tuning: [+/-] adjust all motors, or [a/b/c/d] select a motor."
- `G`       | 71       | "Close gain tuning, resume previous task"        | GAIN_ALL or GAIN_[A/B/C]   | (state before 'G')      | "Gain tuning closed." (see Note2)
- `a`       | 97, 185  | "Tune motor A's direction-dependent gain boost"  | GAIN_ALL or GAIN_[B/C]     | GAIN_A             | (see Note1)
- `b`       | 98, 183  | "Tune motor B's direction-dependent gain boost"  | GAIN_ALL or GAIN_[A/C]     | GAIN_B             | (see Note1)
- `c`       | 99, 178  | "Tune motor C's direction-dependent gain boost"  | GAIN_ALL or GAIN_[A/B]     | GAIN_C             | (see Note1)
- `d`       | 100, 181 | "Tune all motors' gain boost together"           | GAIN_[A/B/C]               | GAIN_ALL           | (see Note1)
- `+`       | 61, 171  | "Increase [MOTOR] gain boost by 0.1"             | GAIN_ALL or GAIN_[A/B/C]   | (same as previous)      | (see Note1)
- `-`       | 45, 173  | "Decrease [MOTOR] gain boost by 0.1"             | GAIN_ALL or GAIN_[A/B/C]   | (same as previous)      | (see Note1)
- `grave`   | 96       | "Abandon gain tuning AND the active task, return to IDLE" | GAIN_ALL or GAIN_[A/B/C] | IDLE         | "System cleared, returning to IDLE state."
-**Note1** The [DISPLAY_TEXT] box shows `ControllerHandler::GetGainTuneStatus()`, updated live every frame: "Gain tune (added to kP_effective): A=x.xx  B=x.xx  C=x.xx -- [a/b/c/d] select motor, +/- = +/-0.1. Press [G] to exit." Each of `gainTune_A/B/C` (default 0.0, clamped to [0.0, 5.0]) is an extra K(theta)-style boost centered on that motor's direction (35/145/270 deg) and periodically interpolated the same way as the stiffness profile K(theta) (see CALIBRATION Note2); the interpolated result is ADDED to `kP_effective` in Stage 1 - on top of K(theta) (if enabled) or `gain_kP` - before `force_x_`/`force_y_` are computed. 'd'/GAIN_ALL adjusts all three motors' boosts together. Does not enable/disable PWM output or manual tension mode - normal operation (and any active task) continues while tuning. The per-motor values are also shown live in the controller panel's "Gain kP" row.
-**Note2** 'G' is a toggle (`KeyboardHandler::IsGainTuneInputState()` / `KeyAction::EXIT_GAIN_MODE`). Opening gain tuning remembers whichever InputState was active (e.g. FIT_RUN, CAL_STI) and freezes `systemState` so the active task - FITTS marker tracking, stiffness calibration, etc. - keeps running underneath the overlay. Pressing 'G' again restores that InputState exactly, without re-triggering its entry logic (e.g. CAL_STI's `cal2.Reset()` does not re-fire). `grave`/`Delete` still perform a full reset to IDLE from within gain tuning, abandoning the active task as usual.
+ `P`       | 80       | "Open proportional gain tuning (all motors)"     | ANY (not already tuning)   | GAIN_ALL                | "Proportional gain tuning: [+/-] adjust all motors, or [a/b/c/d] select a motor. [Enter] exits."
+ `P`       | 80       | "Close proportional gain tuning, resume task"    | GAIN_ALL or GAIN_[A/B/C]   | (state before 'P')      | "Proportional gain tuning closed." (see Note2)
+ `Enter`   | 13, 10   | "Close proportional gain tuning, resume task"    | GAIN_ALL or GAIN_[A/B/C]   | (state before 'P')      | "Proportional gain tuning closed." (see Note2)
+ `I`       | 73       | "Open integral gain tuning (all motors)"         | ANY (not already tuning)   | IGAIN_ALL               | "Integral gain tuning: [+/-] adjust all motors, or [a/b/c/d] select a motor. [Enter] exits."
+ `I`       | 73       | "Close integral gain tuning, resume task"        | IGAIN_ALL or IGAIN_[A/B/C] | (state before 'I')      | "Integral gain tuning closed." (see Note2)
+ `Enter`   | 13, 10   | "Close integral gain tuning, resume task"        | IGAIN_ALL or IGAIN_[A/B/C] | (state before 'I')      | "Integral gain tuning closed." (see Note2)
+ `a`       | 97, 185  | "Tune motor A's gain (P or I, per current mode)"  | (I)GAIN_ALL or (I)GAIN_[B/C] | (I)GAIN_A             | (see Note1)
+ `b`       | 98, 183  | "Tune motor B's gain (P or I, per current mode)"  | (I)GAIN_ALL or (I)GAIN_[A/C] | (I)GAIN_B             | (see Note1)
+ `c`       | 99, 178  | "Tune motor C's gain (P or I, per current mode)"  | (I)GAIN_ALL or (I)GAIN_[A/B] | (I)GAIN_C             | (see Note1)
+ `d`       | 100, 181 | "Tune all motors' gain together"                 | (I)GAIN_[A/B/C]            | (I)GAIN_ALL        | (see Note1)
+ `+`       | 61, 171  | "Increase [MOTOR] gain (P:+0.01, I:+0.005)"      | (I)GAIN_ALL or (I)GAIN_[A/B/C] | (same as previous)  | (see Note1)
+ `-`       | 45, 173  | "Decrease [MOTOR] gain (P:-0.01, I:-0.005)"      | (I)GAIN_ALL or (I)GAIN_[A/B/C] | (same as previous)  | (see Note1)
+ `grave`   | 96       | "Abandon gain tuning AND the active task, return to IDLE" | (I)GAIN_ALL or (I)GAIN_[A/B/C] | IDLE   | "System cleared, returning to IDLE state."
+**Note1** The [DISPLAY_TEXT] box shows `ControllerHandler::GetGainTuneStatus()` ('P' mode) or `GetIGainTuneStatus()` ('I' mode), updated live every frame, e.g. "Proportional gain tune (custom kP): A=x.xx  B=x.xx  C=x.xx -- [a/b/c/d] select motor, +/- = +/-0.01. Press [Enter], [P], or [grave] to exit." Each of `gainTune_A/B/C` (default `gain_kP`, clamped [0.0, 5.0]) / `iGainTune_A/B/C` (default `gain_kI`, clamped [0.0, 2.0]) is centered on that motor's direction (35/145/270 deg) and periodically interpolated the same way as the stiffness profile K(theta) (see CALIBRATION Note2). The proportional result is ADDED to `kP_effective`; the integral result is `kI_effective` used by the Stage 1 gated "endgame" integrator. 'd'/(I)GAIN_ALL adjusts all three together. Does not enable/disable PWM output or manual tension mode - normal operation (and any active task) continues while tuning. The per-motor values are shown live in the controller panel's "Gain kP" / "Gain kI" rows.
+**Note2** 'P' and 'I' are toggles (`KeyboardHandler::IsGainTuneInputState()` / `KeyAction::EXIT_GAIN_MODE`), and `Enter` also exits. Opening either overlay remembers whichever InputState was active (e.g. FIT_RUN, CAL_STI) and freezes `systemState` so the active task - FITTS marker tracking, stiffness calibration, etc. - keeps running underneath the overlay. Switching directly between 'P' and 'I' preserves that remembered task (both are gain-tuning overlay states). Exiting restores that InputState exactly, without re-triggering its entry logic (e.g. CAL_STI's `cal2.Reset()` does not re-fire) - so you can tune gains mid-FITTS and immediately press 'r' for a new target. `grave`/`Delete` still perform a full reset to IDLE from within gain tuning, abandoning the active task as usual.
 
 
 
@@ -148,8 +153,12 @@ Display Text            Text to display after command entered
  Command   | KeyID    | Description                             | Required Input State       | New Input State         | Display Text            
 -----------|----------|-----------------------------------------|----------------------------|-------------------------|-------------------------------------------------------------------------------
  `F`       | 70       | "Enter guidance accuracy mode"          | IDLE                       | FIT_SEL                 | "Select marker mode: [r] Random, [m] Manual..."
+ `F`       | 70       | "Enter accuracy mode (cals incomplete)" | IDLE                       | FIT_WARN                | "Calibrations not complete, (p)roceed or (r)eturn"
+ `p`       | 112      | "Proceed into accuracy mode anyway"     | FIT_WARN                   | FIT_SEL                 | "Select marker mode: [r] Random, [m] Manual..."
+ `r`       | 114      | "Return to idle to finish calibrations" | FIT_WARN                   | IDLE                    | "Returning to idle - complete calibrations, then press F."
  `m`       | 109      | "Manually set active marker (1 to 45)"  | FIT_SEL or FIT_RUN         | FIT_ACT                 | "Which marker (1-45)..."
  `r`       | 114      | "Randomly set active marker (1 to 45)"  | FIT_SEL                    | FIT_RUN                 | "Active marker set to [MARKER_ID]."
  `nn`      | [NUM]    | NONE                                    | FIT_ACT                    | FIT_RUN                 | "Active marker set to [MARKER_ID]."
 **Note1** For command `nn`, this represents a 2-digit value from 00 to 45, always entered with two digits (e.g., 01, 04, 45) 
+**Note3** `F` from IDLE only goes straight to FIT_SEL when all three calibrations (AROM, stiffness, fingertip offset) are complete. Otherwise it diverts to the FIT_WARN confirmation handled in `KeyboardHandler::ProcessKey` (gated by `SetCalibrationsComplete()`): `p` proceeds into the task with whatever calibration data exists, `r` returns to IDLE. 
 **Note2** The keyID [NUM] means any acceptable value entered via keyboard number row or numpad

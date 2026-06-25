@@ -75,6 +75,11 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
 
     // ---- ACCURACY (Task 1 - Fitts) ---------------------------------------------
     { { 'F' }, InputState::IDLE, InputState::FIT_SEL, "Select marker mode: [r] Random, [m] Manual...", KeyAction::NONE },
+    // Calibration-incomplete gate (set up in KeyboardHandler::ProcessKey when 'F'
+    // is pressed with calibrations unfinished): [p] proceeds into the task
+    // anyway, [r] returns to IDLE so calibration can be completed first.
+    { { 'p' }, InputState::FIT_WARN, InputState::FIT_SEL, "Select marker mode: [r] Random, [m] Manual...", KeyAction::NONE },
+    { { 'r' }, InputState::FIT_WARN, InputState::IDLE, "Returning to idle - complete calibrations, then press F.", KeyAction::NONE },
     { { 'm' }, InputState::FIT_SEL, InputState::FIT_ACT, "Which marker ID (fine = 1-414 | coarse = 451-454)...", KeyAction::NONE },
     { { 'm' }, InputState::FIT_RUN, InputState::FIT_ACT, "Which marker ID (fine = 1-414 | coarse = 451-454)...", KeyAction::NONE },
     { { 'r' }, InputState::FIT_SEL, InputState::FIT_RUN, "Active marker set to [MARKER_ID].", KeyAction::RANDOM_FITTS_TARGET },
@@ -161,21 +166,27 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { { 45, 173 }, InputState::TEN_ADJ_C, InputState::SAME, "", KeyAction::ADJUST_TENSION_DEC },
     { { 45, 173 }, InputState::TEN_ADJ_ALL, InputState::SAME, "", KeyAction::ADJUST_TENSION_DEC },
 
-    // ---- GAIN TUNING (custom-tuned proportional gain) ---------------------------
-    // 'G' enters gain tuning: [+/-] nudges the selected motor's gainTune_X by
-    // 0.1. gainTune_X is the custom-tuned proportional gain (seeded from
-    // gain_kP), one of the two terms - with K(theta) - that form kP_effective
-    // (Stage 1). [a/b/c/d] pick which motor's direction the adjustment applies
-    // to ('d' = all three at once). Pressing 'G' again exits gain tuning and
-    // resumes whatever task (FITTS, CAL_STI, ...) was active before - these
-    // rows must come before the ANY row below so they win while already in a
-    // GAIN_* state.
-    { { 'G' }, InputState::GAIN_ALL, InputState::SAME, "Gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
-    { { 'G' }, InputState::GAIN_A, InputState::SAME, "Gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
-    { { 'G' }, InputState::GAIN_B, InputState::SAME, "Gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
-    { { 'G' }, InputState::GAIN_C, InputState::SAME, "Gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    // ---- PROPORTIONAL GAIN TUNING ('P' key) -------------------------------------
+    // 'P' enters proportional gain tuning: [+/-] nudges the selected motor's
+    // gainTune_X by 0.01. gainTune_X is the custom-tuned proportional gain
+    // (seeded from gain_kP), one of the two terms - with K(theta) - that form
+    // kP_effective (Stage 1). [a/b/c/d] pick which motor's direction the
+    // adjustment applies to ('d' = all three at once). Pressing 'P' again, or
+    // [Enter], exits gain tuning and resumes whatever task (FITTS, CAL_STI, ...)
+    // was active before - so an operator can tune mid-task and then immediately
+    // press e.g. 'r' for a new target. These exit rows must come before the ANY
+    // row below so they win while already in a GAIN_* state.
+    { { 'P' }, InputState::GAIN_ALL, InputState::SAME, "Proportional gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { { 'P' }, InputState::GAIN_A, InputState::SAME, "Proportional gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { { 'P' }, InputState::GAIN_B, InputState::SAME, "Proportional gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { { 'P' }, InputState::GAIN_C, InputState::SAME, "Proportional gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    // [Enter] exits proportional gain tuning back to the previous task.
+    { { 13, 10 }, InputState::GAIN_ALL, InputState::SAME, "Proportional gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { { 13, 10 }, InputState::GAIN_A, InputState::SAME, "Proportional gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { { 13, 10 }, InputState::GAIN_B, InputState::SAME, "Proportional gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { { 13, 10 }, InputState::GAIN_C, InputState::SAME, "Proportional gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
 
-    { { 'G' }, InputState::ANY, InputState::GAIN_ALL, "Gain tuning: [+/-] adjust all motors, or [a/b/c/d] select a motor.", KeyAction::NONE },
+    { { 'P' }, InputState::ANY, InputState::GAIN_ALL, "Proportional gain tuning: [+/-] adjust all motors, or [a/b/c/d] select a motor. [Enter] exits.", KeyAction::NONE },
 
     // Re-select a different motor while one is already selected
     { { 'a', 185 }, InputState::GAIN_ALL, InputState::GAIN_A, "", KeyAction::NONE },
@@ -191,7 +202,7 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { { 'd', 181 }, InputState::GAIN_B, InputState::GAIN_ALL, "", KeyAction::NONE },
     { { 'd', 181 }, InputState::GAIN_C, InputState::GAIN_ALL, "", KeyAction::NONE },
 
-    // +/- nudge the selected motor's gain tune by 0.1
+    // +/- nudge the selected motor's proportional gain by 0.01
     { { 61, 171 }, InputState::GAIN_ALL, InputState::SAME, "", KeyAction::ADJUST_GAIN_INC },
     { { 61, 171 }, InputState::GAIN_A, InputState::SAME, "", KeyAction::ADJUST_GAIN_INC },
     { { 61, 171 }, InputState::GAIN_B, InputState::SAME, "", KeyAction::ADJUST_GAIN_INC },
@@ -200,6 +211,48 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { { 45, 173 }, InputState::GAIN_A, InputState::SAME, "", KeyAction::ADJUST_GAIN_DEC },
     { { 45, 173 }, InputState::GAIN_B, InputState::SAME, "", KeyAction::ADJUST_GAIN_DEC },
     { { 45, 173 }, InputState::GAIN_C, InputState::SAME, "", KeyAction::ADJUST_GAIN_DEC },
+
+    // ---- INTEGRAL GAIN TUNING ('I' key) -----------------------------------------
+    // Mirrors 'P' above but adjusts iGainTune_X (the custom-tuned integral gain,
+    // seeded from gain_kI) used by the Stage 1 endgame integrator, by 0.005 per
+    // press. Pressing 'I' again, or [Enter], exits. Switching between 'P' and
+    // 'I' keeps the same underlying task to return to on exit (both are gain-
+    // tuning overlay states - see IsGainTuneInputState). Exit rows first.
+    { { 'I' }, InputState::IGAIN_ALL, InputState::SAME, "Integral gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { { 'I' }, InputState::IGAIN_A, InputState::SAME, "Integral gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { { 'I' }, InputState::IGAIN_B, InputState::SAME, "Integral gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { { 'I' }, InputState::IGAIN_C, InputState::SAME, "Integral gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    // [Enter] exits integral gain tuning back to the previous task.
+    { { 13, 10 }, InputState::IGAIN_ALL, InputState::SAME, "Integral gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { { 13, 10 }, InputState::IGAIN_A, InputState::SAME, "Integral gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { { 13, 10 }, InputState::IGAIN_B, InputState::SAME, "Integral gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+    { { 13, 10 }, InputState::IGAIN_C, InputState::SAME, "Integral gain tuning closed.", KeyAction::EXIT_GAIN_MODE },
+
+    { { 'I' }, InputState::ANY, InputState::IGAIN_ALL, "Integral gain tuning: [+/-] adjust all motors, or [a/b/c/d] select a motor. [Enter] exits.", KeyAction::NONE },
+
+    // Re-select a different motor while one is already selected
+    { { 'a', 185 }, InputState::IGAIN_ALL, InputState::IGAIN_A, "", KeyAction::NONE },
+    { { 'a', 185 }, InputState::IGAIN_B, InputState::IGAIN_A, "", KeyAction::NONE },
+    { { 'a', 185 }, InputState::IGAIN_C, InputState::IGAIN_A, "", KeyAction::NONE },
+    { { 'b', 183 }, InputState::IGAIN_ALL, InputState::IGAIN_B, "", KeyAction::NONE },
+    { { 'b', 183 }, InputState::IGAIN_A, InputState::IGAIN_B, "", KeyAction::NONE },
+    { { 'b', 183 }, InputState::IGAIN_C, InputState::IGAIN_B, "", KeyAction::NONE },
+    { { 'c', 178 }, InputState::IGAIN_ALL, InputState::IGAIN_C, "", KeyAction::NONE },
+    { { 'c', 178 }, InputState::IGAIN_A, InputState::IGAIN_C, "", KeyAction::NONE },
+    { { 'c', 178 }, InputState::IGAIN_B, InputState::IGAIN_C, "", KeyAction::NONE },
+    { { 'd', 181 }, InputState::IGAIN_A, InputState::IGAIN_ALL, "", KeyAction::NONE },
+    { { 'd', 181 }, InputState::IGAIN_B, InputState::IGAIN_ALL, "", KeyAction::NONE },
+    { { 'd', 181 }, InputState::IGAIN_C, InputState::IGAIN_ALL, "", KeyAction::NONE },
+
+    // +/- nudge the selected motor's integral gain by 0.005
+    { { 61, 171 }, InputState::IGAIN_ALL, InputState::SAME, "", KeyAction::ADJUST_IGAIN_INC },
+    { { 61, 171 }, InputState::IGAIN_A, InputState::SAME, "", KeyAction::ADJUST_IGAIN_INC },
+    { { 61, 171 }, InputState::IGAIN_B, InputState::SAME, "", KeyAction::ADJUST_IGAIN_INC },
+    { { 61, 171 }, InputState::IGAIN_C, InputState::SAME, "", KeyAction::ADJUST_IGAIN_INC },
+    { { 45, 173 }, InputState::IGAIN_ALL, InputState::SAME, "", KeyAction::ADJUST_IGAIN_DEC },
+    { { 45, 173 }, InputState::IGAIN_A, InputState::SAME, "", KeyAction::ADJUST_IGAIN_DEC },
+    { { 45, 173 }, InputState::IGAIN_B, InputState::SAME, "", KeyAction::ADJUST_IGAIN_DEC },
+    { { 45, 173 }, InputState::IGAIN_C, InputState::SAME, "", KeyAction::ADJUST_IGAIN_DEC },
 
     // Set zero home postion for virtual fingertip
     { { 'Z' }, InputState::ANY, InputState::SAME, "Setting position as home.", KeyAction::SET_HOME_POSITION },

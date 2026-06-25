@@ -227,6 +227,7 @@ void ArucoHandler::ShowBlankTouchscreen() {
     cv::cvtColor(blank, singleMarkerImage_, cv::COLOR_GRAY2BGR);
     fittsOverlayVisible_ = false;
     fittsTouchPx_        = {};
+    fittsOverlayTargetId_ = 0;
     fittsLine1_.clear();
     fittsLine2_.clear();
     targetCircleVisible_ = false;
@@ -290,6 +291,7 @@ void ArucoHandler::ShowSingleMarker(int id) {
     cv::cvtColor(img, singleMarkerImage_, cv::COLOR_GRAY2BGR);
     fittsOverlayVisible_ = false;
     fittsTouchPx_        = {};
+    fittsOverlayTargetId_ = 0;
     fittsLine1_.clear();
     fittsLine2_.clear();
     targetCircleVisible_ = false;
@@ -297,17 +299,19 @@ void ArucoHandler::ShowSingleMarker(int id) {
     std::cout << "ArucoHandler: Fitts target → marker " << id << "\n";
 }
 
-void ArucoHandler::SetFittsOverlay(bool visible, cv::Point2i touchPx,
+void ArucoHandler::SetFittsOverlay(bool visible, cv::Point2i touchPx, int targetId,
                                    const std::string& line1, const std::string& line2) {
     if (visible == fittsOverlayVisible_ && touchPx == fittsTouchPx_ &&
+        targetId == fittsOverlayTargetId_ &&
         line1 == fittsLine1_ && line2 == fittsLine2_) {
         return;  // No change - avoid redundant redraw
     }
 
-    fittsOverlayVisible_ = visible;
-    fittsTouchPx_        = touchPx;
-    fittsLine1_          = line1;
-    fittsLine2_          = line2;
+    fittsOverlayVisible_  = visible;
+    fittsTouchPx_         = touchPx;
+    fittsOverlayTargetId_ = targetId;
+    fittsLine1_           = line1;
+    fittsLine2_           = line2;
 
     RedrawTouchscreenOverlay();
 }
@@ -356,12 +360,26 @@ void ArucoHandler::RedrawTouchscreenOverlay() {
     }
 
     if (fittsOverlayVisible_) {
+        // Error triangle: from the touch point (fingertip endpoint) to the
+        // target marker centre. The right-angle corner sits at the touch X /
+        // target Y, so the green leg is the vertical error and the red leg is
+        // the horizontal error; the black hypotenuse is the direct error.
+        const cv::Point2i target = GetGridMarkerCenterPx(fittsOverlayTargetId_);
+        if (target != cv::Point2i{}) {
+            const cv::Point2i corner(fittsTouchPx_.x, target.y);
+            cv::line(img, fittsTouchPx_, corner, cv::Scalar(0, 255, 0), 2, cv::LINE_AA);  // vertical error (green)
+            cv::line(img, corner, target,        cv::Scalar(0, 0, 255), 2, cv::LINE_AA);  // horizontal error (red)
+            cv::line(img, fittsTouchPx_, target,  cv::Scalar(0, 0, 0),   2, cv::LINE_AA);  // direct error (black)
+        }
+
         int touchRadiusPx = static_cast<int>(std::round(2.5f * touchCfg_.pixelsPerMm));
         cv::circle(img, fittsTouchPx_, touchRadiusPx, cv::Scalar(255, 0, 0), -1);  // blue filled, 2.5mm radius
-        cv::putText(img, fittsLine1_, cv::Point2i(10, 30), cv::FONT_HERSHEY_SIMPLEX,
-                    0.8, cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
-        cv::putText(img, fittsLine2_, cv::Point2i(10, 65), cv::FONT_HERSHEY_SIMPLEX,
-                    0.8, cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
+
+        // Endpoint-error readout along the bottom of the screen, under the markers.
+        cv::putText(img, fittsLine1_, cv::Point2i(300, img.rows - 60), cv::FONT_HERSHEY_SIMPLEX,
+                    0.7, cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
+        cv::putText(img, fittsLine2_, cv::Point2i(300, img.rows - 20), cv::FONT_HERSHEY_SIMPLEX,
+                    0.7, cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
     }
 
     cv::imshow(TOUCHSCREEN_WIN, img);
@@ -442,6 +460,7 @@ void ArucoHandler::SetFittsBoardVisible(bool visible) {
         cv::cvtColor(fittsBoardImage_, singleMarkerImage_, cv::COLOR_GRAY2BGR);
         fittsOverlayVisible_ = false;
         fittsTouchPx_        = {};
+        fittsOverlayTargetId_ = 0;
         fittsLine1_.clear();
         fittsLine2_.clear();
         targetCircleVisible_ = false;

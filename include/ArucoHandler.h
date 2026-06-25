@@ -161,15 +161,18 @@ public:
 
     /**
      * @brief Draw (or clear) the Fitts touch-sample overlay on top of the
-     *        current Fitts target image: a red dot at the touch position
-     *        plus two lines of error-readout text in the top-left corner.
+     *        current Fitts target image: a dot at the touch position, an error
+     *        triangle from the touch point to the target marker centre (black
+     *        hypotenuse, green vertical leg, red horizontal leg), and two lines
+     *        of endpoint-error readout text along the bottom of the screen.
      *        Persists until the next ShowSingleMarker() call (next target).
      * @param visible  Draw the overlay
      * @param touchPx  Touch position in touchscreen-local pixels
-     * @param line1    First error readout line
-     * @param line2    Second error readout line
+     * @param targetId Fitts board marker id of the active target (for its centre)
+     * @param line1    First error readout line ("Endpoint error [PX] = ...")
+     * @param line2    Second error readout line ("Endpoint error [mm] = ...")
      */
-    void SetFittsOverlay(bool visible, cv::Point2i touchPx,
+    void SetFittsOverlay(bool visible, cv::Point2i touchPx, int targetId,
                          const std::string& line1, const std::string& line2);
 
     /**
@@ -287,6 +290,7 @@ private:
     cv::Mat     singleMarkerImage_;        // BGR base image for the current Fitts target
     bool        fittsOverlayVisible_ = false;
     cv::Point2i fittsTouchPx_        = {};
+    int         fittsOverlayTargetId_ = 0;    // Active target id - for the error-triangle target centre
     std::string fittsLine1_;
     std::string fittsLine2_;
 

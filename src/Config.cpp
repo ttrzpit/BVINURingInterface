@@ -215,6 +215,9 @@ bool Config::load(const std::string& filepath) {
         cg["gain_kP"]               >> controllerGains.gain_kP;
         cg["gain_kD"]               >> controllerGains.gain_kD;
         cg["gain_kI"]               >> controllerGains.gain_kI;
+        if (!cg["integral_enable_radius_mm"].empty())  cg["integral_enable_radius_mm"]  >> controllerGains.integral_enable_radius_mm;
+        if (!cg["integral_enable_speed_mm_s"].empty()) cg["integral_enable_speed_mm_s"] >> controllerGains.integral_enable_speed_mm_s;
+        if (!cg["integral_leak"].empty())              cg["integral_leak"]              >> controllerGains.integral_leak;
         cg["deflection_force_max"]  >> controllerGains.deflection_force_max;
         cg["tension_preload_min"]   >> controllerGains.tension_preload_min;
         cg["tension_preload_max"]   >> controllerGains.tension_preload_max;

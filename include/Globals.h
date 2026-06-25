@@ -125,7 +125,8 @@ static constexpr float CONSTANT_FOUR_PI = 12.566370614f;    // 4π
 //     { 0.f, 35.f, 60.f, 90.f, 120.f, 145.f, 180.f, 210.f, 240.f, 270.f, 300.f, 330.f };
 static constexpr int   CONSTANT_CALIBRATION_ANGLES_COUNT = 4;
 static constexpr float CONSTANT_CALIBRATION_ANGLES_DEG[CONSTANT_CALIBRATION_ANGLES_COUNT] =
-    { 35.0f, 90.0f, 145.0f, 270.0f };
+    { 0.0f, 90.0f, 180.0f, 270.0f };
+    // { 35.0f, 90.0f, 145.0f, 270.0f };
 // 205 335
 // ---- Amplifier current scale --------------------------------------------------
 // TeensyToPcPacket.current_raw_A/B/C are reported in 0.01 A units (amplifier

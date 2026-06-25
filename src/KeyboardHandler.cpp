@@ -50,6 +50,29 @@ void KeyboardHandler::ProcessKey(int key) {
     // ---- Numeric entry (nnn/nnnn/nn/n.n) -------------------------------------
     if (ProcessNumericEntry(key)) return;
 
+    // ---- Start of a Fitts session: clear any stale target --------------------
+    // Pressing 'F' from IDLE begins a new Fitts run (either path below). Clear the
+    // active/target marker left over from a previous run so guidance can't latch
+    // onto a stale target and start deflecting before the operator picks a fresh
+    // one ('r' random / 'm' manual). -1 is "no marker" (board IDs are >= 0), so
+    // every `> 0` guidance/overlay gate stays closed until a target is selected.
+    if (key == 'F' && state_.inputState == InputState::IDLE) {
+        state_.activeTagId   = -1;
+        state_.fittsTargetId = -1;
+    }
+
+    // ---- Fitts-entry calibration gate ----------------------------------------
+    // 'F' from IDLE normally enters the Fitts task (kKeyCommandTable). If the
+    // three calibrations aren't all complete, divert to a confirmation prompt
+    // instead: 'p' proceeds anyway (FIT_WARN -> FIT_SEL), 'r' returns to IDLE.
+    if (key == 'F' && state_.inputState == InputState::IDLE && !calibrationsComplete_) {
+        state_.inputState   = InputState::FIT_WARN;
+        state_.systemState  = DeriveSystemState(state_.inputState);
+        state_.outputBuffer = "Calibrations not complete, (p)roceed or (r)eturn";
+        state_.lastInputKey = key;
+        return;
+    }
+
     // ---- Single-key table dispatch -------------------------------------------
     DispatchTableCommand(key);
 }
@@ -245,15 +268,31 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
             break;
 
         case KeyAction::ADJUST_GAIN_INC:
-            state_.pendingGainAdjust.active    = true;
-            state_.pendingGainAdjust.motor     = MotorLetterFromState(state_.inputState);
-            state_.pendingGainAdjust.deltaGain = 0.01f;
+            state_.pendingGainAdjust.active     = true;
+            state_.pendingGainAdjust.motor      = MotorLetterFromState(state_.inputState);
+            state_.pendingGainAdjust.deltaGain  = 0.01f;
+            state_.pendingGainAdjust.isIntegral = false;
             break;
 
         case KeyAction::ADJUST_GAIN_DEC:
-            state_.pendingGainAdjust.active    = true;
-            state_.pendingGainAdjust.motor     = MotorLetterFromState(state_.inputState);
-            state_.pendingGainAdjust.deltaGain = -0.01f;
+            state_.pendingGainAdjust.active     = true;
+            state_.pendingGainAdjust.motor      = MotorLetterFromState(state_.inputState);
+            state_.pendingGainAdjust.deltaGain  = -0.01f;
+            state_.pendingGainAdjust.isIntegral = false;
+            break;
+
+        case KeyAction::ADJUST_IGAIN_INC:
+            state_.pendingGainAdjust.active     = true;
+            state_.pendingGainAdjust.motor      = MotorLetterFromState(state_.inputState);
+            state_.pendingGainAdjust.deltaGain  = 0.005f;
+            state_.pendingGainAdjust.isIntegral = true;
+            break;
+
+        case KeyAction::ADJUST_IGAIN_DEC:
+            state_.pendingGainAdjust.active     = true;
+            state_.pendingGainAdjust.motor      = MotorLetterFromState(state_.inputState);
+            state_.pendingGainAdjust.deltaGain  = -0.005f;
+            state_.pendingGainAdjust.isIntegral = true;
             break;
 
         case KeyAction::EXIT_GAIN_MODE:
@@ -317,19 +356,23 @@ char KeyboardHandler::MotorLetterFromState(InputState state) const {
         case InputState::MOT_PWM_A:
         case InputState::TEN_SEL_A:
         case InputState::TEN_ADJ_A:
-        case InputState::GAIN_A: return 'A';
+        case InputState::GAIN_A:
+        case InputState::IGAIN_A: return 'A';
         case InputState::MOT_PWM_B:
         case InputState::TEN_SEL_B:
         case InputState::TEN_ADJ_B:
-        case InputState::GAIN_B: return 'B';
+        case InputState::GAIN_B:
+        case InputState::IGAIN_B: return 'B';
         case InputState::MOT_PWM_C:
         case InputState::TEN_SEL_C:
         case InputState::TEN_ADJ_C:
-        case InputState::GAIN_C: return 'C';
+        case InputState::GAIN_C:
+        case InputState::IGAIN_C: return 'C';
         case InputState::MOT_PWM_ALL:
         case InputState::TEN_SEL_ALL:
         case InputState::TEN_ADJ_ALL:
-        case InputState::GAIN_ALL: return 'D';
+        case InputState::GAIN_ALL:
+        case InputState::IGAIN_ALL: return 'D';
         default: return 'A';
     }
 }
@@ -354,11 +397,16 @@ std::string KeyboardHandler::MotorLabelFromState(InputState state) const {
         case InputState::TEN_ADJ_ALL:
         case InputState::GAIN_ALL:
             return "All";
+        case InputState::IGAIN_ALL:
+            return "All";
         case InputState::GAIN_A:
+        case InputState::IGAIN_A:
             return "A";
         case InputState::GAIN_B:
+        case InputState::IGAIN_B:
             return "B";
         case InputState::GAIN_C:
+        case InputState::IGAIN_C:
             return "C";
         default:
             return "";
@@ -371,6 +419,18 @@ bool IsGainTuneInputState(InputState state) {
         case InputState::GAIN_A:
         case InputState::GAIN_B:
         case InputState::GAIN_C:
+            return true;
+        default:
+            return IsIGainTuneInputState(state);
+    }
+}
+
+bool IsIGainTuneInputState(InputState state) {
+    switch (state) {
+        case InputState::IGAIN_ALL:
+        case InputState::IGAIN_A:
+        case InputState::IGAIN_B:
+        case InputState::IGAIN_C:
             return true;
         default:
             return false;

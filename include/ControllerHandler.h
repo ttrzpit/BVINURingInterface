@@ -71,9 +71,17 @@ struct ControllerTelemetry {
                                      ///< CONSTANT_PWM_OFF], never negative. Direction is conveyed by
                                      ///< deflectionForce's sign, not by this value.
     cv::Point3f gainTune;       ///< Custom-tuned proportional gain per motor [N/mm], seeded
-                                 ///< from cfg_.gain_kP and adjustable via 'G' (AdjustGainTune).
+                                 ///< from cfg_.gain_kP and adjustable via 'P' (AdjustGainTune).
                                  ///< Interpolated by direction and combined with K(theta) to
                                  ///< form kP_effective in Stage 1.
+    cv::Point3f iGainTune;      ///< Custom-tuned integral gain per motor [N/(mm·s)], seeded
+                                 ///< from cfg_.gain_kI and adjustable via 'I' (AdjustIGainTune).
+                                 ///< Interpolated by direction to form kI_effective in Stage 1.
+    cv::Point2f integralForce;  ///< Integral force contribution = kI_effective * integral [N],
+                                 ///< task space (X, Y). The integral term of force_x_/force_y_.
+    cv::Point3f integralPwm;    ///< Per-motor PWM equivalent of |integralForce| allocated via
+                                 ///< W_pinv, through the same Tension->Current->PWM pipeline as
+                                 ///< deflectionForcePwm (magnitude only, never negative).
     bool        homeSet;       ///< True once SetHomePosition() has been called
     bool        outputEnabled; ///< True when PWM is actually sent to the Teensy
     bool        manualTensionMode; ///< True during pretensioning step 3/4 - tension is being adjusted live
@@ -283,8 +291,24 @@ public:
     /** @brief Per-motor custom-tuned gain values [N/mm], seeded from cfg_.gain_kP. */
     cv::Point3f GetGainTune() const { return { gainTune_A_, gainTune_B_, gainTune_C_ }; }
 
-    /** @brief Live status string for the 'G' (gain tuning) input mode. */
+    /** @brief Live status string for the 'P' (proportional gain tuning) input mode. */
     std::string GetGainTuneStatus() const;
+
+    // ---- Direction-dependent integral gain tuning ('I' key) ------------------
+    // iGainTune_A/B/C are the custom-tuned integral gain, seeded from
+    // cfg_.gain_kI and adjusted the same way as gainTune (per motor direction,
+    // periodically interpolated by InterpolateIGainTune). The interpolated
+    // result is kI_effective, used by the Stage 1 integrator.
+
+    /** @brief Nudge one motor's integral gain by deltaGain, clamped to [0, 2].
+     *         motor: 'A','B','C', or 'D' (all three). */
+    void AdjustIGainTune(char motor, float deltaGain);
+
+    /** @brief Per-motor custom-tuned integral gain values [N/(mm·s)], seeded from cfg_.gain_kI. */
+    cv::Point3f GetIGainTune() const { return { iGainTune_A_, iGainTune_B_, iGainTune_C_ }; }
+
+    /** @brief Live status string for the 'I' (integral gain tuning) input mode. */
+    std::string GetIGainTuneStatus() const;
 
     // ---- PWM outputs (write into PcToTeensyPacket before sending) -----------
     uint16_t GetPwmA() const { return pwm_A_; }
@@ -318,9 +342,16 @@ private:
      *         thetaRad, over CONSTANT_CALIBRATION_ANGLES_DEG. */
     float InterpolateStiffness(float thetaRad) const;
 
-    /** @brief Periodic linear interpolation of gainTune_A/B/C_ at heading
-     *         thetaRad, over the three motor angles (35deg/145deg/270deg). */
+    /** @brief Periodic linear interpolation of three per-motor values at heading
+     *         thetaRad, over the motor angles (35deg/145deg/270deg). Shared by
+     *         the proportional (gainTune) and integral (iGainTune) tuning. */
+    float InterpolateMotorProfile(float thetaRad, float vA, float vB, float vC) const;
+
+    /** @brief Periodic linear interpolation of gainTune_A/B/C_ at heading thetaRad. */
     float InterpolateGainTune(float thetaRad) const;
+
+    /** @brief Periodic linear interpolation of iGainTune_A/B/C_ at heading thetaRad. */
+    float InterpolateIGainTune(float thetaRad) const;
 
     // ---- Stage 2 helper -----------------------------------------------------
     /** @brief T_deflection_i = clamp((W_pinv^T·F)_i, ±T_deflection_max);
@@ -362,8 +393,9 @@ private:
     double      rampStart_ = 0.0;
     float       rampValue_ = 0.0f;
 
-    // ---- Live proportional gain (Stage 1, for telemetry) --------------------
+    // ---- Live proportional / integral gain (Stage 1, for telemetry) ---------
     float kPEffective_ = cfg_.gain_kP;
+    float kIEffective_ = cfg_.gain_kI;
 
     // ---- K(theta) interpolated at the current error heading (for telemetry) --
     // Independent of gainTune_A/B/C_ - see ControllerTelemetry::stiffnessGain.
@@ -441,4 +473,9 @@ private:
     // Seeded from cfg_.gain_kP - the config value is now purely the starting
     // point for this user-adjustable gain, not a separate baseline term.
     float gainTune_A_ = cfg_.gain_kP, gainTune_B_ = cfg_.gain_kP, gainTune_C_ = cfg_.gain_kP;
+
+    // ---- Direction-dependent integral gain tuning ('I' key) ------------------
+    // Seeded from cfg_.gain_kI - the config value is the starting point for this
+    // user-adjustable integral gain (kI_effective is its directional interpolation).
+    float iGainTune_A_ = cfg_.gain_kI, iGainTune_B_ = cfg_.gain_kI, iGainTune_C_ = cfg_.gain_kI;
 };

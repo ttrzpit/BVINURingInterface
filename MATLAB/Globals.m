@@ -4,7 +4,7 @@ classdef Globals
     % Line widths
     lineWidthData = 1.75; 
     lineWidthAxis = 1.50; 
-    lineWidthTraj = 5.00; 
+    lineWidthTraj = 2.00; 
 
     % Font sizes
     fontSizeTitle   = 16; 

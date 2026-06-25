@@ -8,7 +8,8 @@ function fig = PlotNURingTrial(tt, varargin)
     %       approaching the target, drawn against a to-scale 527mm x 296mm
     %       screen plane.
     %     - Right: three stacked subplots of x, y, and z position vs time
-    %       (t_secs), one component per plot.
+    %       (t_secs), one component per plot, each with an optional second
+    %       y-axis showing that component's velocity.
     %
     %   tt is the per-trial timetable produced by PARSENURINGTRIALS (i.e.
     %   trials.data{i}), and must contain variables t_secs, dx_mm, dy_mm,
@@ -36,8 +37,8 @@ function fig = PlotNURingTrial(tt, varargin)
     %                           for the trial matching tt via trial_key.
     %       'PlaneWidth'      (default 527)   - physical screen width (mm)
     %       'PlaneHeight'     (default 296)   - physical screen height (mm)
-    %       'Azimuth'        (default -60)   - 3D view azimuth angle (deg)
-    %       'Elevation'      (default 15)    - 3D view elevation angle (deg)
+    %       'Azimuth'        (default -30)   - 3D view azimuth angle (deg)
+    %       'Elevation'      (default 30)    - 3D view elevation angle (deg)
     %       'TrialTitle'      (default '')   - optional title/subtitle string
     %                           shown above the figure (e.g. trial filename)
     %       'LeftWidth'       (default 0.45) - fraction (0-1) of the figure's
@@ -49,10 +50,39 @@ function fig = PlotNURingTrial(tt, varargin)
     %                           projection of the trajectory
     %       'DrawEstimated'   (default false) - shade time regions where the
     %                           marker was detected
-    %       'PlotR2Comparison'(default true)  - also produce the separate
-    %                           actual-vs-ideal R^2 comparison figure
     %       'Threshold'       (default 15)    - mm threshold used for the
-    %                           "Nmm completion time"/R^2 metrics
+    %                           "Nmm completion time" metric
+    %       'ShowVelocity'    (default true)  - overlay each component's
+    %                           velocity (mm/s) on a second y-axis in the
+    %                           three stacked subplots on the right. Set to
+    %                           false to show position only.
+    %       'Animate'         (default false) - in addition to the static
+    %                           figure, play the 3D trajectory and the three
+    %                           stacked subplots point-by-point over time,
+    %                           and export the animation as a video file
+    %                           whose PLAYBACK duration matches the trial's
+    %                           real-world duration (t_secs(end)-t_secs(1)).
+    %                           Frame-accurate: the video is rendered at a
+    %                           fixed frame rate (VideoFrameRate), but each
+    %                           output frame shows whichever sample was
+    %                           current at that real elapsed time -- so
+    %                           irregular sample spacing (dropped frames,
+    %                           variable loop timing) still displays with
+    %                           the correct real-world delay between
+    %                           visible updates, rather than every sample
+    %                           getting equal screen time.
+    %       'SourceFilename'  (default '')   - path or name of the source
+    %                           trial CSV file. When Animate is true, the
+    %                           output video is saved next to it using the
+    %                           same base filename (e.g.
+    %                           "123-...-303.csv" -> "123-...-303.mp4"). If
+    %                           omitted, a generic filename is used in the
+    %                           current folder and a warning is issued.
+    %       'VideoFrameRate'  (default 30)   - fixed output frame rate (fps)
+    %                           used when Animate is true. Higher values
+    %                           give smoother motion but don't change the
+    %                           overall video duration, which is always
+    %                           locked to the trial's real-world duration.
     %
     %   Example:
     %       [headers, trials] = ParseNURingTrials('+TrialData');
@@ -62,7 +92,9 @@ function fig = PlotNURingTrial(tt, varargin)
     %       PlotNURingTrialOnScreen(tt, ...
     %           'TargetScreenPosition', [hdr.target_screen_position_x_mm, ...
     %                                    hdr.target_screen_position_y_mm], ...
-    %           'TrialTitle', row.filename(1));
+    %           'TrialTitle', row.filename(1), ...
+    %           'Animate', true, ...
+    %           'SourceFilename', row.filepath(1));
     %
     %   See also PARSENURINGTRIALS.
 
@@ -74,14 +106,18 @@ function fig = PlotNURingTrial(tt, varargin)
     addParameter(p, 'TargetScreenPosition', [0 0], @(x) isnumeric(x) && numel(x)==2);
     addParameter(p, 'PlaneWidth', 527, @(x) isnumeric(x) && isscalar(x) && x > 0);
     addParameter(p, 'PlaneHeight', 296, @(x) isnumeric(x) && isscalar(x) && x > 0);
-    addParameter(p, 'Azimuth', -60, @isnumeric);
-    addParameter(p, 'Elevation', 15, @isnumeric);
+    addParameter(p, 'Azimuth', -30, @isnumeric);
+    addParameter(p, 'Elevation', 30, @isnumeric);
     addParameter(p, 'TrialTitle', '', @(x) ischar(x) || isstring(x));
     addParameter(p, 'LeftWidth', 0.45, @(x) isnumeric(x) && x > 0 && x < 1);
     addParameter(p, 'DrawShadowXY', false, @(x) islogical(x) || isnumeric(x));
     addParameter(p, 'DrawEstimated', false, @(x) islogical(x) || isnumeric(x));
-    addParameter(p, 'PlotR2Comparison', true, @(x) islogical(x) || isnumeric(x));
     addParameter(p, 'Threshold', 15, @isnumeric);
+    addParameter(p, 'ShowVelocity', true, @(x) islogical(x) || isnumeric(x));
+    addParameter(p, 'Animate', false, @(x) islogical(x) || isnumeric(x));
+    addParameter(p, 'SourceFilename', '', @(x) ischar(x) || isstring(x));
+    addParameter(p, 'VideoFrameRate', 30, @(x) isnumeric(x) && isscalar(x) && x > 0);
+    addParameter(p, 'SetZLimit', 30, @(x) isnumeric(x) && isscalar(x) && x > 0);
     parse(p, tt, varargin{:});
 
     az                  = p.Results.Azimuth;
@@ -93,8 +129,11 @@ function fig = PlotNURingTrial(tt, varargin)
     leftWidthFrac       = p.Results.LeftWidth;
     drawShadowXY        = p.Results.DrawShadowXY;
     drawEstimated       = p.Results.DrawEstimated;
-    plotR2Comparison    = p.Results.PlotR2Comparison;
     crossThresh         = p.Results.Threshold;
+    showVelocity        = logical(p.Results.ShowVelocity);
+    animatePlots        = logical(p.Results.Animate);
+    sourceFilename      = string(p.Results.SourceFilename);
+    videoFrameRate      = p.Results.VideoFrameRate;
 
     % targetPos: target's 3D position in the SAME (now screen-relative)
     % frame as the offset trajectory below -- on the screen plane (z=0),
@@ -132,6 +171,14 @@ function fig = PlotNURingTrial(tt, varargin)
     tym = tt.dy_mm;
     tzm = tt.dz_mm;
 
+    % Velocity of each marker-frame component (mm/s), via numerical
+    % gradient against the (possibly non-uniform) sample times -- used for
+    % the second y-axis on each of the three stacked subplots, when
+    % ShowVelocity is enabled.
+    vxm = gradient(txm, t);
+    vym = gradient(tym, t);
+    vzm = gradient(tzm, t);
+
     % Endpoint data
     endX = tx(end);
     endY = ty(end);
@@ -147,29 +194,33 @@ function fig = PlotNURingTrial(tt, varargin)
     % Axis limits -- expanded to cover both the trajectory data AND the
     % physical screen plane, so the plane is never clipped. (World/screen
     % frame -- used for the 3D plot.)
-    xMax = max([abs(tx); planeHalfW]);
-    yMax = max([abs(ty); planeHalfH]);
     zMax = max(abs(tz));
 
     xLim = ceil( (( Globals.screenWidth/2)+100)/50)*50;
     yLim = ceil( ((Globals.screenHeight/2)+100)/50)*50;
     zLim = ceil(zMax/50) * 50 ;
-    % xLim = ceil(xMax/50) * 50 ;
-    % yLim = ceil(yMax/50) * 50 ;
-    % zLim = ceil(zMax/50) * 50 ;
 
     % Marker-frame axis limits (target-relative, centered at 0) -- used for
     % the three stacked time-series subplots on the right. No plane
     % half-extent term here since those subplots aren't showing the screen.
-    xMaxM = max(abs(txm));
-    yMaxM = max(abs(tym));
-    zMaxM = max(abs(tzm));
-    xLimM = xLim ;
-    yLimM = yLim;
-    zLimM = zLim;
-    % xLimM = ceil(xMaxM/50) * 50 ; Original
-    % yLimM = ceil(yMaxM/50) * 50 ;
-    % zLimM = ceil(zMaxM/50) * 50 ;
+    maxDx = max(abs(tt.dx_mm) ) ;
+    maxDy = max(abs(tt.dy_mm) ) ; 
+    maxDz = max(abs(tt.dz_mm) ) ; 
+    xLimM = ceil( maxDx / 50 ) * 50 ;
+    yLimM = ceil( maxDy / 50 ) * 50 ; 
+    zLimM = ceil( maxDz / 100) * 100; 
+
+    % Fixed velocity (right-yyaxis) limits, computed up front from the
+    % FULL velocity arrays -- same idea as xLimM/yLimM/zLimM above. Setting
+    % these once, before any plotting/animation happens, prevents MATLAB's
+    % auto-scaling from rescaling (and visually jumping) the right axis as
+    % the animated velocity line grows frame-by-frame.
+    vLimX = max(abs(vxm)) * 1.1;
+    vLimY = max(abs(vym)) * 1.1;
+    vLimZ = max(abs(vzm)) * 1.1;
+    if vLimX == 0, vLimX = 1; end
+    if vLimY == 0, vLimY = 1; end
+    if vLimZ == 0, vLimZ = 1; end
 
     % =====================================================================
     % === COMPLETION TIME / R^2 METRICS ==================================
@@ -207,22 +258,6 @@ function fig = PlotNURingTrial(tt, varargin)
     SStot     = sum(sum((actualPts - mean(actualPts, 1)).^2));
     R2_total  = 1 - SSres / SStot;
 
-    % --- R^2: threshold segment vs ideal straight line (crossing -> target) ---
-    if ~isempty(crossIdx) && crossIdx < N
-        subPts      = actualPts(crossIdx:end, :);
-        Nsub        = size(subPts, 1);
-        startPtThreshold  = subPts(1, :);
-        fracsThreshold    = ((1:Nsub)' - 1) / max(Nsub - 1, 1);
-        idealPtsThreshold = startPtThreshold + fracsThreshold .* (targetPt - startPtThreshold);
-
-        SSresThreshold    = sum(sum((subPts - idealPtsThreshold).^2));
-        SStotThreshold    = sum(sum((subPts - mean(subPts, 1)).^2));
-        R2_Threshold      = 1 - SSresThreshold / SStotThreshold;
-    else
-        idealPtsThreshold = [];
-        R2_Threshold      = NaN;
-    end
-
     % =====================================================================
     % === NEW FIGURE ======================================================
     % =====================================================================
@@ -248,10 +283,9 @@ function fig = PlotNURingTrial(tt, varargin)
         '%.0f mm Completion Time: %.2f s\n' ...
         'Endpoint Accuracy (X|Y|Z): (%.1f | %.1f | %.1f) mm\n' ...
         'Endpoint Accuracy (2D|3D): (%.1f | %.1f) mm\n' ...
-        'Total R^2 Fit: %.3f\n' ...
-        '%.0f mm R^2 Fit: %.3f'], ...
+        'Total R^2 Fit: %.3f'], ...
         trialCompletionTime, crossThresh, timeAtThreshold, errX, errY, errZ, rXY, rXYZ,...
-        R2_total, crossThresh , R2_Threshold);
+        R2_total);
 
     topEdge = 0.99;
     boxW    = 0.22;
@@ -291,36 +325,13 @@ function fig = PlotNURingTrial(tt, varargin)
     % Axis
     ax3d = axes(fig, 'Position', [leftAxX, margin, leftAxW, usableH]);
     hold(ax3d, 'on');
-
-    % Visual-axis remap: plot3/scatter3 args are (visualX, visualY, visualZ).
-    % We want visual X = tx (horizontal), visual Y = tz (depth, into screen),
-    % visual Z = ty (vertical) -- so pass (tx, tz, ty), not (tx, ty, tz).
-    % Plot trajectory data & shadow
-    plot3(ax3d, tx, tz, ty, '-', 'Color', [Colors.graMd 0.5], 'LineWidth', Globals.lineWidthTraj);
-    plot3(ax3d, tx, tz, ty, '.', 'Color', [Colors.graDk], 'LineWidth', Globals.lineWidthTraj,  'HandleVisibility','off');
-
-    % Plot important points
-    scatter3(ax3d, tx(1), tz(1), ty(1), 70, 'g', 'filled', 'MarkerEdgeColor', 'k'); % start
-    scatter3(ax3d, tx(end), tz(end), ty(end), 70, 'r', 'filled', 'MarkerEdgeColor', 'k'); % end of trajectory
-
-    legend(ax3d, {'Trajectory','Start','End','Screen','Target'}, 'Location', 'best');
-    xlabel(ax3d, 'X (mm)');
-    ylabel(ax3d, 'Z (mm)'); % visual Y axis carries tz data
-    zlabel(ax3d, 'Y (mm)'); % visual Z axis carries ty data
-    title(ax3d, 'Finger Trajectory Toward Target', 'FontSize',Globals.fontSizeTitle);
-    grid(ax3d, 'on');
-    set(ax3d, 'DataAspectRatio', [1 1 1]); % equal scaling without vis3d's overflow behavior
-    set(ax3d, 'YDir', 'reverse'); % reverses Z-data axis (visual Y/depth)
-    set(ax3d, 'XDir', 'reverse'); % flips X-data axis (visual X, horizontal)
-    view(ax3d, az, el);
+    ax3d.SortMethod = 'childorder';
 
     % Explicitly set the 3D axes limits to match the same limMax/zMax used by
     % the 2D subplots below, so spacing/scale is consistent everywhere.
     % Visual X = tx -> +/-limMax, Visual Y (depth) = tz -> [0 zMax],
     % Visual Z (vertical) = ty -> +/-limMax.
-    
-    
-   xlim(ax3d, [-xLim xLim]); 
+    xlim(ax3d, [-xLim xLim]);
     ylim(ax3d, [0 zMax]);
     zlim(ax3d, [-yLim yLim]);
 
@@ -338,49 +349,44 @@ function fig = PlotNURingTrial(tt, varargin)
     yl = ylim(ax3d); % tz range (visual Y / depth)
     zl = zlim(ax3d); % ty range (visual Z / vertical)
 
+    % === Target reference lines ===
     % Red target X line
     plot3(ax3d, [targetScreenPos(1) targetScreenPos(1)], [0 0], zl, '-', 'Color', Colors.redLt, 'LineWidth', Globals.lineWidthAxis, 'HandleVisibility','off'); % line along ty-axis (tx=0, tz=0)
     plot3(ax3d, [targetScreenPos(1) targetScreenPos(1)], [0 max(yl)] , [zl(1) zl(1)], '-', 'Color', Colors.redLt, 'LineWidth', Globals.lineWidthAxis, 'HandleVisibility','off'); % line at x=xl(1), z from 0 to max, y=0
-
     % Green target Y line
     plot3(ax3d, xl, [0 0], [targetScreenPos(2) targetScreenPos(2)], '-', 'Color', Colors.greLt, 'LineWidth', Globals.lineWidthAxis, 'HandleVisibility','off'); % line along tx-axis (ty=0, tz=0)
-    plot3(ax3d, [xl(1) xl(1)], [0 max(yl)], [targetScreenPos(2) targetScreenPos(2)], '-', 'Color', Colors.greLt, 'LineWidth', Globals.lineWidthAxis, 'HandleVisibility','off'); % line at x=xl(1), z from 0 to max, y=0
+    plot3(ax3d, [-xl(1) -xl(1)], [0 max(yl)], [targetScreenPos(2) targetScreenPos(2)], '-', 'Color', Colors.greLt, 'LineWidth', Globals.lineWidthAxis, 'HandleVisibility','off'); % line at x=xl(1), z from 0 to max, y=0
 
-    % Black 0,0,0 lines
+    % === World reference lines ===
     % X-axis (y = 0)
     plot3(ax3d, xl, [0 0], [0 0], '-', 'Color', Colors.graMd, 'LineWidth', Globals.lineWidthAxis, 'HandleVisibility','off'); % line along tx-axis (ty=0, tz=0)
-    plot3(ax3d, [xl(1) xl(1)], [0 max(yl)], [0 0], '-', 'Color', Colors.graMd, 'LineWidth', Globals.lineWidthAxis, 'HandleVisibility','off'); % line at x=xl(1), z from 0 to max, y=0
+    plot3(ax3d, [-xl(1) -xl(1)], [0 max(yl)], [0 0], '-', 'Color', Colors.graMd, 'LineWidth', Globals.lineWidthAxis, 'HandleVisibility','off'); % line at x=xl(1), z from 0 to max, y=0
     % Y-axis (x = 0)
-    plot3(ax3d, [0 0], [0 0], zl, '-', 'Color', Colors.redLt, 'LineWidth', Globals.lineWidthAxis, 'HandleVisibility','off'); % line along ty-axis (tx=0, tz=0)
-    plot3(ax3d, [yl(1) yl(1)], [0 max(yl)] , [zl(1) zl(1)], '-', 'Color', Colors.redLt, 'LineWidth', Globals.lineWidthAxis, 'HandleVisibility','off'); % line at x=xl(1), z from 0 to max, y=0
-    
-    % Projection of X data (tx) onto the bottom wall (tz = min(tz))
-    plot3(ax3d, tx, tz, repmat(zl(1), size(tx)), '-', 'Color', [Colors.redMd 0.25], 'LineWidth', Globals.lineWidthData, 'HandleVisibility','off');
+    plot3(ax3d, [0 0], [0 0], zl, '-', 'Color', Colors.graMd, 'LineWidth', Globals.lineWidthAxis, 'HandleVisibility','off'); % line along ty-axis (tx=0, tz=0)
+    plot3(ax3d, [yl(1) yl(1)], [0 max(yl)] , [zl(1) zl(1)], '-', 'Color', Colors.graMd, 'LineWidth', Globals.lineWidthAxis, 'HandleVisibility','off'); % line at x=xl(1), z from 0 to max, y=0
 
-    % Projection of Y data (ty) onto the back wall (tx = min(tx))
-    plot3(ax3d, repmat(xl(1), size(tz)), tz, ty, '-', 'Color', [Colors.greMd 0.25], 'LineWidth', Globals.lineWidthData, 'HandleVisibility','off');
-
-    % Projection of Z data (tz) onto the back plane (tz = min(tz), spanning tx and ty)
+    % === Data projections ===
+    % Projection onto the floor: visual-Z (ty, vertical) held constant at
+    % zl(1) = -yLim (the bottom of the vertical range), spanning tx and tz
+    hShadowX = plot3(ax3d, tx, tz, repmat(zl(1), size(tx)), '-', 'Color', [Colors.redMd 0.25], 'LineWidth', Globals.lineWidthData, 'HandleVisibility','off');
+    % Projection onto the back wall: visual-X (tx, horizontal) held constant
+    % at -xl(1) = +xLim (the far horizontal edge), spanning tz and ty
+    hShadowY = plot3(ax3d, repmat(-xl(1), size(tz)), tz, ty, '-', 'Color', [Colors.greMd 0.25], 'LineWidth', Globals.lineWidthData, 'HandleVisibility','off');
+    % Projection onto the front plane: visual-Y/depth (tz) held constant at
+    % yl(1) = 0 (nearest depth), spanning tx and ty
     if (drawShadowXY)
         plot3(ax3d, tx, repmat(yl(1), size(tx)), ty, '-', 'Color', [Colors.bluMd 0.25], 'LineWidth', Globals.lineWidthData, 'HandleVisibility','off');
     end
 
-    % =====================================================================
-    % Physical screen plane: drawn flat in the shadow plane (visual Y / tz
-    % held constant at yl(1)), as a 527mm x 296mm rectangle centered at
-    % screen-coordinate origin (0,0) -- i.e. the full extent of the
-    % physical screen, regardless of where on it the target sits.
-    % =====================================================================
+    % === Touchscreen outline ===
     screenCornersX = [-planeHalfW  planeHalfW  planeHalfW -planeHalfW];
     screenCornersY = repmat(yl(1), 1, 4); % flat in the shadow plane (tz = yl(1))
     screenCornersZ = [-planeHalfH -planeHalfH  planeHalfH  planeHalfH];
     patch(ax3d, screenCornersX, screenCornersY, screenCornersZ, Colors.bluLt, ...
-        'FaceAlpha', 0.15, 'EdgeColor', Colors.bluMd, 'LineWidth', 1, ...
+        'FaceAlpha', 0.10, 'EdgeColor', Colors.bluLt, 'LineWidth', 1, ...
         'HandleVisibility', 'off');
 
-    % Target marker: an actual flat 8mm x 8mm square, lying in the same
-    % screen plane, centered at the target's true on-screen position
-    % (targetScreenPos), spanning tx (visual X) and ty (visual Z).
+    % === Target marker ===
     targetSide = 8; % mm, full side length of the target square
     half = targetSide / 2;
     targetCornersX = targetScreenPos(1) + [-half  half  half -half];
@@ -389,14 +395,13 @@ function fig = PlotNURingTrial(tt, varargin)
     patch(ax3d, targetCornersX, targetCornersY, targetCornersZ, Colors.magMd, ...
         'FaceAlpha', 1, 'EdgeColor', 'none', 'HandleVisibility', 'off');
 
-    % Registration markers      
+    % === Registration markers ===
     coarseSide = 56; % mm, full side length of the target square
     coarseHalf = coarseSide / 2;
     ul = Globals.registrationMarkerUL ;
     ur = Globals.registrationMarkerUR ;
     ll = Globals.registrationMarkerLL ;
     lr = Globals.registrationMarkerLR ;
-
     % Calculate marker positions
     ulX = ul(1) + [-coarseHalf  coarseHalf coarseHalf -coarseHalf];
     urX = ur(1) + [-coarseHalf  coarseHalf coarseHalf -coarseHalf];
@@ -410,12 +415,32 @@ function fig = PlotNURingTrial(tt, varargin)
     urZ = ur(2) + [-coarseHalf -coarseHalf coarseHalf coarseHalf];
     llZ = ll(2) + [-coarseHalf -coarseHalf coarseHalf coarseHalf];
     lrZ = lr(2) + [-coarseHalf -coarseHalf coarseHalf coarseHalf];
-    
     % Plot markers
     patch(ax3d, ulX, ulY, ulZ, Colors.graLt, 'FaceAlpha', 0.5, 'EdgeColor', 'none', 'HandleVisibility', 'off');
-    % patch(ax3d, urX, urY, urZ, Colors.graLt, 'FaceAlpha', 0.5, 'EdgeColor', 'none', 'HandleVisibility', 'off');
-    % patch(ax3d, llX, llY, llZ, Colors.graLt, 'FaceAlpha', 0.5, 'EdgeColor', 'none', 'HandleVisibility', 'off');
-    % patch(ax3d, lrX, lrY, lrZ, Colors.graLt, 'FaceAlpha', 0.5, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+    patch(ax3d, urX, urY, urZ, Colors.graLt, 'FaceAlpha', 0.5, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+    patch(ax3d, llX, llY, llZ, Colors.graLt, 'FaceAlpha', 0.5, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+    patch(ax3d, lrX, lrY, lrZ, Colors.graLt, 'FaceAlpha', 0.5, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+
+
+    % === Plot trajectory ===
+    % Plot trajectory data
+    hTrajLine = plot3(ax3d, tx, tz, ty, '-', 'Color', [Colors.graMd 0.5], 'LineWidth', Globals.lineWidthTraj);
+    % Plot trajectory shadow
+    hTrajDots = plot3(ax3d, tx, tz, ty, '.', 'Color', [Colors.graDk], 'LineWidth', Globals.lineWidthTraj,  'HandleVisibility','off');
+
+    % Plot important points
+    hStartPt = scatter3(ax3d, tx(1), tz(1), ty(1), 70, 'g', 'filled', 'MarkerEdgeColor', 'k'); % start
+    hEndPt   = scatter3(ax3d, tx(end), tz(end), ty(end), 70, 'r', 'filled', 'MarkerEdgeColor', 'k'); % end of trajectory
+
+    % legend(ax3d, {'Trajectory','Target'}, 'Location', 'best');
+    xlabel(ax3d, 'X (mm)');
+    ylabel(ax3d, 'Z (mm)'); % visual Y axis carries tz data
+    zlabel(ax3d, 'Y (mm)'); % visual Z axis carries ty data
+    title(ax3d, 'Raw Finger Trajectory', 'FontSize',Globals.fontSizeTitle);
+    grid(ax3d, 'on');
+    set(ax3d, 'DataAspectRatio', [1 1 1]); % equal scaling without vis3d's overflow behavior
+    set(ax3d, 'YDir', 'reverse'); % reverses Z-data axis (visual Y/depth)
+    view(ax3d, az, el);
 
 
     hold(ax3d, 'off');
@@ -439,16 +464,16 @@ function fig = PlotNURingTrial(tt, varargin)
     hold ( axX , 'on' ) ;
 
     % Plot data (marker frame -- target-relative, centered at 0)
-    plot(axX, t, txm, 'Color', Colors.redMd, 'LineWidth', Globals.lineWidthData);
-    plot(axY, t, tym, 'Color', Colors.greMd, 'LineWidth', Globals.lineWidthData);
-    plot(axZ, t, tzm, 'Color', Colors.bluMd, 'LineWidth', Globals.lineWidthData);
+    hPosLineX = plot(axX, t, txm, 'Color', Colors.redMd, 'LineWidth', Globals.lineWidthData);
+    hPosLineY = plot(axY, t, tym, 'Color', Colors.greMd, 'LineWidth', Globals.lineWidthData);
+    hPosLineZ = plot(axZ, t, tzm, 'Color', Colors.bluMd, 'LineWidth', Globals.lineWidthData);
 
     if (drawEstimated)
         % Shade areas where pose based on real data
         yl_axX = [-xLimM xLimM];   % matches the ylim you set further down for axX
         yl_axY = [-yLimM yLimM];   % matches the ylim you set further down for axX
         yl_axZ = [-zLimM zLimM];   % matches the ylim you set further down for axX
-        runs = findContiguousRuns(vis == 1);  % helper below, or inline it
+        runs = FindContiguousRuns(vis == 1);  % helper below, or inline it
         for k = 1:size(runs, 1)
             iStart = runs(k,1);
             iEnd   = runs(k,2);
@@ -482,7 +507,7 @@ function fig = PlotNURingTrial(tt, varargin)
     ylabel(axZ, 'Z (mm)', 'FontWeight','bold');
 
     % Plot labels
-    title(axX, 'Position vs Time', 'FontSize', 16);
+    title(axX, 'Error vs Time', 'FontSize', 16);
     xlabel(axZ, 'Time (s)', 'FontWeight','bold');
 
     % Grids
@@ -498,7 +523,39 @@ function fig = PlotNURingTrial(tt, varargin)
     % Tick mark formatting
     axX.YTick = -xLimM:50:xLimM;
     axY.YTick = -yLimM:50:yLimM ;
-    axZ.YTick = 0:50:zLimM;
+    axZ.YTick = 0:100:zLimM;
+
+    % =====================================================================
+    % Velocity overlay -- second y-axis on each subplot, plotted AFTER the
+    % position-axis (left) limits/ticks above are finalized, so adding the
+    % right axis doesn't disturb them. Controlled by 'ShowVelocity'.
+    % =====================================================================
+    if showVelocity
+        yyaxis(axX, 'right');
+        hVelLineX = plot(axX, t, vxm, '-', 'Color', [Colors.redMd 0.4], 'LineWidth', Globals.lineWidthData*0.75);
+        ylabel(axX, 'Velocity (mm/s)', 'FontWeight','bold');
+        axX.YAxis(2).Color = Colors.redMd;
+        ylim(axX, [-vLimX vLimX]); % fixed -- prevents auto-rescale jump during animation
+        yyaxis(axX, 'left'); % leave left as the active axis (matches position-axis ylim/ticks set above)
+
+        yyaxis(axY, 'right');
+        hVelLineY = plot(axY, t, vym, '-', 'Color', [Colors.greMd 0.4], 'LineWidth', Globals.lineWidthData*0.75);
+        ylabel(axY, 'Velocity (mm/s)', 'FontWeight','bold');
+        axY.YAxis(2).Color = Colors.greMd;
+        ylim(axY, [-vLimY vLimY]);
+        yyaxis(axY, 'left');
+
+        yyaxis(axZ, 'right');
+        hVelLineZ = plot(axZ, t, vzm, '-', 'Color', [Colors.bluMd 0.4], 'LineWidth', Globals.lineWidthData*0.75);
+        ylabel(axZ, 'Velocity (mm/s)', 'FontWeight','bold');
+        axZ.YAxis(2).Color = Colors.bluMd;
+        ylim(axZ, [-vLimZ vLimZ]);
+        yyaxis(axZ, 'left');
+    else
+        hVelLineX = [];
+        hVelLineY = [];
+        hVelLineZ = [];
+    end
 
 
     % Release hold
@@ -507,22 +564,29 @@ function fig = PlotNURingTrial(tt, varargin)
     % Link axis based on 'x'
     linkaxes([axX, axY, axZ], 'x');
 
-    % Add R2 comparison
-    if plotR2Comparison
-        if ~isempty(crossIdx) && crossIdx < N
-            subPtsForPlot = actualPts(crossIdx:end, :);
-        else
-            subPtsForPlot = [];
-        end
-        PlotR2ComparisonFig(actualPts, idealPts, R2_total, ...
-            subPtsForPlot, idealPtsThreshold, R2_Threshold, az, el, trialTitle);
+    % =====================================================================
+    % === ANIMATION / VIDEO EXPORT ========================================
+    % =====================================================================
+    if animatePlots
+        AnimateAndExportVideo(fig, t, tx, ty, tz, txm, tym, tzm, vxm, vym, vzm, ...
+            ax3d, axX, axY, axZ, ...
+            hTrajLine, hTrajDots, hStartPt, hEndPt, hShadowX, hShadowY, ...
+            hPosLineX, hPosLineY, hPosLineZ, ...
+            hVelLineX, hVelLineY, hVelLineZ, ...
+            showVelocity, sourceFilename, trialTitle, videoFrameRate, ...
+            xl, yl, zl);
     end
 
 end
 
 
 
-function runs = findContiguousRuns(mask)
+
+%% ========================================================================
+% === CONTINUOUS RUN MASK =================================================
+% =========================================================================
+
+function runs = FindContiguousRuns(mask)
     %FINDCONTIGUOUSRUNS Return [startIdx endIdx] for each run of consecutive true values.
     mask = mask(:);
     d = diff([0; mask; 0]);
@@ -532,57 +596,216 @@ function runs = findContiguousRuns(mask)
 end
 
 
-function PlotR2ComparisonFig(actualPts, idealPts, R2_total, subPts, idealPts500, R2_500, az, el, trialTitle)
-%PLOTR2COMPARISONFIG Visualize actual trajectory vs. ideal straight-line
-%   path, for both the full trial and the threshold segment, side by side.
 
-fig2 = figure('Color', 'w', 'Units', 'normalized', 'Position', [0.15 0.15 0.65 0.5]);
+%% ========================================================================
+% === ANIMATION CONTROLLER ================================================
+% =========================================================================
+function AnimateAndExportVideo(fig, t, tx, ty, tz, txm, tym, tzm, vxm, vym, vzm, ...
+        ax3d, axX, axY, axZ, ...
+        hTrajLine, hTrajDots, hStartPt, hEndPt, hShadowX, hShadowY, ...
+        hPosLineX, hPosLineY, hPosLineZ, ...
+        hVelLineX, hVelLineY, hVelLineZ, ...
+        showVelocity, sourceFilename, trialTitle, videoFrameRate, ...
+        xl, yl, zl)
+    %ANIMATEANDEXPORTVIDEO Replay the trajectory and position/velocity
+    %   subplots over time and export a video whose PLAYBACK duration
+    %   matches the trial's real-world duration (t(end)-t(1)), with
+    %   FRAME-ACCURATE timing: the video is rendered at a fixed frame rate
+    %   (videoFrameRate), but the data shown at each output frame is
+    %   whichever sample was current at that frame's real elapsed time --
+    %   so irregular/non-uniform sample spacing (dropped frames, variable
+    %   loop timing) still displays with correct real-world delay between
+    %   visible updates, rather than giving every sample equal screen time.
+    %
+    %   This temporarily hides the fully-drawn static trajectory/position/
+    %   velocity lines and points, draws growing "animated" copies plus a
+    %   moving "current position" marker on top frame-by-frame, captures
+    %   each frame, and restores the original static lines once done so the
+    %   figure handed back to the caller still shows the complete static
+    %   plot.
 
-if trialTitle ~= ""
-    annotation(fig2, 'textbox', [0 0.93 1 0.05], 'String', ...
-        trialTitle + " -- R^2 Fit Comparison", 'Interpreter', 'none', ...
-        'EdgeColor', 'none', 'HorizontalAlignment', 'center', ...
-        'FontSize', Globals.fontSizeTitle, 'FontWeight', 'bold');
-end
+    numSamples = numel(t);
+    duration   = t(end) - t(1);
+    if numSamples < 2 || duration <= 0
+        warning('PlotNURingTrial:AnimateAndExportVideo:badTimebase', ...
+            'Cannot animate: trial has fewer than 2 samples or non-positive duration.');
+        return;
+    end
 
-% --- Panel 1: full trajectory ---
-ax1 = subplot(1, 2, 1, 'Parent', fig2);
-hold(ax1, 'on');
-plot3(ax1, actualPts(:,1), actualPts(:,3), actualPts(:,2), '-', ...
-    'Color', Colors.graDk, 'LineWidth', Globals.lineWidthTraj);
-plot3(ax1, idealPts(:,1), idealPts(:,3), idealPts(:,2), '--', ...
-    'Color', Colors.magMd, 'LineWidth', Globals.lineWidthAxis);
-scatter3(ax1, actualPts(1,1), actualPts(1,3), actualPts(1,2), 70, 'g', 'filled', 'MarkerEdgeColor', 'k');
-scatter3(ax1, actualPts(end,1), actualPts(end,3), actualPts(end,2), 70, 'r', 'filled', 'MarkerEdgeColor', 'k');
-legend(ax1, {'Actual', 'Ideal (straight line)', 'Start', 'End'}, 'Location', 'best');
-xlabel(ax1, 'X (mm)'); ylabel(ax1, 'Z (mm)'); zlabel(ax1, 'Y (mm)');
-title(ax1, sprintf('Full Trajectory (R^2 = %.3f)', R2_total), 'FontSize', Globals.fontSizeTitle);
-grid(ax1, 'on'); set(ax1, 'DataAspectRatio', [1 1 1]);
-set(ax1, 'YDir', 'reverse'); set(ax1, 'XDir', 'reverse');
-view(ax1, az, el);
-hold(ax1, 'off');
+    % ---------------------------------------------------------------
+    % Resolve output video filename: prefer SourceFilename, fall back to
+    % TrialTitle (commonly set to the source CSV's filename by the
+    % caller), and only fall back to a generic name if neither is given.
+    % ---------------------------------------------------------------
+    if sourceFilename ~= ""
+        baseNameSource = sourceFilename;
+    elseif trialTitle ~= ""
+        baseNameSource = trialTitle;
+    else
+        baseNameSource = "";
+    end
 
-% --- Panel 2: threshold segment ---
-ax2 = subplot(1, 2, 2, 'Parent', fig2);
-hold(ax2, 'on');
-if ~isempty(subPts)
-    plot3(ax2, subPts(:,1), subPts(:,3), subPts(:,2), '-', ...
-        'Color', Colors.graDk, 'LineWidth', Globals.lineWidthTraj);
-    plot3(ax2, idealPts500(:,1), idealPts500(:,3), idealPts500(:,2), '--', ...
-        'Color', Colors.magMd, 'LineWidth', Globals.lineWidthAxis);
-    scatter3(ax2, subPts(1,1), subPts(1,3), subPts(1,2), 70, 'g', 'filled', 'MarkerEdgeColor', 'k');
-    scatter3(ax2, subPts(end,1), subPts(end,3), subPts(end,2), 70, 'r', 'filled', 'MarkerEdgeColor', 'k');
-    legend(ax2, {'Actual', 'Ideal (straight line)', 'Start (threshold crossing)', 'End'}, 'Location', 'best');
-    title(ax2, sprintf('Threshold Segment (R^2 = %.3f)', R2_500), 'FontSize', Globals.fontSizeTitle);
-else
-    text(0.5, 0.5, 'Trajectory never crossed threshold', 'Parent', ax2, ...
-        'HorizontalAlignment', 'center');
-    title(ax2, 'Threshold Segment (N/A)', 'FontSize', Globals.fontSizeTitle);
-end
-xlabel(ax2, 'X (mm)'); ylabel(ax2, 'Z (mm)'); zlabel(ax2, 'Y (mm)');
-grid(ax2, 'on'); set(ax2, 'DataAspectRatio', [1 1 1]);
-set(ax2, 'YDir', 'reverse'); set(ax2, 'XDir', 'reverse');
-view(ax2, az, el);
-hold(ax2, 'off');
+    if baseNameSource == ""
+        warning('PlotNURingTrial:AnimateAndExportVideo:noSourceFilename', ...
+            'Neither ''SourceFilename'' nor ''TrialTitle'' was provided; saving animation as ''NURingTrialAnimation.mp4'' in the current folder.');
+        outFile = fullfile(pwd, 'NURingTrialAnimation.mp4');
+    else
+        [folder, name, ~] = fileparts(char(baseNameSource));
+        if folder == ""
+            folder = pwd;
+        end
+        outFile = fullfile(folder, [name '.mp4']);
+    end
+
+    % ---------------------------------------------------------------
+    % Fixed-frame-rate output time grid, spanning the trial's real-world
+    % duration exactly. For each output frame time, find the latest
+    % sample at or before that time -- this is what makes timing
+    % frame-accurate: a long gap between samples holds the last frame
+    % for several output frames (correct real-world delay), while
+    % several samples arriving faster than the frame rate get collapsed
+    % into a single output frame (nothing to show them individually).
+    % ---------------------------------------------------------------
+    numOutFrames = max(2, round(duration * videoFrameRate) + 1);
+    outTimes     = linspace(t(1), t(end), numOutFrames);
+    % sampleIdxForFrame(j) = index of the latest sample with t <= outTimes(j)
+    sampleIdxForFrame = zeros(1, numOutFrames);
+    searchFrom = 1;
+    for j = 1:numOutFrames
+        idx = find(t(searchFrom:end) <= outTimes(j), 1, 'last');
+        if isempty(idx)
+            idx = 1;
+        else
+            idx = searchFrom + idx - 1;
+        end
+        sampleIdxForFrame(j) = idx;
+        searchFrom = idx; % monotonic: never search earlier than the last match
+    end
+
+    try
+        vidObj = VideoWriter(outFile, 'MPEG-4');
+    catch
+        % MPEG-4 profile isn't available on all platforms (e.g. some Linux
+        % installs) -- fall back to Motion JPEG AVI in that case.
+        [folder, name, ~] = fileparts(outFile);
+        outFile = fullfile(folder, [name '.avi']);
+        vidObj = VideoWriter(outFile, 'Motion JPEG AVI');
+    end
+    vidObj.FrameRate = videoFrameRate;
+    open(vidObj);
+
+    % ---------------------------------------------------------------
+    % Hide the fully-drawn static lines/points during the animation, and
+    % create empty "animated" counterparts to grow frame-by-frame, plus a
+    % moving "current position" marker on each axis.
+    % ---------------------------------------------------------------
+    set([hTrajLine, hTrajDots, hStartPt, hEndPt, hShadowX, hShadowY], 'Visible', 'off');
+    set([hPosLineX, hPosLineY, hPosLineZ], 'Visible', 'off');
+    if showVelocity
+        set([hVelLineX, hVelLineY, hVelLineZ], 'Visible', 'off');
+    end
+
+    hold(ax3d, 'on');
+    hAnimTraj  = plot3(ax3d, nan, nan, nan, '-', 'Color', Colors.graDk, 'LineWidth', Globals.lineWidthTraj, 'HandleVisibility', 'off');
+    hAnimPoint = scatter3(ax3d, nan, nan, nan, 15, 'm', 'filled', 'MarkerEdgeColor', 'k', 'HandleVisibility', 'off');
+    % Animated counterparts of the red/green wall-projection shadows
+    hAnimShadowX = plot3(ax3d, nan, nan, nan, '-', 'Color', [Colors.redMd 0.25], 'LineWidth', Globals.lineWidthData, 'HandleVisibility','off');
+    hAnimShadowY = plot3(ax3d, nan, nan, nan, '-', 'Color', [Colors.greMd 0.25], 'LineWidth', Globals.lineWidthData, 'HandleVisibility','off');
+    hold(ax3d, 'off');
+
+    % NOTE: hold is kept 'on' through ALL object creation on a given right-
+    % hand axis (position line + point + velocity line), then released
+    % once at the end. Calling plot(...) with hold OFF clears the axes'
+    % existing children first -- releasing hold between the position line
+    % and the velocity line below previously wiped out the just-created
+    % position line/point handles, leaving them invalid by the time the
+    % frame loop tried to update them.
+    hold(axX, 'on');
+    hAnimLineX = plot(axX, nan, nan, 'Color', Colors.redMd, 'LineWidth', Globals.lineWidthData);
+    hAnimPtX   = scatter(axX, nan, nan, 50, 'k', 'filled', 'HandleVisibility', 'off');
+
+    hold(axY, 'on');
+    hAnimLineY = plot(axY, nan, nan, 'Color', Colors.greMd, 'LineWidth', Globals.lineWidthData);
+    hAnimPtY   = scatter(axY, nan, nan, 50, 'k', 'filled', 'HandleVisibility', 'off');
+
+    hold(axZ, 'on');
+    hAnimLineZ = plot(axZ, nan, nan, 'Color', Colors.bluMd, 'LineWidth', Globals.lineWidthData);
+    hAnimPtZ   = scatter(axZ, nan, nan, 50, 'k', 'filled', 'HandleVisibility', 'off');
+
+    if showVelocity
+        yyaxis(axX, 'right');
+        hAnimVelLineX = plot(axX, nan, nan, '-', 'Color', [Colors.redMd 0.4], 'LineWidth', Globals.lineWidthData*0.75);
+        yyaxis(axX, 'left');
+
+        yyaxis(axY, 'right');
+        hAnimVelLineY = plot(axY, nan, nan, '-', 'Color', [Colors.greMd 0.4], 'LineWidth', Globals.lineWidthData*0.75);
+        yyaxis(axY, 'left');
+
+        yyaxis(axZ, 'right');
+        hAnimVelLineZ = plot(axZ, nan, nan, '-', 'Color', [Colors.bluMd 0.4], 'LineWidth', Globals.lineWidthData*0.75);
+        yyaxis(axZ, 'left');
+    end
+
+    hold(axX, 'off');
+    hold(axY, 'off');
+    hold(axZ, 'off');
+
+    % ---------------------------------------------------------------
+    % Frame loop: for each fixed-rate output frame, reveal data up through
+    % whichever sample was current at that frame's real elapsed time
+    % ---------------------------------------------------------------
+    for j = 1:numOutFrames
+        k = sampleIdxForFrame(j);
+
+        % 3D trajectory (visual remap: visual X=tx, visual Y=tz, visual Z=ty)
+        set(hAnimTraj, 'XData', tx(1:k), 'YData', tz(1:k), 'ZData', ty(1:k));
+        set(hAnimPoint, 'XData', tx(k), 'YData', tz(k), 'ZData', ty(k));
+
+        % Wall-projection shadows, growing alongside the trajectory:
+        %   red  -- projection onto the bottom wall (visual Z held at zl(1))
+        %   green -- projection onto the back wall (visual X held at -xl(1))
+        set(hAnimShadowX, 'XData', tx(1:k), 'YData', tz(1:k), 'ZData', repmat(zl(1), size(tx(1:k))));
+        set(hAnimShadowY, 'XData', repmat(-xl(1), size(tz(1:k))), 'YData', tz(1:k), 'ZData', ty(1:k));
+
+        % Position subplots (marker frame)
+        set(hAnimLineX, 'XData', t(1:k), 'YData', txm(1:k));
+        set(hAnimPtX,   'XData', t(k),   'YData', txm(k));
+        set(hAnimLineY, 'XData', t(1:k), 'YData', tym(1:k));
+        set(hAnimPtY,   'XData', t(k),   'YData', tym(k));
+        set(hAnimLineZ, 'XData', t(1:k), 'YData', tzm(1:k));
+        set(hAnimPtZ,   'XData', t(k),   'YData', tzm(k));
+
+        % Velocity overlays, if enabled -- these lines live on the right
+        % yyaxis of axX/axY/axZ, but their data can be set directly via
+        % the handle regardless of which side is currently "active".
+        if showVelocity
+            set(hAnimVelLineX, 'XData', t(1:k), 'YData', vxm(1:k));
+            set(hAnimVelLineY, 'XData', t(1:k), 'YData', vym(1:k));
+            set(hAnimVelLineZ, 'XData', t(1:k), 'YData', vzm(1:k));
+        end
+
+        drawnow;
+        frame = getframe(fig);
+        writeVideo(vidObj, frame);
+    end
+
+    close(vidObj);
+
+    % ---------------------------------------------------------------
+    % Clean up: remove the animated overlay objects and restore the
+    % original static lines/points, so the figure returned to the caller
+    % still shows the complete, static plot.
+    % ---------------------------------------------------------------
+    delete([hAnimTraj, hAnimPoint, hAnimShadowX, hAnimShadowY, hAnimLineX, hAnimPtX, hAnimLineY, hAnimPtY, hAnimLineZ, hAnimPtZ]);
+    if showVelocity
+        delete([hAnimVelLineX, hAnimVelLineY, hAnimVelLineZ]);
+    end
+    set([hTrajLine, hTrajDots, hStartPt, hEndPt, hShadowX, hShadowY], 'Visible', 'on');
+    set([hPosLineX, hPosLineY, hPosLineZ], 'Visible', 'on');
+    if showVelocity
+        set([hVelLineX, hVelLineY, hVelLineZ], 'Visible', 'on');
+    end
+
+    fprintf('PlotNURingTrial: Animation saved to %s\n', outFile);
 
 end

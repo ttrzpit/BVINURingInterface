@@ -42,6 +42,22 @@ void TrialLogger::SetTrialMeta(float targetScreenXmm, float targetScreenYmm,
     hasFtOffset_     = hasOffset;
 }
 
+void TrialLogger::SetCalibrationMeta(std::vector<float> calibAnglesDeg,
+                                     bool aromValid,
+                                     std::vector<float> cpTheta,
+                                     std::vector<float> cpRadius,
+                                     std::vector<float> cpAccel,
+                                     bool stiffnessValid,
+                                     std::vector<float> stiffness) {
+    calibAnglesDeg_ = std::move(calibAnglesDeg);
+    aromValid_      = aromValid;
+    cpTheta_        = std::move(cpTheta);
+    cpRadius_       = std::move(cpRadius);
+    cpAccel_        = std::move(cpAccel);
+    stiffnessValid_ = stiffnessValid;
+    stiffness_      = std::move(stiffness);
+}
+
 void TrialLogger::AddSample(const TrialSample& s) {
     if (!active_) return;
     rows_.push_back(s);
@@ -71,9 +87,9 @@ std::string TrialLogger::Write(float touchXpx, float touchYpx, float mmPerPixel)
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
 
-    // Filename: <userID>-mmddyyyy-hhmmss-<targetID>.csv from the trial start wall
+    // Filename: <userID>-<targetID>-ddmmyyyy-hhmmss.csv from the trial start wall
     // time. The user ID and target ID are both zero-padded to 3 digits (e.g.
-    // "123-06242026-163128-056.csv").
+    // "123-056-24062026-163128.csv").
     char stamp[32];
     std::tm tmv{};
 #if defined(_WIN32)
@@ -81,12 +97,12 @@ std::string TrialLogger::Write(float touchXpx, float touchYpx, float mmPerPixel)
 #else
     localtime_r(&startWall_, &tmv);
 #endif
-    std::strftime(stamp, sizeof(stamp), "%m%d%Y-%H%M%S", &tmv);
+    std::strftime(stamp, sizeof(stamp), "%d%m%Y-%H%M%S", &tmv);
 
     std::ostringstream nameStream;
     nameStream << std::setfill('0') << std::setw(3) << std::max(0, userId_) << '-'
-               << stamp << '-'
-               << std::setw(3) << targetId_ << ".csv";
+               << std::setw(3) << targetId_ << '-'
+               << stamp << ".csv";
     std::string basename = nameStream.str();
     std::string fullpath = dir + "/" + basename;
 
@@ -118,13 +134,39 @@ std::string TrialLogger::Write(float touchXpx, float touchYpx, float mmPerPixel)
     f << std::setprecision(4);
     f << "completion_time: " << finalTSecs << '\n';
     f << "endpoint_error_mm: [" << last.dx << ", " << last.dy << ", " << last.dz << "]\n";
+
+    // ---- Calibration metadata (for offline reconstruction in MATLAB) --------
+    // AROM envelope: a periodic cubic spline over the calibration headings. With
+    // (control_points_theta, control_points_radius, control_points_accel) the
+    // exact runtime curve is reproducible via the piecewise cubic in
+    // AromBoundary::RadiusAtAngle. stiffness_measurements: Cal2 K(theta) per
+    // heading, to rebuild the stiffness polygon. Arrays are written as [] when
+    // the corresponding calibration wasn't run.
+    auto writeArray = [&f](const char* key, const std::vector<float>& v, bool valid) {
+        f << key << ": [";
+        if (valid) {
+            for (size_t i = 0; i < v.size(); i++) {
+                if (i) f << ", ";
+                f << v[i];
+            }
+        }
+        f << "]\n";
+    };
+    f << std::setprecision(6);
+    f << "calibration_angle_count: " << calibAnglesDeg_.size() << '\n';
+    writeArray("calibration_angles_deg", calibAnglesDeg_, true);
+    writeArray("control_points_theta",   cpTheta_,   aromValid_);
+    writeArray("control_points_radius",  cpRadius_,  aromValid_);
+    writeArray("control_points_accel",   cpAccel_,   aromValid_);
+    writeArray("stiffness_measurements", stiffness_, stiffnessValid_);
+
     f << std::setprecision(2);
     f << "{DATA}\n";
 
     f << std::setprecision(4);
     f << "t_secs,target_id,detected,tx_mm,ty_mm,tz_mm,dx_mm,dy_mm,dz_mm,"
          "qx,qy,qz,qw,"
-         "pwm_a,pwm_b,pwm_c,touch_x_px,touch_y_px,touch_x_mm,touch_y_mm\n";
+         "pwm_a,pwm_b,pwm_c,virtual_x_mm,virtual_y_mm,touch_x_mm,touch_y_mm\n";
 
     const double t0 = rows_[0].tSecs;
     for (size_t i = 0; i < rows_.size(); i++) {
@@ -133,13 +175,13 @@ std::string TrialLogger::Write(float touchXpx, float touchYpx, float mmPerPixel)
           << s.tx << ',' << s.ty << ',' << s.tz << ','
           << s.dx << ',' << s.dy << ',' << s.dz << ','
           << s.qx << ',' << s.qy << ',' << s.qz << ',' << s.qw << ','
-          << s.pwmA << ',' << s.pwmB << ',' << s.pwmC << ',';
-        // Touch endpoint only on the final row (the contact frame).
+          << s.pwmA << ',' << s.pwmB << ',' << s.pwmC << ','
+          << s.vx << ',' << s.vy << ',';
+        // Touch endpoint (touchscreen-local mm) only on the final row (contact).
         if (i + 1 == rows_.size()) {
-            f << touchXpx << ',' << touchYpx << ','
-              << (touchXpx * mmPerPixel) << ',' << (touchYpx * mmPerPixel) << '\n';
+            f << (touchXpx * mmPerPixel) << ',' << (touchYpx * mmPerPixel) << '\n';
         } else {
-            f << ",,,\n";
+            f << ",\n";
         }
     }
 

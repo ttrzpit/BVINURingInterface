@@ -41,6 +41,7 @@ enum class InputState {
     MOT_PWM_B,
     MOT_PWM_C,
     MOT_PWM_ALL,
+    FIT_WARN,    // Calibration-incomplete confirmation prompt before FITTS
     FIT_SEL,
     FIT_RUN,
     FIT_ACT,
@@ -56,6 +57,10 @@ enum class InputState {
     GAIN_A,
     GAIN_B,
     GAIN_C,
+    IGAIN_ALL,
+    IGAIN_A,
+    IGAIN_B,
+    IGAIN_C,
     // Sentinels - only valid in KeyCommand::requiredState / newState
     ANY,
     SAME,
@@ -78,12 +83,16 @@ enum class SystemState {
 /** @brief Map an InputState to its coarse SystemState for grid/handler dispatch. */
 SystemState DeriveSystemState( InputState state );
 
-/** @brief True for GAIN_ALL/GAIN_A/GAIN_B/GAIN_C - the gain-tuning overlay
- *         entered via 'G'. These states don't represent a task of their own,
- *         so SystemState and any task entry/exit logic must ignore them,
- *         letting the underlying task (FITTS, CAL_STI, etc.) keep running
- *         while gains are tuned. */
+/** @brief True for the gain-tuning overlay states - proportional (GAIN_*, 'P')
+ *         and integral (IGAIN_*, 'I'). These states don't represent a task of
+ *         their own, so SystemState and any task entry/exit logic must ignore
+ *         them, letting the underlying task (FITTS, CAL_STI, etc.) keep running
+ *         while gains are tuned. Switching between the P and I overlays
+ *         preserves the task to return to on exit. */
 bool IsGainTuneInputState( InputState state );
+
+/** @brief True only for the integral-gain overlay states (IGAIN_*, 'I'). */
+bool IsIGainTuneInputState( InputState state );
 
 // ---- Serial connection action -----------------------------------------------
 // Set by the 'S' (toggle) key; cleared by main.cpp after acting.
@@ -108,6 +117,8 @@ enum class KeyAction {
     SET_TENSION,
     ADJUST_GAIN_INC,
     ADJUST_GAIN_DEC,
+    ADJUST_IGAIN_INC,
+    ADJUST_IGAIN_DEC,
     EXIT_GAIN_MODE,
     SET_HOME_POSITION,
     SET_ROBOT_IDLE,
@@ -139,8 +150,9 @@ struct TensionAdjustRequest {
 
 struct GainAdjustRequest {
     bool  active = false;
-    char  motor = 'A';         ///< 'A', 'B', 'C', or 'D' (all motors)
-    float deltaGain = 0.0f;    ///< +/- step applied to gainTune_[motor]
+    char  motor = 'A';          ///< 'A', 'B', 'C', or 'D' (all motors)
+    float deltaGain = 0.0f;     ///< +/- step applied to the selected gain
+    bool  isIntegral = false;   ///< true: adjust integral gain (iGainTune); false: proportional (gainTune)
 };
 
 // ---- RobotState ladder request -----------------------------------------------
@@ -264,6 +276,12 @@ class KeyboardHandler {
      *         marker IDs are reachable. Defaults to fittsTargetIdMax_. */
     void SetFittsBoardMaxId( int maxId ) { fittsBoardMaxId_ = maxId; }
 
+    /** @brief Report whether all three calibrations (AROM, stiffness, fingertip
+     *         offset) are complete. Drives the 'F' Fitts-entry gate: if any are
+     *         incomplete, 'F' diverts to a (p)roceed/(r)eturn confirmation
+     *         (FIT_WARN) instead of entering the task directly. */
+    void SetCalibrationsComplete( bool complete ) { calibrationsComplete_ = complete; }
+
    private:
     /** @brief Route digit/decimal/Backspace/Enter keys while inputState expects
      *         a numeric entry. Returns true if the key was consumed. */
@@ -298,4 +316,5 @@ class KeyboardHandler {
     int           fittsTargetIdMin_ = 1;               // Fitts target range (set from the board layout)
     int           fittsTargetIdMax_ = 45;
     int           fittsBoardMaxId_  = 45;              // Board-wide max (includes coarse) for manual entry
+    bool          calibrationsComplete_ = false;       // All 3 cals done? Gates 'F' Fitts entry
 };
