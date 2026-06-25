@@ -40,6 +40,8 @@ std::string FormatLastInputKey( int key ) {
         case 8:
         case 127:
             return "BKSP";
+        case 255:
+            return "DEL";
         case 174:
             return ".";    // numpad decimal
         case 171:
@@ -829,7 +831,9 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
     // Guiding Position - the displacement Δp = pos_target_3d − pos_fingertip [mm]
     // computed by ControllerHandler's fingertip-to-target transform. This is the
     // move that lands the fingertip on the target (the error to the actual guided
-    // target, offsets/roll compensation included). Δp.z is the depth to target.
+    // target, offsets/roll compensation included). Δp.z is the depth from the
+    // FINGERTIP to the target (target depth minus the Cal3 standoff), so it is
+    // smaller than the camera-to-target depth shown in Position above.
     AddControllerSubheadingCell( "Guiding Pos [mm]", "A10", 5, 1, "center", bodyFontSize );
     if ( haveTarget ) {
         const cv::Point3f dp = controllerTele_.displacement;

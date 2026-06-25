@@ -4,33 +4,26 @@ clear all;
 clc;
 
 % Load trial data from the specified directory
-[trials, summary] = ParseNURingTrials('+TrialData');
+[headers, trials, summary] = ParseNURingTrials('+TrialData');
 
+disp(headers)
 
-%% === ALL PLOTS =========================================================
+% === ALL PLOTS =========================================================
 
 %% --- Trajectory Plot ---------------------------------------------------
 close all;
 
-% Select participant and trial
-pID = 123 ;                                                    % Participant ID
-tID = 331;                                                    % Target marker ID
-allTrials = trials(trials.participant_id == string(pID), :);    % All trials for this participant
-oneTrialRow = allTrials(allTrials.target_marker == sprintf('%03d', tID), :);
+% Select user and trial
+key = "u123_t126" ;
+hdr = headers(headers.trial_key == key, :);   % adjust to your actual user/target IDs
+row = trials(trials.trial_key == key , :);
+tt  = row.data{1};
 
-% Verify
-if height(oneTrialRow) == 0
-    error('No trial found for participant %d, target marker %d', pID, tID);
-elseif height(oneTrialRow) > 1
-    warning('Multiple trials found for participant %d, target marker %d; using the first.', pID, tID);
-end
-
-pTitle   = oneTrialRow.filename{1};   % grab filename from the row BEFORE overwriting
-oneTrial = oneTrialRow.data{1};       % now extract the timetable
-
-% Plot trial
-PlotNURingTrial(oneTrial, ...
-    'LeftWidth', 0.45, ...
-    'TrialTitle', string(pTitle), ...
+PlotNURingTrial(tt, ...
+    'TargetScreenPosition', [hdr.target_screen_position_x_mm, hdr.target_screen_position_y_mm], ...
+    'TrialTitle', row.filename(1), ...
     'DrawShadowXY', false, ...
-    'DrawEstimated', false);
+    'DrawEstimated', true, ...
+    'PlotR2Comparison', false, ...
+    'Threshold', 500) ;
+

@@ -70,7 +70,7 @@ void ControllerHandler::SetTarget(
     cv::Point3f markerPosMm,
     float       markerRollRad,
     bool        cal3Complete,
-    cv::Point2f cal3Offset,
+    cv::Point3f cal3Offset,
     float       cal3RollRefRad,
     float       defaultOffsetMm,
     bool        guidanceActive)
@@ -164,11 +164,16 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
         cv::Point3f offset;
         cv::Matx33f R_roll;
         if ( targetCal3Complete_ ) {
-            // Cal3 measures the offset in the screen-world frame (X right, Y DOWN,
-            // Z toward camera); its X,Y coincide with the OpenCV camera frame
-            // (also Y-down). positionMm uses a Y-UP camera frame, so negate Y to
-            // express the offset there. (Z is unused in-plane, set to 0.)
-            offset = cv::Point3f( targetCal3Offset_.x, -targetCal3Offset_.y, 0.0f );
+            // Cal3 offset = fingertip - camera in the screen-world frame (X right,
+            // Y DOWN, Z INTO the screen / away from camera). positionMm uses a
+            // Y-UP camera frame, so negate Y. Z carries over unchanged: the camera
+            // depth axis points the same way as screen-world +Z (toward the
+            // screen), and cal3Offset.z is the positive standoff, so the fingertip
+            // sits in FRONT of the camera at that depth and displacement_.z =
+            // target.z - standoff (depth from the fingertip, not the camera). Z
+            // does not affect the planar PID (only .x/.y are used below), so
+            // guidance is unchanged - it only corrects the displayed Guiding Pos.
+            offset = cv::Point3f( targetCal3Offset_.x, -targetCal3Offset_.y, +targetCal3Offset_.z );
             // Roll the offset by +(roll_current - roll_reference) about +Z. In the
             // Y-up frame this is the SAME physical R*d that
             // FittsTaskHandler::VirtualFingertipPx computes in the Y-down frame
@@ -201,6 +206,7 @@ void ControllerHandler::Update(const TeensyToPcPacket& rx,
         // PID setpoint: drive the virtual fingertip by the planar displacement.
         pos_target_raw.x += displacement_.x;
         pos_target_raw.y += displacement_.y;
+        
     } else {
         displacement_ = {};
         targetOx_ = targetOy_ = targetCorrX_ = targetCorrY_ = 0.0f;

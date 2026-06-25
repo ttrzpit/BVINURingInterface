@@ -10,7 +10,9 @@
 //
 // Every keystroke is processed immediately:
 //   1. ESC / SPACE / grave (27/32/96) always apply, even mid numeric-entry -
-//      they quit / clear-to-IDLE / reset-to-IDLE respectively.
+//      they quit / e-stop-toggle / reset-to-IDLE respectively. (Delete=127
+//      clears input to IDLE, but only outside numeric entry, where it is
+//      backspace.)
 //   2. If the current inputState expects a numeric entry (kNumericEntryTable),
 //      digit/decimal/Backspace/Enter keys are buffered until Enter confirms.
 //   3. Otherwise, kKeyCommandTable is scanned for a row matching (key,
@@ -36,7 +38,11 @@ void KeyboardHandler::ProcessKey(int key) {
     // std::cout << "Key code: " << key << "\n";
 
     // ---- Global escape hatches - always take priority -----------------------
-    if (key == 27 || key == 32 || key == 96) {
+    // ESC (quit), SPACE (e-stop), grave (reset), Delete (255, cancel to IDLE).
+    // These bypass numeric entry so they fire from any state - including mid
+    // numeric-entry. Backspace (8/127) is deliberately NOT here, so it still
+    // edits the numeric buffer rather than cancelling.
+    if (key == 27 || key == 32 || key == 96 || key == 255) {
         DispatchTableCommand(key);
         return;
     }
@@ -63,7 +69,7 @@ bool KeyboardHandler::ProcessNumericEntry(int key) {
     if (!fmt) return false;  // current state isn't a numeric-entry state
 
     // Backspace / Delete
-    if (key == 8 || key == 127) {
+    if (key == 8 || key == 255) {
         if (!inputBuffer_.empty()) {
             inputBuffer_.pop_back();
             state_.inputBuffer = inputBuffer_;
@@ -241,13 +247,13 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
         case KeyAction::ADJUST_GAIN_INC:
             state_.pendingGainAdjust.active    = true;
             state_.pendingGainAdjust.motor     = MotorLetterFromState(state_.inputState);
-            state_.pendingGainAdjust.deltaGain = 0.1f;
+            state_.pendingGainAdjust.deltaGain = 0.01f;
             break;
 
         case KeyAction::ADJUST_GAIN_DEC:
             state_.pendingGainAdjust.active    = true;
             state_.pendingGainAdjust.motor     = MotorLetterFromState(state_.inputState);
-            state_.pendingGainAdjust.deltaGain = -0.1f;
+            state_.pendingGainAdjust.deltaGain = -0.01f;
             break;
 
         case KeyAction::EXIT_GAIN_MODE:
@@ -264,6 +270,10 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
 
         case KeyAction::TOGGLE_STIFFNESS_GAIN:
             state_.pendingStiffnessGainToggle = true;
+            break;
+
+        case KeyAction::TOGGLE_ESTOP:
+            state_.pendingEStopToggle = true;
             break;
 
         case KeyAction::SET_HOME_POSITION:

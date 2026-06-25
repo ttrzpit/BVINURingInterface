@@ -11,9 +11,16 @@
 //   touchscreen contact -> FinishTrial(..) : write logging/<stamp>-<id>.csv.
 //   'L' during capture  -> TogglePrimed()  : cancel + discard (no file), disarm.
 //
-// One row per camera frame. The target pose is the marker in the CAMERA frame
-// (OpenCV convention) as translation [mm] + quaternion (x,y,z,w), so [R|t]
-// reconstructs the finger's flight relative to the fixed target for analysis.
+// One row per camera frame. Positions are in the CAMERA frame, Y-UP (X right,
+// Y up, Z = depth away from the camera) - the same frame as the guidance:
+//   tx/ty/tz : target marker centre, from the ambiguity-free homography+scale
+//              estimator (stable at all ranges - no planar-pose depth flip).
+//   dx/dy/dz : fingertip-compensated displacement Δp = target - fingertip,
+//              using the full 3D Cal3 offset, so all three -> 0 as the
+//              fingertip reaches the target (dz no longer floors at the
+//              camera-to-fingertip standoff).
+//   qx..qw   : board->camera rotation (OpenCV Y-DOWN convention); nice-to-have
+//              orientation, may be noisy when the board is far away.
 // =============================================================================
 
 #include <ctime>
@@ -26,8 +33,9 @@ struct TrialSample {
     double tSecs;     ///< Seconds since trial start (0.0 on the first frame)
     int    targetId;
     int    detected;  ///< 1 = target marker seen directly, 0 = estimated from others
-    float  tx, ty, tz;        ///< Target marker centre, camera frame [mm]
-    float  qx, qy, qz, qw;    ///< Quaternion (x,y,z,w) of board->camera rotation
+    float  tx, ty, tz;        ///< Target marker centre, camera frame Y-up [mm]
+    float  dx, dy, dz;        ///< Fingertip-compensated displacement Δp = target - fingertip [mm] (->0 on touch)
+    float  qx, qy, qz, qw;    ///< Quaternion (x,y,z,w) of board->camera rotation (OpenCV Y-down)
     float  pwmA, pwmB, pwmC;  ///< Commanded motor PWM (0=full … 2047=off)
 };
 
@@ -49,6 +57,16 @@ public:
 
     /** @brief Begin a fresh capture for `targetId` (clears any in-progress one). */
     void StartTrial(int targetId);
+
+    /** @brief Set the per-trial header metadata written above the data block.
+     *         Call once per trial (e.g. right after StartTrial).
+     *  @param targetScreenXmm,targetScreenYmm  Target centroid relative to the
+     *         screen centre [mm] (x right+, y down+ in screen orientation; the
+     *         screen centre is (0,0)).
+     *  @param ftOffX,ftOffY,ftOffZ  Measured Cal3 camera-to-fingertip offset [mm].
+     *  @param hasOffset  False if Cal3 was never run - offset is logged as 0,0,0. */
+    void SetTrialMeta(float targetScreenXmm, float targetScreenYmm,
+                      float ftOffX, float ftOffY, float ftOffZ, bool hasOffset);
 
     /** @brief Append one per-frame row (no-op unless a capture is active). */
     void AddSample(const TrialSample& s);
@@ -80,4 +98,12 @@ private:
     int                      targetId_ = 0;
     std::time_t              startWall_ = 0;
     std::vector<TrialSample> rows_;
+
+    // ---- Per-trial header metadata (set via SetTrialMeta) --------------------
+    float targetScreenXmm_ = 0.0f;    // target centroid X rel. to screen centre [mm]
+    float targetScreenYmm_ = 0.0f;    // target centroid Y rel. to screen centre [mm]
+    float ftOffX_ = 0.0f;             // measured fingertip offset [mm]
+    float ftOffY_ = 0.0f;
+    float ftOffZ_ = 0.0f;
+    bool  hasFtOffset_ = false;       // false -> offset written as 0,0,0
 };

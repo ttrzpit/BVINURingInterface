@@ -145,6 +145,17 @@ bool Config::load(const std::string& filepath) {
         if (!fb["select_border_rows"].empty()) fb["select_border_rows"] >> fittsBoard.selectBorderRows;
         if (!fb["select_border_cols"].empty()) fb["select_border_cols"] >> fittsBoard.selectBorderCols;
         if (!fb["num_distance_bands"].empty()) fb["num_distance_bands"] >> fittsBoard.numDistanceBands;
+        // Random-target exclusion list (YAML sequence of marker IDs). Still
+        // rendered and detected - just removed from the random target pool.
+        if (!fb["random_target_excluded_ids"].empty())
+            fb["random_target_excluded_ids"] >> fittsBoard.excludedTargetIds;
+    }
+
+    // ---- Accuracy Trials (manual random-target debug pool) ------------------
+    cv::FileNode at = fs["accuracy_trials"];
+    if (!at.empty()) {
+        if (!at["random_pool"].empty())
+            at["random_pool"] >> accuracyTrials.randomPool;
     }
 
     // ---- Touchscreen --------------------------------------------------------

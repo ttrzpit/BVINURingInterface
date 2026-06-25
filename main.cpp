@@ -27,6 +27,7 @@
 #include <cmath>
 #include <csignal>
 #include <deque>
+#include <iomanip>
 #include <iostream>
 #include <random>
 #include <string>
@@ -152,8 +153,8 @@ int main() {
     // Trial logging + distance-stratified target selection state.
     std::mt19937 targetRng{ std::random_device{}() };
     int          distanceBandCursor = 0;   // cycles 0..numDistanceBands-1
-    double       trialStartSecs      = 0.0; // loop clock at the active trial's start
     bool         prevLogTouched      = false;
+    bool         primeLoggingAfterUserId = false;   // 'L' with no user ID set: prime once the ID is entered
     int prevActiveTagId = 0;    ///< Detects kb.activeTagId changes -> ramps guidance force on new targets
 
     // Last-known camera-side target-circle position (persists when activeMarker
@@ -170,6 +171,12 @@ int main() {
 
     bool cal3CompletionHandled = false;
     bool cal2ProfileApplied = false;    ///< Set once Cal2's K(theta) has been applied to the controller
+    bool cal1CompletionHandled = false; ///< Set once Cal1 (AROM) completion has returned the system to IDLE
+
+    // Manual random-target debug pool ('r' cycles these IDs, no repeats, then
+    // falls back to the normal picker). Refreshed on every FITTS entry.
+    std::vector<int> randomPoolRemaining;
+    bool             randomPoolExhaustedNotified = false;
     PcToTeensyPacket lastTxPkt = {};    // Pending TX values updated each frame - sent by TX thread at 200 Hz
 
     // Controller - dt is measured between loop iterations, independent of camera frame rate
@@ -184,6 +191,14 @@ int main() {
 
     // ---- Main loop ----------------------------------------------------------
     while ( g_running ) {
+        // Stall probe: time each iteration. camera.getLatestFrame() only ever
+        // returns the newest frame, so any main-thread stall silently drops
+        // every frame captured during it - which is what punches the gaps in
+        // the trial log. Warn when an iteration runs long enough to have lost
+        // frames (>25 ms ≈ 2+ frames at 90 fps) so the blocking step can be
+        // pinned down.
+        const Clock::time_point iterStart = Clock::now();
+
         // a. Keyboard - PollKey() must be called every iteration to keep all
         //    OpenCV windows responsive. The result is fed to KeyboardHandler
         //    which manages multi-character commands and the quit flag.
@@ -218,6 +233,17 @@ int main() {
             controller.SetGuidanceOutputEnabled( true );
             keyboard.SetExternalStatus( "Amplifier output: guidance enabled." );
             keyboard.ClearRobotStateRequest();
+        }
+
+        // Spacebar e-stop - single-key toggle of the guidance output. Engaged:
+        // guidance force is zeroed so the amplifier holds tension PWM only;
+        // released: full guidance output resumes. Same path as 'e'/'E'.
+        if ( kb.pendingEStopToggle ) {
+            const bool enable = !controller.IsGuidanceOutputEnabled();
+            controller.SetGuidanceOutputEnabled( enable );
+            keyboard.SetExternalStatus( enable ? "E-STOP released - full guidance output resumed."
+                                               : "E-STOP engaged - tension PWM only." );
+            keyboard.ClearEStopToggle();
         }
 
         // Stiffness gain toggle ('k' key) - enables/disables adding K(theta)
@@ -263,6 +289,9 @@ int main() {
                 aruco.SetFittsBoardDetection( true );    // DICT_4X4_250, per-ID sizing
                 aruco.SetFittsBoardVisible( true );
                 fitts.Reset();
+                // Refresh the manual random-target debug pool for this session.
+                randomPoolRemaining         = cfg.accuracyTrials.randomPool;
+                randomPoolExhaustedNotified = false;
             }
             // IDLE and any other state - window already closed above
 
@@ -311,6 +340,7 @@ int main() {
         if ( !IsGainTuneInputState( kb.inputState ) && kb.inputState != prevInputState ) {
             if ( kb.inputState == InputState::CAL_ROM ) {
                 cal1.Reset();
+                cal1CompletionHandled = false;
                 controller.SetOutputEnabled( true );
                 controller.SetManualTensionMode( false );
             }
@@ -375,6 +405,9 @@ int main() {
                 display.SetCal3State( true, cal3.GetFinalOffset(), cal3.GetRollRef() );
                 aruco.SetCalibrationGridVisible( false );
                 aruco.SetCalibrationDetection( false );
+                // Multi-step process finished - return to the default IDLE state
+                // and wait for the next command.
+                keyboard.SetInputState( InputState::IDLE );
             }
         }
 
@@ -383,6 +416,12 @@ int main() {
         if ( kb.inputState == InputState::CAL_ROM ) {
             cal1.Update( nowSecs );
             keyboard.SetExternalStatus( cal1.GetStatus() );
+
+            if ( cal1.IsComplete() && !cal1CompletionHandled ) {
+                cal1CompletionHandled = true;
+                // Multi-step process finished - return to the default IDLE state.
+                keyboard.SetInputState( InputState::IDLE );
+            }
         }
 
         // CAL_STI - stiffness calibration: drive the per-heading force ramp
@@ -398,14 +437,38 @@ int main() {
             if ( cal2.IsComplete() && !cal2ProfileApplied ) {
                 controller.SetStiffnessProfile( cal2.GetStiffnessProfile() );
                 cal2ProfileApplied = true;
+                // Multi-step process finished - return to the default IDLE state.
+                keyboard.SetInputState( InputState::IDLE );
             }
         }
 
-        // 'L' - toggle the trial logger (prime / disarm; cancel + discard if
-        // pressed mid-capture).
+        // 'L' - system-level trial-logging toggle (works in any state). If no
+        // user ID has been entered yet, jump to the user-ID prompt first and
+        // prime automatically once the ID is set (see the watcher below).
         if ( kb.pendingLoggingToggle ) {
-            trialLogger.TogglePrimed();
+            if ( kb.activeUserId < 0 ) {
+                keyboard.SetInputState( InputState::LOG_UID );
+                keyboard.SetExternalStatus( "Enter user ID (000-999) to start logging..." );
+                primeLoggingAfterUserId = true;
+            } else {
+                trialLogger.SetUserId( kb.activeUserId );
+                trialLogger.TogglePrimed();
+                keyboard.SetExternalStatus( trialLogger.IsPrimed() ? "Trial logging primed."
+                                                                   : "Trial logging off." );
+            }
             keyboard.ClearLoggingToggle();
+        }
+
+        // Auto-prime once an 'L'-triggered user-ID prompt has been completed.
+        if ( primeLoggingAfterUserId ) {
+            if ( kb.activeUserId >= 0 ) {
+                primeLoggingAfterUserId = false;
+                trialLogger.SetUserId( kb.activeUserId );
+                if ( !trialLogger.IsPrimed() ) trialLogger.TogglePrimed();
+                keyboard.SetExternalStatus( "User ID set - trial logging primed." );
+            } else if ( kb.inputState != InputState::LOG_UID ) {
+                primeLoggingAfterUserId = false;    // user left the prompt without setting an ID
+            }
         }
 
         // 'r' - distance-stratified random target. Bands of distance (from the
@@ -419,35 +482,52 @@ int main() {
                 const float mmpp  = cfg.touchscreen.mmPerPixel;
                 int nextId = sel[0];
 
-                if ( prevId <= 0 || aruco.GetGridMarkerCenterPx( prevId ) == cv::Point2i{} ) {
-                    nextId = sel[ std::uniform_int_distribution<int>( 0, (int)sel.size() - 1 )( targetRng ) ];
+                if ( !randomPoolRemaining.empty() ) {
+                    // Manual debug pool: pick a random unused ID from the
+                    // operator-supplied pool (config: accuracy_trials.random_pool)
+                    // and remove it so it never repeats until the pool refreshes.
+                    const int idx = std::uniform_int_distribution<int>( 0, (int)randomPoolRemaining.size() - 1 )( targetRng );
+                    nextId = randomPoolRemaining[idx];
+                    randomPoolRemaining.erase( randomPoolRemaining.begin() + idx );
                 } else {
-                    const cv::Point2i pPx = aruco.GetGridMarkerCenterPx( prevId );
-                    float dmin = 1e9f, dmax = 0.0f;
-                    std::vector<std::pair<int, float>> cand;
-                    for ( int id : sel ) {
-                        if ( id == prevId ) continue;
-                        const cv::Point2i cPx = aruco.GetGridMarkerCenterPx( id );
-                        const float dx = ( cPx.x - pPx.x ) * mmpp;
-                        const float dy = ( cPx.y - pPx.y ) * mmpp;
-                        const float d  = std::sqrt( dx * dx + dy * dy );
-                        cand.push_back( { id, d } );
-                        dmin = std::min( dmin, d );
-                        dmax = std::max( dmax, d );
+                    // Pool empty: fall back to the normal whole-board picker. If
+                    // a pool was configured and we have just used the last entry,
+                    // announce the switch exactly once.
+                    if ( !cfg.accuracyTrials.randomPool.empty() && !randomPoolExhaustedNotified ) {
+                        std::cout << "Moving outside of random pool, selecting new random value" << std::endl;
+                        randomPoolExhaustedNotified = true;
                     }
-                    const int   nBands = std::max( 1, cfg.fittsBoard.numDistanceBands );
-                    const int   band   = distanceBandCursor % nBands;
-                    distanceBandCursor = ( distanceBandCursor + 1 ) % nBands;
-                    const float w  = ( dmax - dmin ) / nBands;
-                    const float lo = dmin + band * w;
-                    const float hi = ( band == nBands - 1 ) ? dmax + 1.0f : lo + w;
-                    std::vector<int> inBand;
-                    for ( auto& pr : cand )
-                        if ( pr.second >= lo && pr.second <= hi ) inBand.push_back( pr.first );
-                    if ( inBand.empty() )
-                        for ( auto& pr : cand ) inBand.push_back( pr.first );  // fallback: any
-                    if ( !inBand.empty() )
-                        nextId = inBand[ std::uniform_int_distribution<int>( 0, (int)inBand.size() - 1 )( targetRng ) ];
+
+                    if ( prevId <= 0 || aruco.GetGridMarkerCenterPx( prevId ) == cv::Point2i{} ) {
+                        nextId = sel[ std::uniform_int_distribution<int>( 0, (int)sel.size() - 1 )( targetRng ) ];
+                    } else {
+                        const cv::Point2i pPx = aruco.GetGridMarkerCenterPx( prevId );
+                        float dmin = 1e9f, dmax = 0.0f;
+                        std::vector<std::pair<int, float>> cand;
+                        for ( int id : sel ) {
+                            if ( id == prevId ) continue;
+                            const cv::Point2i cPx = aruco.GetGridMarkerCenterPx( id );
+                            const float dx = ( cPx.x - pPx.x ) * mmpp;
+                            const float dy = ( cPx.y - pPx.y ) * mmpp;
+                            const float d  = std::sqrt( dx * dx + dy * dy );
+                            cand.push_back( { id, d } );
+                            dmin = std::min( dmin, d );
+                            dmax = std::max( dmax, d );
+                        }
+                        const int   nBands = std::max( 1, cfg.fittsBoard.numDistanceBands );
+                        const int   band   = distanceBandCursor % nBands;
+                        distanceBandCursor = ( distanceBandCursor + 1 ) % nBands;
+                        const float w  = ( dmax - dmin ) / nBands;
+                        const float lo = dmin + band * w;
+                        const float hi = ( band == nBands - 1 ) ? dmax + 1.0f : lo + w;
+                        std::vector<int> inBand;
+                        for ( auto& pr : cand )
+                            if ( pr.second >= lo && pr.second <= hi ) inBand.push_back( pr.first );
+                        if ( inBand.empty() )
+                            for ( auto& pr : cand ) inBand.push_back( pr.first );  // fallback: any
+                        if ( !inBand.empty() )
+                            nextId = inBand[ std::uniform_int_distribution<int>( 0, (int)inBand.size() - 1 )( targetRng ) ];
+                    }
                 }
 
                 keyboard.SetFittsTargetId( nextId );
@@ -456,7 +536,15 @@ int main() {
                 if ( trialLogger.IsPrimed() ) {
                     trialLogger.SetUserId( kb.activeUserId );
                     trialLogger.StartTrial( nextId );
-                    trialStartSecs = nowSecs;
+                    // Header metadata: target centroid relative to screen centre
+                    // [mm] (x right+, y down+) and the measured Cal3 fingertip
+                    // offset (0,0,0 if Cal3 never ran).
+                    const cv::Point2i tCenterPx = aruco.GetGridMarkerCenterPx( nextId );
+                    const float tScreenXmm = ( tCenterPx.x - cfg.touchscreen.width  * 0.5f ) * cfg.touchscreen.mmPerPixel;
+                    const float tScreenYmm = ( tCenterPx.y - cfg.touchscreen.height * 0.5f ) * cfg.touchscreen.mmPerPixel;
+                    const cv::Point3f ftOff = cal3.GetFinalOffset();
+                    trialLogger.SetTrialMeta( tScreenXmm, tScreenYmm,
+                                              ftOff.x, ftOff.y, ftOff.z, cal3.IsComplete() );
                     // Sync prevLogTouched so a touch already in progress at trial
                     // start is not immediately detected as the finish rising edge.
                     prevLogTouched = touchState.isTouched;
@@ -552,7 +640,7 @@ int main() {
             targetPosMm,
             targetRoll,
             cal3.IsComplete(),
-            cv::Point2f{ cal3.GetFinalOffset().x, cal3.GetFinalOffset().y },
+            cal3.GetFinalOffset(),
             cal3.GetRollRef(),
             cfg.target.offsetDefaultMm,
             !guidanceSuppressedByTouch
@@ -686,6 +774,13 @@ int main() {
             if ( kb.pendingPretensionAdvance ) {
                 pretension.Advance( rxPkt );
                 keyboard.ClearPretensionAdvance();
+                // Guided sequence finished (home recorded at step 3/3) - return
+                // to the default IDLE state and wait for the next command. The
+                // RobotState ladder keeps preload tension held (READY) since
+                // pretension.IsComplete() stays true.
+                if ( pretension.IsComplete() ) {
+                    keyboard.SetInputState( InputState::IDLE );
+                }
             }
             keyboard.SetExternalStatus( pretension.GetStatus() );
         }
@@ -868,14 +963,22 @@ int main() {
 
                 // Trial logging - one row per camera frame while a capture runs.
                 if ( trialLogger.IsActive() ) {
-                    cv::Point3f tpos; cv::Vec4f tquat; bool tDetected = false;
-                    if ( fitts.GetTargetFullPose( markers, kb.fittsTargetId, tpos, tquat, tDetected ) ) {
+                    cv::Point3f tpos; cv::Vec4f tquat; cv::Point3f tdisp; bool tDetected = false;
+                    if ( fitts.GetTargetFullPose( markers, kb.fittsTargetId,
+                                                  cal3.IsComplete(), cal3.GetFinalOffset(),
+                                                  cal3.GetRollRef(),
+                                                  tpos, tquat, tdisp, tDetected ) ) {
                         const auto tele = controller.GetTelemetry();
                         TrialSample s;
-                        s.tSecs    = nowSecs - trialStartSecs;
+                        // Stamp with the camera capture time (CameraHandler sets
+                        // frame.timestamp), not the main-loop poll time, so the
+                        // sample cadence reflects the true frame interval. Write()
+                        // re-zeroes to the first row, so absolute value is fine.
+                        s.tSecs    = frame.timestamp;
                         s.targetId = kb.fittsTargetId;
                         s.detected = tDetected ? 1 : 0;
                         s.tx = tpos.x; s.ty = tpos.y; s.tz = tpos.z;
+                        s.dx = tdisp.x; s.dy = tdisp.y; s.dz = tdisp.z;
                         s.qx = tquat[0]; s.qy = tquat[1]; s.qz = tquat[2]; s.qw = tquat[3];
                         s.pwmA = tele.outputPwm.x; s.pwmB = tele.outputPwm.y; s.pwmC = tele.outputPwm.z;
                         trialLogger.AddSample( s );
@@ -924,6 +1027,18 @@ int main() {
             }
 
             display.Update( *displayFrame, markers, touchState, kb, serialSt );
+        }
+
+        // Stall probe (see iterStart): flag long iterations that drop frames.
+        const double iterMs =
+            std::chrono::duration<double, std::milli>( Clock::now() - iterStart ).count();
+        if ( iterMs > 25.0 ) {
+            std::cerr << "Main: long iteration " << std::fixed << std::setprecision( 1 )
+                      << iterMs << " ms"
+                      << ( trialLogger.IsActive() ? " (DROPPED frames during active trial)" : "" )
+                      << " - newFrame=" << isNewFrame
+                      << " fitts=" << ( kb.systemState == SystemState::FITTS )
+                      << "\n";
         }
     }
 

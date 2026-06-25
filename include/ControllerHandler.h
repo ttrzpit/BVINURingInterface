@@ -84,7 +84,8 @@ struct ControllerTelemetry {
 
     cv::Point3f displacement;           ///< Δp = pos_target_3d − pos_fingertip [mm] - the move that
                                          ///< lands the fingertip on the target (camera frame, Y-up, Z=depth).
-                                         ///< Δp.xy equals the PID position error; Δp.z is depth_to_target.
+                                         ///< Δp.xy equals the PID position error; Δp.z is the fingertip-to-target
+                                         ///< depth (target depth minus the Cal3 standoff), not camera-to-target.
     cv::Point2f measuredForce;          ///< Measured force from amplifier current [N]
     std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT> stiffnessProfile; ///< K(theta) [N/mm]
     bool        stiffnessValid;         ///< True once Cal2Handler has produced K(theta)
@@ -122,7 +123,8 @@ public:
      * @param markerPosMm      Marker position from DetectedMarker::positionMm [mm]
      * @param markerRollRad    Marker roll from DetectedMarker::rollRad [rad]
      * @param cal3Complete     True once Cal3 fingertip-offset calibration is done
-     * @param cal3Offset       Calibrated camera-to-fingertip offset vector (x, y) [mm]
+     * @param cal3Offset       Calibrated camera-to-fingertip offset vector (x, y, z) [mm];
+     *                         z is the standoff used only for the displayed Guiding Pos depth
      * @param cal3RollRefRad   Cal3 reference roll angle [rad]
      * @param defaultOffsetMm  Fallback Y offset used before Cal3 completes [mm]
      * @param guidanceActive   False suppresses guidance (e.g. touch already recorded)
@@ -131,7 +133,7 @@ public:
                    cv::Point3f markerPosMm,
                    float       markerRollRad,
                    bool        cal3Complete,
-                   cv::Point2f cal3Offset,
+                   cv::Point3f cal3Offset,
                    float       cal3RollRefRad,
                    float       defaultOffsetMm,
                    bool        guidanceActive);
@@ -413,7 +415,7 @@ private:
     cv::Point3f targetMarkerPosMm_     = {};
     float       targetMarkerRollRad_   = 0.0f;
     bool        targetCal3Complete_    = false;
-    cv::Point2f targetCal3Offset_      = {};
+    cv::Point3f targetCal3Offset_      = {};
     float       targetCal3RollRefRad_  = 0.0f;
     float       targetDefaultOffsetMm_ = 0.0f;
 

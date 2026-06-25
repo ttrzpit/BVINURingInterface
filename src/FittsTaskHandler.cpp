@@ -158,8 +158,11 @@ bool FittsTaskHandler::EstimateTargetFromBoard(const std::vector<DetectedMarker>
 }
 
 bool FittsTaskHandler::GetTargetFullPose(const std::vector<DetectedMarker>& markers,
-                                         int targetId, cv::Point3f& posMmOut,
-                                         cv::Vec4f& quatXyzwOut, bool& detectedOut) const {
+                                         int targetId,
+                                         bool cal3Complete, cv::Point3f cal3Offset,
+                                         float cal3RollRef,
+                                         cv::Point3f& posMmOut, cv::Vec4f& quatXyzwOut,
+                                         cv::Point3f& dispMmOut, bool& detectedOut) const {
     const FittsMarker* fm = layout_.Find(targetId);
     if (!fm) return false;
 
@@ -167,20 +170,45 @@ bool FittsTaskHandler::GetTargetFullPose(const std::vector<DetectedMarker>& mark
     for (const auto& m : markers)
         if (m.id == targetId) { detectedOut = true; break; }
 
+    // --- Clean target trajectory (camera frame, Y-up) ------------------------
+    // Use the ambiguity-free homography + apparent-scale estimator rather than
+    // solvePnP, whose planar-pose ambiguity throws the depth +/-50 mm when the
+    // board is far away. This is the same estimate that drives live guidance.
+    float rollRad = 0.0f;
+    if (!EstimateTargetFromBoard(markers, targetId, posMmOut, rollRad)) return false;
+
+    // --- Fingertip-compensated displacement Δp = target - fingertip ----------
+    // Uses the FULL 3D Cal3 offset (incl. its Z standoff), so dz -> 0 when the
+    // fingertip reaches the target plane. Cal3 offset = fingertip - camera in the
+    // screen-world frame (X right, Y DOWN, Z INTO the screen / away from camera).
+    // The camera-frame depth axis points the same way as screen-world +Z (toward
+    // the screen), so Z carries over unchanged and cal3Offset.z is the positive
+    // standoff -> dz = tz - standoff < tz. Only Y flips (screen Y-down -> camera
+    // Y-up). Then roll about +Z by (roll_now - roll_ref) to match
+    // ControllerHandler::BuildRollCorrection.
+    if (cal3Complete) {
+        const cv::Point3f dFull(cal3Offset.x, -cal3Offset.y, cal3Offset.z);
+        const float dRoll = rollRad - cal3RollRef;
+        const float c = std::cos(dRoll), s = std::sin(dRoll);
+        const cv::Point3f fingertip(c * dFull.x - s * dFull.y,
+                                    s * dFull.x + c * dFull.y,
+                                    dFull.z);
+        dispMmOut = posMmOut - fingertip;
+    } else {
+        dispMmOut = posMmOut;    // no compensation available
+    }
+
+    // --- Orientation (nice-to-have, OpenCV Y-down) ---------------------------
+    // board->camera rotation from solvePnP, as a quaternion. May be noisy far
+    // away (planar-pose ambiguity); position above is unaffected by it.
     cv::Vec3d rvec, tvec;
-    if (!ComputeArucoPose(markers, rvec, tvec) || tvec[2] <= 1e-6) return false;
+    if (!ComputeArucoPose(markers, rvec, tvec) || tvec[2] <= 1e-6) {
+        quatXyzwOut = cv::Vec4f(0.f, 0.f, 0.f, 1.f);
+        return true;
+    }
 
     cv::Mat R;
     cv::Rodrigues(rvec, R);
-
-    // Target marker centre (board mm) -> camera frame: C = R*P + t.
-    const double cx = (fm->xPx + fm->sizePx * 0.5) * touchCfg_.mmPerPixel;
-    const double cy = (fm->yPx + fm->sizePx * 0.5) * touchCfg_.mmPerPixel;
-    cv::Mat P = (cv::Mat_<double>(3, 1) << cx, cy, 0.0);
-    cv::Mat C = R * P + cv::Mat(tvec);
-    posMmOut = cv::Point3f(static_cast<float>(C.at<double>(0)),
-                           static_cast<float>(C.at<double>(1)),
-                           static_cast<float>(C.at<double>(2)));
 
     // Rotation matrix (board->camera) -> quaternion (x,y,z,w).
     const double m00 = R.at<double>(0,0), m01 = R.at<double>(0,1), m02 = R.at<double>(0,2);

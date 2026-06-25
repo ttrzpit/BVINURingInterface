@@ -114,6 +114,7 @@ enum class KeyAction {
     SET_ROBOT_READY,
     TOGGLE_STIFFNESS_GAIN,
     TOGGLE_LOGGING,
+    TOGGLE_ESTOP,
 };
 
 // ---- Motor test request -----------------------------------------------------
@@ -169,6 +170,7 @@ struct KeyboardState {
     bool                 pendingSetHomePosition = false;                        ///< One-shot: 'Z' pressed (record current encoder pose as home)
     bool                 pendingRandomTarget = false;                           ///< One-shot: 'r' pressed - main picks the (distance-stratified) target
     bool                 pendingLoggingToggle = false;                          ///< One-shot: 'L' pressed - main toggles the trial logger
+    bool                 pendingEStopToggle = false;                            ///< One-shot: spacebar pressed - main toggles the guidance-output e-stop
     std::string          inputBuffer;                                           ///< Numeric value currently being typed
     std::string          outputBuffer;                                          ///< Display text for the last executed command
 };
@@ -225,6 +227,9 @@ class KeyboardHandler {
 
     /** @brief Clear the one-shot 'L' logging-toggle request (main consumed it). */
     void ClearLoggingToggle() { state_.pendingLoggingToggle = false; }
+
+    /** @brief Clear the one-shot spacebar e-stop-toggle request (main consumed it). */
+    void ClearEStopToggle() { state_.pendingEStopToggle = false; }
 
     /**
      * @brief Force the input state directly (bypassing the key-table dispatch),

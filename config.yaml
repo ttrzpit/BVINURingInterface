@@ -23,7 +23,7 @@ aruco_detector:
    adaptive_thresh_win_size_step: 10   # Step size (pixels) between adaptive_thresh_win_size_min and _max - the detector reruns thresholding at each window size in this sequence. A larger step means fewer passes (faster) but coarser coverage of lighting scales; a smaller step is slower but more thorough.
 
    # Marker geometry filters: reject detections that are too small/large/imprecise.
-   min_marker_perimeter_rate:      0.01   # Minimum marker contour perimeter, as a fraction of the maximum image dimension, for a candidate to be considered. Smaller values allow smaller (more distant) markers to be detected but increase false positives from noise; larger values filter out tiny spurious contours.
+   min_marker_perimeter_rate:      0.1   # Minimum marker contour perimeter, as a fraction of the maximum image dimension, for a candidate to be considered. Smaller values allow smaller (more distant) markers to be detected but increase false positives from noise; larger values filter out tiny spurious contours.
    max_marker_perimeter_rate:      4.0    # Maximum marker contour perimeter, as a fraction of the maximum image dimension, for a candidate to be considered. Values above 4.0 (i.e. larger than the image itself) effectively disable this upper bound, so only min_marker_perimeter_rate filters out implausibly large contours.
    polygonal_approx_accuracy_rate: 0.03   # Relative accuracy (as a fraction of the contour perimeter) used by cv::approxPolyDP when reducing each candidate contour to a 4-corner polygon. Smaller values demand a tighter fit to 4 corners (rejecting non-square shapes) but can fail on slightly distorted markers; larger values are more permissive.
    min_corner_distance_rate:       0.05   # Minimum allowed distance between any two corners of a candidate marker, as a fraction of its perimeter. Candidates whose corners are closer together than this (degenerate/collapsed quads) are rejected as noise rather than real markers.
@@ -186,7 +186,21 @@ fitts_board_assignments:
    select_border_rows:        1        # Exclude this many fine rows at the top & bottom from random selection
    select_border_cols:        1        # Exclude this many fine cols at the left & right from random selection
    num_distance_bands:        5        # Distance bands cycled for an even spread of movement distances
+   # Marker IDs to exclude from the random ("r") target pool. Still rendered and
+   # detected for pose/guidance - just never picked as random targets. Add/remove
+   # IDs here (YAML inline list). Leave as [] for no exclusions.
+   random_target_excluded_ids: [73, 74, 75, 100, 101, 102, 103, 104, 105, 130, 131, 132, 133, 134, 135, 160, 161, 162]
    
+# ---- Accuracy trials (manual random-target debug pool) ------------------------
+# random_pool: a list of fine marker IDs that the Fitts 'r' key cycles through,
+# in random order without repeating, for manual/debug target selection. Each 'r'
+# press picks one unused ID from this pool. Once every ID has been used, the
+# program prints "Moving outside of random pool, selecting new random value" and
+# reverts to the normal whole-board random target picker. The pool is refreshed
+# each time the FITTS task is entered. Leave as [] to disable (normal picker).
+accuracy_trials:
+   random_pool: [126, 262]
+
 # ---- Fitts target circle ------------------------------------------------------
 # radius_mm         : Drawn target circle radius [mm]
 # offset_default_mm : Default Y offset (below the tag center) shown as a gray

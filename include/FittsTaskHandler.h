@@ -80,18 +80,34 @@ public:
                                  std::array<cv::Point2f, 4>* cornersPxOut = nullptr) const;
 
     /**
-     * @brief Full 6-DOF pose of the target marker in the camera frame (OpenCV
-     *        convention, Y-down), from a board solvePnP over all visible markers
-     *        - for per-frame trial logging. During a trial the finger is close
-     *        and many fine markers are visible, so this pose is well-conditioned.
-     * @param posMmOut     Target marker centre, camera frame [mm]
-     * @param quatXyzwOut  Quaternion (x,y,z,w) of the board->camera rotation
-     * @param detectedOut  True if the target marker itself was detected this frame
-     * @return false if the target is unknown or the board pose could not be solved
+     * @brief Per-frame trial-logging sample for the target marker.
+     *
+     * Position (posMmOut) comes from the ambiguity-free homography + apparent-
+     * scale estimator (EstimateTargetFromBoard), camera frame Y-UP, so the
+     * logged trajectory stays clean at long range instead of flipping between
+     * the two planar-pose solutions the way solvePnP depth does.
+     *
+     * dispMmOut is the fingertip-compensated displacement Δp = target - fingertip
+     * (camera frame Y-up), computed with the FULL 3D Cal3 offset (incl. its Z
+     * standoff), so dz -> 0 as the fingertip reaches the target plane - unlike
+     * the controller's planar-only displacement.
+     *
+     * quatXyzwOut is the board->camera rotation (OpenCV Y-DOWN) from solvePnP;
+     * nice-to-have orientation only, may be noisy far away.
+     *
+     * @param cal3Complete  Whether Cal3 finished (compensation available)
+     * @param cal3Offset    Calibrated camera->fingertip offset [mm] (Cal3 frame)
+     * @param cal3RollRef   Cal3 roll reference [rad]
+     * @param posMmOut      Target marker centre, camera frame Y-up [mm]
+     * @param quatXyzwOut   Quaternion (x,y,z,w) of board->camera rotation
+     * @param dispMmOut     Δp = target - fingertip, camera frame Y-up [mm]
+     * @param detectedOut   True if the target marker itself was detected this frame
+     * @return false if the target is unknown or no stable estimate was available
      */
     bool GetTargetFullPose(const std::vector<DetectedMarker>& markers, int targetId,
+                           bool cal3Complete, cv::Point3f cal3Offset, float cal3RollRef,
                            cv::Point3f& posMmOut, cv::Vec4f& quatXyzwOut,
-                           bool& detectedOut) const;
+                           cv::Point3f& dispMmOut, bool& detectedOut) const;
 
     // ---- Touch sample (for ArucoHandler touchscreen overlay) ------------------
     bool               HasTouchSample() const { return sampleValid_; }

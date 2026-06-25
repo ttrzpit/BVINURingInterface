@@ -28,6 +28,7 @@
 #include <array>
 #include <opencv2/core.hpp>  // cv::Mat, cv::FileStorage
 #include <string>
+#include <vector>
 
 // ---- Camera -----------------------------------------------------------------
 
@@ -170,6 +171,21 @@ struct FittsBoardConfig {
     int selectBorderRows = 1;
     int selectBorderCols = 1;
     int numDistanceBands = 5;
+
+    // Marker IDs excluded from the random ("r") target pool. These markers are
+    // still rendered on the board and still detected for pose/guidance - they
+    // just cannot be picked as random targets. Edit via config.yaml.
+    std::vector<int> excludedTargetIds;
+};
+
+// ---- Accuracy Trials (manual random-target debug pool) ----------------------
+// A fixed, operator-supplied list of marker IDs cycled (in random order, no
+// repeats) by the Fitts 'r' key for debugging. Once every ID in the pool has
+// been used, selection falls back to the normal whole-board random picker.
+// Leave random_pool empty ([]) to disable and always use the normal picker.
+
+struct AccuracyTrialsConfig {
+    std::vector<int> randomPool;  // Marker IDs to cycle through on 'r' (empty = disabled)
 };
 
 // ---- Touchscreen Monitor ----------------------------------------------------
@@ -311,6 +327,7 @@ class Config {
     ArucoDisplayConfig arucoDisplay;
     ArucoCalibrationGridConfig arucoCalGrid;
     FittsBoardConfig fittsBoard;
+    AccuracyTrialsConfig accuracyTrials;
     TouchscreenConfig touchscreen;
     DisplayConfig display;
     TelemetryConfig telemetry;

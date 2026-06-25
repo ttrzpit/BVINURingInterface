@@ -28,7 +28,13 @@ struct KeyCommand {
 inline const std::vector<KeyCommand> kKeyCommandTable = {
     // ---- SYSTEM ---------------------------------------------------------------
     { { 27 }, InputState::ANY, InputState::QUIT, "Exiting.", KeyAction::NONE },
-    { { 32 }, InputState::ANY, InputState::IDLE, "Input cleared.", KeyAction::NONE },
+    // Spacebar is the e-stop: toggle guidance output off (tension PWM only) / on.
+    // Real outcome text is set via SetExternalStatus() by main.cpp.
+    { { 32 }, InputState::ANY, InputState::SAME, "Toggling e-stop...", KeyAction::TOGGLE_ESTOP },
+    // Delete (255 from OpenCV) cancels out of any state back to IDLE (the old
+    // spacebar action). It is a global escape hatch (see KeyboardHandler.cpp) so
+    // it works even mid numeric-entry; Backspace (8/127) edits the buffer there.
+    { { 255 }, InputState::ANY, InputState::IDLE, "Input cleared.", KeyAction::NONE },
     { { 96 }, InputState::ANY, InputState::IDLE, "System cleared, returning to IDLE state.", KeyAction::NONE },
 
     // ---- GUIDANCE OUTPUT TOGGLE ---------------------------------------------------
@@ -49,7 +55,10 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { { 'o' }, InputState::CAL_SEL, InputState::CAL_OFF, "Running fingertip offset calibration.", KeyAction::NONE },
 
     // ---- LOGGING ---------------------------------------------------------------
-    // { { 'L' }, InputState::ANY, InputState::LOG, "Select logging option: [u] Set User ID...", KeyAction::NONE },
+    // 'L' is a system-level trial-logging toggle - works in any state, so it can
+    // be armed once at the start of a session. If no user ID has been entered,
+    // main.cpp jumps to the user-ID prompt first and primes once it is set.
+    { { 'L' }, InputState::ANY, InputState::SAME, "", KeyAction::TOGGLE_LOGGING },
     { { 'U' }, InputState::ANY, InputState::LOG_UID, "Enter ID for user (000-999)...", KeyAction::NONE },
 
     // ---- PWM_TEST ---------------------------------------------------------------
@@ -70,8 +79,6 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { { 'm' }, InputState::FIT_RUN, InputState::FIT_ACT, "Which marker ID (fine = 1-414 | coarse = 451-454)...", KeyAction::NONE },
     { { 'r' }, InputState::FIT_SEL, InputState::FIT_RUN, "Active marker set to [MARKER_ID].", KeyAction::RANDOM_FITTS_TARGET },
     { { 'r' }, InputState::FIT_RUN, InputState::FIT_RUN, "Active marker set to [MARKER_ID].", KeyAction::RANDOM_FITTS_TARGET },
-    { { 'L' }, InputState::FIT_SEL, InputState::SAME, "Trial logging toggled.", KeyAction::TOGGLE_LOGGING },
-    { { 'L' }, InputState::FIT_RUN, InputState::SAME, "Trial logging toggled.", KeyAction::TOGGLE_LOGGING },
 
     // ---- TENSION / PRETENSION ---------------------------------------------------
     // 'T' opens the tensioning menu: [p] runs the full guided pretensioning
