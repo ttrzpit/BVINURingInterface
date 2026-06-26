@@ -24,7 +24,7 @@ disp(headers.stiffness_measurements)
 close all;
 
 % Select user and trial
-key = "u130_t324" ;
+key = "u123_t057" ;
 hdr = headers(headers.trial_key == key, :);   % adjust to your actual user/target IDs
 row = trials(trials.trial_key == key , :);
 tt  = row.data{1};
