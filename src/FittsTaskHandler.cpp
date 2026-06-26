@@ -115,66 +115,51 @@ bool FittsTaskHandler::EstimateTargetFromBoard( const std::vector<DetectedMarker
         for ( int k = 0; k < 4; k++ ) ( *cornersPxOut )[k] = tImg[k];
     const cv::Point2f centerPx = tImg[4];
 
-    // Depth from apparent marker scale: Z = f * sizeMm / edgePx per marker,
-    // aggregated over visible markers. This uses only apparent size (not tilt),
-    // so it is free of the planar-pose ambiguity and stays stable far away.
+    // Depth from the homography-projected target scale. tImg[0..3] are the
+    // target marker's four corners mapped through the SAME homography that gave
+    // centerPx, so depth and XY now come from ONE continuous fit. The apparent
+    // edge of those projected corners is the local image scale at the target's
+    // own board location, i.e. edgePx = f * sizeMm / z_target, which inverts to
+    // the depth below. This uses only apparent size (not tilt), so it is free of
+    // solvePnP's planar-pose ambiguity and stays stable far away.
     //
-    // Aggregate with an inverse-variance WEIGHTED MEDIAN. A marker's depth
-    // z_i = f * sizeMm / edge_i has corner-localisation noise that propagates as
-    // Δz_i ≈ (z / edge_i) * σ_px, i.e. variance ∝ 1/edge_i², so the
-    // inverse-variance weight is edge_i² (the marker's apparent area). This makes
-    // large, well-resolved markers dominate - coarse tags when far, fine tags up
-    // close - while tiny, distant markers, whose few-pixel edges turn sub-pixel
-    // jitter into tens of mm of depth error, barely count. It is still a MEDIAN
-    // (50% breakdown point), so it keeps the plain median's rejection of a single
-    // bad marker (motion blur, grazing/half-occluded tag); the weighting only
-    // stops the small, noisy markers from dragging the central value when just a
-    // few markers are visible at range - the residual source of the Z spikes. The
-    // XY centre already comes from a RANSAC homography, which is why only depth
-    // was spiking.
-    const double f = 0.5 * ( camCfg_.fx + camCfg_.fy );
-    std::vector<double> perMarkerDepth;   // z_i [mm]
-    std::vector<double> perMarkerWeight;  // edge_i² (inverse-variance weight)
-    perMarkerDepth.reserve( markers.size() );
-    perMarkerWeight.reserve( markers.size() );
-    for ( const auto& m : markers ) {
-        const FittsMarker* v = layout_.Find( m.id );
-        if ( !v ) continue;
-        double edge = 0.0;
-        for ( int k = 0; k < 4; k++ ) {
-            const cv::Point2f d = m.cornersPx[( k + 1 ) & 3] - m.cornersPx[k];
-            edge += std::sqrt( d.x * d.x + d.y * d.y );
-        }
-        edge *= 0.25;
-        if ( edge > 1e-3 ) {
-            perMarkerDepth.push_back( f * ( v->sizePx * mmpp ) / edge );
-            perMarkerWeight.push_back( edge * edge );
-        }
+    // Why this replaced the per-marker weighted median: a median is a SELECTION
+    // operator, so it steps to a neighbouring marker's depth whenever the visible
+    // set changes - e.g. a coarse corner marker hitting the frame edge and being
+    // dropped while moving toward the screen. The homography, by contrast, is a
+    // least-squares fit over the RANSAC inliers, so as markers enter/leave the
+    // FOV it - and the projected target edge - changes continuously, with no
+    // step. Outlier rejection still happens, once, in findHomography's RANSAC, so
+    // both XY and depth inherit it. Up close the target marker is itself an
+    // inlier, so the projected corners match its measured corners and depth
+    // degrades gracefully to the direct single-marker measurement. Using the
+    // local scale AT the target location (not a board-wide aggregate) also makes
+    // board tilt correct for free.
+    //
+    // Physically plausible target-depth band for this rig [mm]. A value outside
+    // this band can only come from a degenerate homography or a false decode
+    // poisoning the fit; rejecting it keeps a single bad frame from driving
+    // guidance. The board's closest real approach is the fingertip standoff
+    // (~90 mm at touch), so a 50 mm floor never clips real data; the ceiling is
+    // generous headroom past the farthest target (~1050 mm observed).
+    constexpr double kMinPlausibleDepthMm = 50.0;
+    constexpr double kMaxPlausibleDepthMm = 2000.0;
+
+    double edgePx = 0.0;
+    for ( int k = 0; k < 4; k++ ) {
+        const cv::Point2f d = tImg[( k + 1 ) & 3] - tImg[k];
+        edgePx += std::sqrt( d.x * d.x + d.y * d.y );
     }
-    if ( perMarkerDepth.empty() ) return false;
+    edgePx *= 0.25;
+    if ( edgePx < 1e-3 ) return false;
 
-    // Weighted median: sort depths (carrying their weights), then walk the sorted
-    // order accumulating weight until it reaches half the total - that value is
-    // the weighted median.
-    std::vector<size_t> order( perMarkerDepth.size() );
-    for ( size_t i = 0; i < order.size(); i++ ) order[i] = i;
-    std::sort( order.begin(), order.end(),
-               [&]( size_t a, size_t b ) { return perMarkerDepth[a] < perMarkerDepth[b]; } );
-
-    double totalW = 0.0;
-    for ( double w : perMarkerWeight ) totalW += w;
-
-    const double halfW = 0.5 * totalW;
-    double depth = perMarkerDepth[order.back()];   // fallback (all weight below half)
-    double cumW  = 0.0;
-    for ( size_t idx : order ) {
-        cumW += perMarkerWeight[idx];
-        if ( cumW >= halfW ) { depth = perMarkerDepth[idx]; break; }
-    }
+    const double f     = 0.5 * ( camCfg_.fx + camCfg_.fy );
+    const double depth = f * ( fm->sizePx * mmpp ) / edgePx;
+    if ( depth < kMinPlausibleDepthMm || depth > kMaxPlausibleDepthMm ) return false;
 
     // Camera-relative target position from the image ray + depth (Y-up, to match
     // DetectedMarker::positionMm). Stable because both centre px (homography) and
-    // depth (scale) are ambiguity-free.
+    // depth (projected target scale) come from the same ambiguity-free fit.
     const double X = ( centerPx.x - camCfg_.cx ) / camCfg_.fx * depth;
     const double Y = ( centerPx.y - camCfg_.cy ) / camCfg_.fy * depth;
     posOut = cv::Point3f( static_cast<float>( X ),

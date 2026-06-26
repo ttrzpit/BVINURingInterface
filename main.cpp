@@ -26,6 +26,7 @@
 #include <chrono>
 #include <cmath>
 #include <csignal>
+#include <cstdio>
 #include <deque>
 #include <iomanip>
 #include <iostream>
@@ -1096,6 +1097,48 @@ int main() {
             display.SetGestureIndicator( gesture.IsIndicatorActive( nowSecs ), gesture.GetLastGesture() );
             display.SetLoggingStatus( trialLogger.IsPrimed(), trialLogger.IsActive() );
             display.SetArucoStats( aruco.GetDetectionHz(), aruco.GetDetectionLagMs() );
+
+            // // --- Phase 1 detection diagnostics: once-per-second console summary
+            // // Quantifies the gap between camera delivery and pose-update rate
+            // // (duplicate frames = detector falling behind), plus per-stage
+            // // detector timing, so detection cost can be measured on the rig.
+            // // TEMPORARY - remove once Phase 1 tuning is complete.
+            // {
+            //     static double diagWindowStart = nowSecs;
+            //     static int    diagCamFrames = 0;
+            //     static int    diagPoseUpdates = 0;
+            //     static double diagPrevResultTs = -1.0;
+
+            //     diagCamFrames++;
+            //     const double curResultTs = aruco.GetLatestDetectionTimestamp();
+            //     if ( curResultTs != diagPrevResultTs ) {
+            //         diagPoseUpdates++;
+            //         diagPrevResultTs = curResultTs;
+            //     }
+
+            //     if ( kb.systemState == SystemState::FITTS ) {
+                    
+            //         const double win = nowSecs - diagWindowStart;
+            //         if ( win >= 1.0f ) {
+            //             ControllerTelemetry tele = controller.GetTelemetry();
+            //             const double        camHz = diagCamFrames / win;
+            //             const double        poseHz = diagPoseUpdates / win;
+            //             const double        dupPct = camHz > 1e-6 ? 100.0 * ( 1.0 - poseHz / camHz ) : 0.0;
+            //             char                line[256];
+            //             std::snprintf( line, sizeof( line ),
+            //                            "[DET] ID=%d tpos.z=%.2fmm cam=%.1fHz pose=%.1fHz (dup %.0f%%) detect=%.1fHz | "
+            //                            "detectMarkers=%.1fms poseSolve=%.2fms markers=%d lag=%.0fms",
+            //                            kb.activeTagId, tele.displacement.z, camHz, poseHz, dupPct, aruco.GetDetectionHz(),
+            //                            aruco.GetDetectMarkersMs(), aruco.GetPoseSolveMs(),
+            //                            aruco.GetMarkerCount(), aruco.GetDetectionLagMs() );
+            //             std::cout << line << std::endl;
+
+            //             diagWindowStart = nowSecs;
+            //             diagCamFrames = 0;
+            //             diagPoseUpdates = 0;
+            //         }
+            //     }
+            // }
 
             // Pair the displayed image with the frame the current marker
             // detection was computed from, so the overlay never drifts

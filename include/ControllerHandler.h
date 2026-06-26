@@ -393,6 +393,14 @@ private:
     double      rampStart_ = 0.0;
     float       rampValue_ = 0.0f;
 
+    // ---- Distance ramp state (ramp_type 2) ----------------------------------
+    // rampStartZ_ is the fingertip-to-target depth (displacement_.z) captured at
+    // the first detection after a new target; the ramp climbs 0->1 as the depth
+    // closes by cfg_.initial_ramp_percentage of it. One-directional (rampValue_
+    // never decreases if the user retreats). Reset by ResetRamp().
+    float       rampStartZ_ = 0.0f;
+    bool        rampZInit_  = false;
+
     // ---- Live proportional / integral gain (Stage 1, for telemetry) ---------
     float kPEffective_ = cfg_.gain_kP;
     float kIEffective_ = cfg_.gain_kI;

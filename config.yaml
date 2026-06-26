@@ -19,11 +19,11 @@ aruco_marker:
 aruco_detector:
    adaptive_thresh_constant:     5           # 5      Constant subtracted from the local mean during adaptive thresholding, which converts the grayscale image to binary before contours are searched for marker borders. Higher values produce a stricter (darker) threshold, rejecting faint/low-contrast edges; lower values pick up more edges but add noise. OpenCV default is 7.
    adaptive_thresh_win_size_min: 13           # 3      Smallest local window size (pixels) used by the adaptive threshold step. Smaller windows adapt to fine local lighting variation but are noisier; this is the starting size of the win_size_min..max..step sweep run at multiple scales to find markers under uneven illumination.
-   adaptive_thresh_win_size_max: 13          # 23     Largest local window size (pixels) used by the adaptive threshold sweep. Larger windows tolerate broader lighting gradients and help detect markers farther from the camera (where they appear smaller), at the cost of extra thresholding passes and slower detection.
+   adaptive_thresh_win_size_max: 23          # 23     Largest local window size (pixels) used by the adaptive threshold sweep. Larger windows tolerate broader lighting gradients and help detect markers farther from the camera (where they appear smaller), at the cost of extra thresholding passes and slower detection.
    adaptive_thresh_win_size_step: 10         # 10     Step size (pixels) between adaptive_thresh_win_size_min and _max - the detector reruns thresholding at each window size in this sequence. A larger step means fewer passes (faster) but coarser coverage of lighting scales; a smaller step is slower but more thorough.
 
    # Marker geometry filters: reject detections that are too small/large/imprecise.
-   min_marker_perimeter_rate:      0.03      # 0.03   Minimum marker contour perimeter, as a fraction of the maximum image dimension, for a candidate to be considered. Smaller values allow smaller (more distant) markers to be detected but increase false positives from noise; larger values filter out tiny spurious contours.
+   min_marker_perimeter_rate:      0.05      # 0.03   Minimum marker contour perimeter, as a fraction of the maximum image dimension, for a candidate to be considered. Smaller values allow smaller (more distant) markers to be detected but increase false positives from noise; larger values filter out tiny spurious contours. Raised 0.03->0.05 to cull tiny spurious contours at close range before decode/refinement (watch far-range acquisition).
    max_marker_perimeter_rate:      4.0       # 4.0    Maximum marker contour perimeter, as a fraction of the maximum image dimension, for a candidate to be considered. Values above 4.0 (i.e. larger than the image itself) effectively disable this upper bound, so only min_marker_perimeter_rate filters out implausibly large contours.
    polygonal_approx_accuracy_rate: 0.03      # 0.03   Relative accuracy (as a fraction of the contour perimeter) used by cv::approxPolyDP when reducing each candidate contour to a 4-corner polygon. Smaller values demand a tighter fit to 4 corners (rejecting non-square shapes) but can fail on slightly distorted markers; larger values are more permissive.
    min_corner_distance_rate:       0.05      # 0.05   Minimum allowed distance between any two corners of a candidate marker, as a fraction of its perimeter. Candidates whose corners are closer together than this (degenerate/collapsed quads) are rejected as noise rather than real markers.
@@ -31,18 +31,21 @@ aruco_detector:
 
    # Corner refinement improves 3D pose accuracy at a small speed cost.
    corner_refinement_method:         1       # 1      Corner refinement algorithm applied after initial detection to improve pose accuracy: 0 = none (fastest, least accurate), 1 = subpixel refinement (cv::cornerSubPix), 2 = contour-based, 3 = AprilTag-based refinement (most accurate, slowest). 1 (subpixel) is a good accuracy/speed tradeoff.
-   corner_refinement_max_iterations: 15      # 30     Maximum number of iterations the corner refinement algorithm (set by corner_refinement_method) runs per marker. More iterations can improve accuracy slightly but increase per-marker processing time; refinement stops early if corner_refinement_min_accuracy is reached first.
-   corner_refinement_min_accuracy:   0.05    # 0.01   Convergence threshold (in pixels) for corner refinement: refinement stops once corner positions change by less than this between iterations, or corner_refinement_max_iterations is reached, whichever comes first. Smaller values demand tighter convergence (slower, more precise).
+   corner_refinement_max_iterations: 30      # 30     Maximum number of iterations the corner refinement algorithm (set by corner_refinement_method) runs per marker. More iterations can improve accuracy slightly but increase per-marker processing time; refinement stops early if corner_refinement_min_accuracy is reached first.
+   corner_refinement_min_accuracy:   0.01    # 0.01   Convergence threshold (in pixels) for corner refinement: refinement stops once corner positions change by less than this between iterations, or corner_refinement_max_iterations is reached, whichever comes first. Smaller values demand tighter convergence (slower, more precise).
 
    # Detect markers on glossy/reflective surfaces that invert the black/white pattern.
    detect_inverted_marker: 0                 # 0      When enabled (1), also searches for markers printed with inverted polarity (white pattern on black background), in addition to the normal black-on-white markers. Useful for markers viewed on a backlit screen or a reflective/glossy surface where contrast can invert. Roughly doubles detection cost when on.
 
+   # Bit-decoding strictness - how many flipped bits the decoder will repair.
+   error_correction_rate: 0.4                # 0.6    Fraction of a marker's error-correction capacity the decoder may use to fix flipped bits before rejecting the candidate. OpenCV default 0.6 is lenient; on the low-Hamming-distance DICT_4X4_1000 board that lets noise/motion-blur up close decode as valid IDs (the marker-count explosion + phantom poses). Lowered to 0.4 to reject marginal candidates - fewer false markers and less corner-refinement work, so detectMarkers() is faster. Raise back toward 0.6 if genuine markers start dropping.
+
    # Perspective removal - resolution of the internal bit-extraction step.
-   perspective_remove_pixel_per_cell:          4      # 8      Resolution, in pixels per bit-cell, used when the detector warps each candidate marker to a flat square to read its black/white bit pattern. Higher values sample each cell more finely (more accurate bit decoding, especially at oblique angles) at the cost of extra processing per marker.
-   perspective_remove_ignored_margin_per_cell: 0.2    # 0.13   Fraction of each bit-cell's width/height, around its edge, that is ignored when sampling that cell's color during bit decoding. Avoids letting blur or imperfect perspective correction near a cell's border bias the black/white decision toward the wrong value.
+   perspective_remove_pixel_per_cell:          8      # 8      Resolution, in pixels per bit-cell, used when the detector warps each candidate marker to a flat square to read its black/white bit pattern. Higher values sample each cell more finely (more accurate bit decoding, especially at oblique angles) at the cost of extra processing per marker.
+   perspective_remove_ignored_margin_per_cell: 0.13    # 0.13   Fraction of each bit-cell's width/height, around its edge, that is ignored when sampling that cell's color during bit decoding. Avoids letting blur or imperfect perspective correction near a cell's border bias the black/white decision toward the wrong value.
 
    # ArUco3 detection - faster and more robust algorithm for small/distant markers.
-   use_aruco3_detection: 1   # Enables the newer ArUco3 detection pipeline, which adds a fast low-resolution pre-pass to locate marker candidates before refining them at full resolution. Generally faster and better at finding small or distant markers than the legacy pipeline, at the cost of some extra tuning parameters (not exposed here).
+   use_aruco3_detection: 0   # 0 Enables the newer ArUco3 detection pipeline, which adds a fast low-resolution pre-pass to locate marker candidates before refining them at full resolution. Generally faster and better at finding small or distant markers than the legacy pipeline, at the cost of some extra tuning parameters (not exposed here).
 
 
 # ---- ArUco Marker Display (on the touchscreen) ------------------------------
@@ -183,13 +186,13 @@ fitts_board_assignments:
    coarse_marker_x4:          487.5    # Coarse marker 1 center x-coordinate [mm]
    coarse_marker_y4:          252.23   # Coarse marker 1 center x-coordinate [mm]
    # ---- Random target selection ----
-   select_border_rows:        1        # Exclude this many fine rows at the top & bottom from random selection
+   select_border_rows:        2        # Exclude this many fine rows at the top & bottom from random selection
    select_border_cols:        1        # Exclude this many fine cols at the left & right from random selection
    num_distance_bands:        5        # Distance bands cycled for an even spread of movement distances
    # Marker IDs to exclude from the random ("r") target pool. Still rendered and
    # detected for pose/guidance - just never picked as random targets. Add/remove
    # IDs here (YAML inline list). Leave as [] for no exclusions.
-   random_target_excluded_ids: [1, 2, 23, 24, 25, 26, 47, 48, 49, 50, 71, 72, 73, 74, 75, 100, 101, 102, 103, 104, 105, 130, 131, 132, 133, 134, 135, 160, 161, 162, 343, 366, 367, 390, 391, 414]
+   random_target_excluded_ids: [1, 2, 23, 24, 25, 26, 47, 48, 49, 50, 71, 72, 73, 74, 75, 76, 99, 100, 101, 102, 103, 104, 105, 130, 131, 132, 133, 134, 135, 160, 161, 162, 343, 366, 367, 390, 391, 414]
    
 # ---- Accuracy trials (manual random-target debug pool) ------------------------
 # random_pool: a list of fine marker IDs that the Fitts 'r' key cycles through,
@@ -199,7 +202,19 @@ fitts_board_assignments:
 # reverts to the normal whole-board random target picker. The pool is refreshed
 # each time the FITTS task is entered. Leave as [] to disable (normal picker).
 accuracy_trials:
-   random_pool: [57, 111, 124, 267, 275, 286]
+   random_pool:   [354] # [57, 111, 124, 267, 275, 286] 
+   target_set_01: [51, 52, 53, 77, 78, 79, 80, 106, 107, 108, 109, 110, 136, 137, 138, 139, 140 ]
+   target_set_02: [54, 55, 56, 57, 58, 59, 60, 81, 82, 83, 84, 85, 86, 87, 111, 112, 113, 114, 115, 116, 117, 141, 142, 143, 144, 145, 146, 147 ]
+   target_set_03: [61, 62, 63, 64, 65, 66, 67, 88, 89, 90, 91, 92, 93, 94, 118, 119, 120, 121, 122, 123, 124, 148, 149, 150, 151, 152, 153, 154 ]
+   target_set_04: [68, 69, 70, 95, 96, 97, 98, 125, 126, 127, 128, 129, 155, 156, 157, 158, 159 ]
+   target_set_05: [164, 165, 166, 167, 168, 169, 170, 194, 195, 196, 197, 198, 199, 200, 224, 225, 226, 227, 228, 229, 230, 254, 255, 256, 257, 258, 259, 260 ]
+   target_set_06: [171, 172, 173, 174, 175, 176, 177, 201, 202, 203, 204, 205, 206, 207, 231, 232, 233, 234, 235, 236, 237, 261, 262, 263, 264, 265, 266, 267 ]
+   target_set_07: [178, 179, 180, 181, 182, 183, 184, 208, 209, 210, 211, 212, 213, 214, 238, 239, 240, 241, 242, 243, 244, 268, 269, 270, 271, 272, 273, 274 ]
+   target_set_08: [185, 186, 187, 188, 189, 190, 191, 215, 216, 217, 218, 219, 220, 221, 245, 246, 247, 248, 249, 250, 251, 275, 276, 277, 278, 279, 280, 281 ]
+   target_set_09: [284, 285, 286, 287, 288, 289, 290, 314, 315, 316, 317, 318, 319, 320, 344, 345, 346, 347, 368, 369, 370, 371 ]
+   target_set_10: [291, 292, 293, 294, 295, 296, 297, 321, 322, 323, 324, 325, 326, 327, 348, 349, 350, 351, 352, 353, 354, 372, 373, 374, 375, 376, 377, 378 ]
+   target_set_11: [298, 299, 300, 301, 302, 303, 304, 328, 329, 330, 331, 332, 333, 334, 355, 356, 357, 358, 359, 360, 361, 379, 380, 381, 382, 383, 384, 385 ]
+   target_set_12: [305, 306, 307, 308, 309, 310, 311, 335, 336, 337, 338, 339, 340, 341, 362, 363, 364, 365, 386, 387, 388, 389 ]
 
 # ---- Fitts target circle ------------------------------------------------------
 # radius_mm         : Drawn target circle radius [mm]
@@ -259,6 +274,9 @@ serial:
 #                     gated "endgame" integrator below to cancel steady-state
 #                     bias (e.g. the fingertip settling below the target in y).
 # integral_enable_radius_mm  : Integrator winds up only within this error radius [mm]
+# integral_z_based           : 0 = radius is the in-plane (X/Y) error only (depth ignored);
+#                              1 = radius is the full 3D fingertip-to-target distance, so it
+#                                  includes Z depth (a true sphere around the target centre)
 # integral_enable_speed_mm_s : ...and only below this finger speed [mm/s] (final settling)
 # integral_leak              : Per-frame decay of the integral while not winding up (0-1)
 # deflection_force_max : Maximum commanded guidance deflection force magnitude [N] (Stage 1, task space)
@@ -273,7 +291,19 @@ serial:
 #
 # position_tolerance: Deadband radius - no force applied inside this radius [mm]
 # lowpass_alpha     : Velocity low-pass filter coefficient (0 = heavy, 1 = none)
-# ramp_duration_secs   : Force ramp-up duration when a new target appears [s]
+# ramp_type         : How guidance force ramps up to full power
+#                       0 = no ramp (full output immediately)
+#                       1 = startup ramp (time-based; ramps over ramp_duration_secs
+#                           after a new target is selected)
+#                       2 = distance ramp (ramps as the fingertip-to-target depth
+#                           closes; see initial_ramp_percentage)
+# ramp_duration_secs   : Startup-ramp (ramp_type 1) duration when a new target appears [s]
+# initial_ramp_percentage : Distance-ramp (ramp_type 2) only. Fraction of the starting
+#                           fingertip-to-target depth that must be closed before guidance
+#                           reaches full power, e.g. 0.2 = ramp over the first 20%. Starting
+#                           at 1000 mm with 0.2 reaches full power at 800 mm. The depth is
+#                           captured at first detection of each new target, and the ramp is
+#                           one-directional: retreating (depth increasing) never reverses it.
 # max_current_amps     : Amplifier current limit [A]
 # encoder_counts_per_rev : Encoder ticks per full motor revolution
 controller_gains:
@@ -281,8 +311,9 @@ controller_gains:
    gain_kD: 0.0
    gain_kI: 0.02
    integral_enable_radius_mm: 100.0
-   integral_enable_speed_mm_s: 40.0
-   integral_leak: 0.97
+   integral_z_based: 0          # 0 = in-plane (X/Y) radius, 1 = 3D distance incl. Z depth
+   integral_enable_speed_mm_s: 60.0
+   integral_leak: 0.9
    deflection_force_max: 20.0
    tension_preload_min: 0.1
    tension_preload_max: 2.0
@@ -290,6 +321,8 @@ controller_gains:
    tension_output_max: 6.0
    position_tolerance: 1.0
    lowpass_alpha: 0.15
-   ramp_duration_secs: 3.0
+   ramp_type: 2                     # 0 = none, 1 = startup (time) ramp, 2 = distance ramp
+   ramp_duration_secs: 5.0
+   initial_ramp_percentage: 0.5    # ramp_type 2: ramp to full power over the first 20% of depth closed
    max_current_amps: 1.89
    encoder_counts_per_rev: 4096

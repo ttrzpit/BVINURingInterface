@@ -161,9 +161,19 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
 
     const cv::aruco::ArucoDetector& det =
         useCalDetector_.load() ? calDetector_ : detector_;
-    det.detectMarkers(grayFrame, corners, detectedIds);
 
-    if (detectedIds.empty()) return results;
+    // Phase 1 diagnostic: time the detectMarkers() call in isolation - it is the
+    // dominant per-frame cost and scales with the number of markers decoded.
+    const auto detT0 = std::chrono::steady_clock::now();
+    det.detectMarkers(grayFrame, corners, detectedIds);
+    const auto detT1 = std::chrono::steady_clock::now();
+    detectMarkersMs_.store(std::chrono::duration<float, std::milli>(detT1 - detT0).count());
+    markerCount_.store(static_cast<int>(detectedIds.size()));
+
+    // Reset per-frame pose-solve time; set below only if the active target is solved.
+    float poseSolveMs = 0.0f;
+
+    if (detectedIds.empty()) { poseSolveMs_.store(0.0f); return results; }
 
     const int idMin = activeValidIdMin_.load();
     const int idMax = activeValidIdMax_.load();
@@ -206,8 +216,11 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
 
             std::vector<std::vector<cv::Point2f>> singleCorner = {corners[i]};
             std::vector<cv::Vec3d> rvecs, tvecs;
+            const auto poseT0 = std::chrono::steady_clock::now();
             cv::aruco::estimatePoseSingleMarkers(
                 singleCorner, markerSizeMm, camMatrix_, distCoeffs_, rvecs, tvecs);
+            const auto poseT1 = std::chrono::steady_clock::now();
+            poseSolveMs += std::chrono::duration<float, std::milli>(poseT1 - poseT0).count();
 
             if (!tvecs.empty()) {
                 // 3D position in millimetres, camera-relative. Y is negated so
@@ -233,6 +246,7 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
         results.push_back(marker);
     }
 
+    poseSolveMs_.store(poseSolveMs);
     return results;
 }
 
@@ -692,6 +706,7 @@ void ArucoHandler::initDetector() {
     detectorParams_.detectInvertedMarker = detectorCfg_.detectInvertedMarker;
     detectorParams_.perspectiveRemovePixelPerCell = detectorCfg_.perspectiveRemovePixelPerCell;
     detectorParams_.perspectiveRemoveIgnoredMarginPerCell = detectorCfg_.perspectiveRemoveIgnoredMarginPerCell;
+    detectorParams_.errorCorrectionRate = detectorCfg_.errorCorrectionRate;
     detectorParams_.useAruco3Detection = detectorCfg_.useAruco3Detection;
 
     detector_    = cv::aruco::ArucoDetector(dictionary_,       detectorParams_);

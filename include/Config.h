@@ -110,6 +110,14 @@ struct ArucoDetectorConfig {
     int perspectiveRemovePixelPerCell = 8;
     double perspectiveRemoveIgnoredMarginPerCell = 0.13;
 
+    // Bit-decoding strictness - fraction of a marker's error-correction bits the
+    // decoder may spend fixing flipped bits before rejecting the candidate.
+    // OpenCV default is 0.6 (lenient). Lower values reject marginal candidates,
+    // which on a low-Hamming-distance dictionary (DICT_4X4_*) sharply cuts false
+    // decodes from noise/blur up close - fewer phantom markers AND less corner
+    // refinement work, so detectMarkers() runs faster.
+    double errorCorrectionRate = 0.6;
+
     // ArUco3 detection - improved algorithm that is faster and more robust for
     // small or distant markers. Requires OpenCV 4.6+.
     bool useAruco3Detection = true;
@@ -301,6 +309,7 @@ struct ControllerConfig {
     // bias such as gravity/friction shows up). Outside that window the
     // integral decays by integral_leak each frame to bleed stale windup.
     float integral_enable_radius_mm  = 30.0f;  // Wind up only within this error radius [mm]
+    int   integral_z_based           = 0;      // 0 = in-plane (X/Y) radius; 1 = full 3D fingertip-to-target distance (includes Z depth)
     float integral_enable_speed_mm_s = 40.0f;  // Wind up only below this finger speed [mm/s]
     float integral_leak              = 0.97f;  // Per-frame decay of the integral while not winding up
     float deflection_force_max = 5.0f;   // Maximum allowable guidance deflection force magnitude [N]
@@ -310,7 +319,11 @@ struct ControllerConfig {
     float tension_output_max    = 3.0f;  // T_output_max: max total commanded tension per motor (T_preload + T_deflection) [N]
     float position_tolerance  = 1.0f;    // Deadband radius - no force inside [mm]
     float lowpass_alpha       = 0.15f;   // Velocity low-pass coefficient (0=heavy, 1=none)
-    float ramp_duration_secs  = 1.0f;   // Force ramp-up duration after new target [s]
+    int   ramp_type           = 1;      // 0=no ramp, 1=startup (time) ramp, 2=distance ramp
+    float ramp_duration_secs  = 1.0f;   // Startup-ramp (ramp_type 1) duration after new target [s]
+    float initial_ramp_percentage = 0.2f; // Distance-ramp (ramp_type 2): fraction of the starting
+                                          // fingertip-to-target depth that must be closed before
+                                          // guidance reaches full power (e.g. 0.2 = first 20%)
     float max_current_amps    = 1.89f;   // Amplifier max current [A]
     int   encoder_counts_per_rev = 4096; // Encoder ticks per motor revolution
 };

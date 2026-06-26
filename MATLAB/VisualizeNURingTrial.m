@@ -836,17 +836,40 @@ function AnimateAndExportVideo(fig, t, tx, ty, tz, txm, tym, tzm, vxm, vym, vzm,
         baseNameSource = "";
     end
 
-    if baseNameSource == ""
-        warning('VisualizeNURingTrial:AnimateAndExportVideo:noSourceFilename', ...
-            'Neither ''SourceFilename'' nor ''TrialTitle'' was provided; saving animation as ''NURingTrialAnimation.mp4'' in the current folder.');
-        outFile = fullfile(pwd, 'NURingTrialAnimation.mp4');
-    else
-        [folder, name, ~] = fileparts(char(baseNameSource));
-        if folder == ""
-            folder = pwd;
-        end
-        outFile = fullfile(folder, [name '.mp4']);
+    % ---------------------------------------------------------------------
+    % Save file in root folder (previous version)
+    % ---------------------------------------------------------------------
+    % if baseNameSource == ""
+    %     warning('VisualizeNURingTrial:AnimateAndExportVideo:noSourceFilename', ...
+    %         'Neither ''SourceFilename'' nor ''TrialTitle'' was provided; saving animation as ''NURingTrialAnimation.mp4'' in the current folder.');
+    %     outFile = fullfile(pwd, 'NURingTrialAnimation.mp4');
+    % else
+    %     [folder, name, ~] = fileparts(char(baseNameSource));
+    %     if folder == ""
+    %         folder = pwd;
+    %     end
+    %     outFile = fullfile(folder, [name '.mp4']);
+    % end
+
+    % ---------------------------------------------------------------
+    % Save videos into VideoOutputs folder next to this MATLAB script
+    % ---------------------------------------------------------------
+    scriptFolder = fileparts(mfilename('fullpath'));
+    videoFolder = fullfile(scriptFolder, 'VideoOutputs');
+
+    % Create folder if it does not exist
+    if ~exist(videoFolder, 'dir')
+        mkdir(videoFolder);
     end
+
+    if baseNameSource == ""
+        videoName = 'NURingTrialAnimation.mp4';
+    else
+        [~, name, ~] = fileparts(char(baseNameSource));
+        videoName = [name '.mp4'];
+    end
+
+    outFile = fullfile(videoFolder, videoName);
 
     % ---------------------------------------------------------------
     % Fixed-frame-rate output time grid, spanning the trial's real-world

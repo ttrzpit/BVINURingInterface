@@ -102,6 +102,9 @@ bool Config::load(const std::string& filepath) {
         adet["perspective_remove_pixel_per_cell"]          >> arucoDetector.perspectiveRemovePixelPerCell;
         adet["perspective_remove_ignored_margin_per_cell"] >> arucoDetector.perspectiveRemoveIgnoredMarginPerCell;
 
+        if (!adet["error_correction_rate"].empty())
+            adet["error_correction_rate"] >> arucoDetector.errorCorrectionRate;
+
         int a3 = 1;
         adet["use_aruco3_detection"] >> a3;
         arucoDetector.useAruco3Detection = (a3 != 0);
@@ -216,6 +219,7 @@ bool Config::load(const std::string& filepath) {
         cg["gain_kD"]               >> controllerGains.gain_kD;
         cg["gain_kI"]               >> controllerGains.gain_kI;
         if (!cg["integral_enable_radius_mm"].empty())  cg["integral_enable_radius_mm"]  >> controllerGains.integral_enable_radius_mm;
+        if (!cg["integral_z_based"].empty())           cg["integral_z_based"]           >> controllerGains.integral_z_based;
         if (!cg["integral_enable_speed_mm_s"].empty()) cg["integral_enable_speed_mm_s"] >> controllerGains.integral_enable_speed_mm_s;
         if (!cg["integral_leak"].empty())              cg["integral_leak"]              >> controllerGains.integral_leak;
         cg["deflection_force_max"]  >> controllerGains.deflection_force_max;
@@ -225,7 +229,9 @@ bool Config::load(const std::string& filepath) {
         cg["tension_output_max"]    >> controllerGains.tension_output_max;
         cg["position_tolerance"]    >> controllerGains.position_tolerance;
         cg["lowpass_alpha"]         >> controllerGains.lowpass_alpha;
+        if (!cg["ramp_type"].empty())                 cg["ramp_type"]                 >> controllerGains.ramp_type;
         cg["ramp_duration_secs"]    >> controllerGains.ramp_duration_secs;
+        if (!cg["initial_ramp_percentage"].empty())   cg["initial_ramp_percentage"]   >> controllerGains.initial_ramp_percentage;
         cg["max_current_amps"]      >> controllerGains.max_current_amps;
         cg["encoder_counts_per_rev"] >> controllerGains.encoder_counts_per_rev;
     }

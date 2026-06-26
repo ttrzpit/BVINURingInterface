@@ -4,7 +4,7 @@ clear all;
 clc;
 
 % Load trial data from the specified directory
-[headers, trials, summary] = ParseNURingTrials('+TrialData');
+[headers, trials, summary] = ParseNURingTrials('+TrialData', 'Participants', {});
 %%
 disp(headers.stiffness_measurements)
 
@@ -24,7 +24,7 @@ disp(headers.stiffness_measurements)
 close all;
 
 % Select user and trial
-key = "u127_t111" ;
+key = "u130_t324" ;
 hdr = headers(headers.trial_key == key, :);   % adjust to your actual user/target IDs
 row = trials(trials.trial_key == key , :);
 tt  = row.data{1};
@@ -34,17 +34,12 @@ VisualizeNURingTrial(tt, ...
     'TargetScreenPosition', [hdr.target_screen_position_x_mm, hdr.target_screen_position_y_mm], ...
     'TrialTitle', row.filename(1), ...
     'DrawShadowXY', false, ...
-    'DrawEstimated', false, ...
+    'DrawEstimated', true, ...
     'Threshold', 500, ...
     'ShowVelocity', true, ...
-    'Animate', false, ...
+    'Animate', true, ...
     'SetZLimit', 0, ...
     'ColumnWidths', [0.4 0.3 0.3]) ;
-
-
-
-
-
 
 
 
@@ -56,4 +51,13 @@ user = "124" ;
 
 % Plot
 results = ParticipantGuidanceAnalysis(user, headers, trials, ...
+    'MatchFingersightScale', true ) ; 
+
+
+
+%% --- Linear Regression (whole study) ------------------------------------
+close all; 
+
+% Plot
+results = StudyGuidanceAnalysis(headers, trials, ...
     'MatchFingersightScale', false ) ; 

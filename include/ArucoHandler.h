@@ -106,6 +106,19 @@ public:
      *  Zero when the thread is idle or caught up. */
     float GetDetectionLagMs() const { return detectionLagMs_.load(); }
 
+    // ---- Phase 1 detection diagnostics --------------------------------------
+    /** Wall time of the last cv::aruco detectMarkers() call [ms] - the dominant
+     *  detection cost, scales with image size and decoded marker count. */
+    float GetDetectMarkersMs() const { return detectMarkersMs_.load(); }
+
+    /** Wall time of the last estimatePoseSingleMarkers() solve for the active
+     *  target [ms]. Zero on frames with no active target detected. */
+    float GetPoseSolveMs() const { return poseSolveMs_.load(); }
+
+    /** Number of markers decoded in the last detection (pre ID-range filter) -
+     *  the per-frame decode workload. */
+    int GetMarkerCount() const { return markerCount_.load(); }
+
     // ---- Touchscreen display (main thread only) -----------------------------
 
     /**
@@ -340,4 +353,7 @@ private:
     std::atomic<double> resultTimestamp_{0.0};
     std::atomic<float>  detectionHz_{ 0.0f };     // detection thread throughput [Hz]
     std::atomic<float>  detectionLagMs_{ 0.0f };  // frame→result lag [ms]
+    std::atomic<float>  detectMarkersMs_{ 0.0f }; // detectMarkers() call time [ms]
+    std::atomic<float>  poseSolveMs_{ 0.0f };     // active-target pose solve time [ms]
+    std::atomic<int>    markerCount_{ 0 };        // markers decoded in the last frame
 };
