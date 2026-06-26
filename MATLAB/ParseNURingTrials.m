@@ -1,23 +1,31 @@
-function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
+function [headers, trials, summary, userMeans, userMedians] = ParseNURingTrials(rootDir, varargin)
     %PARSENURINGTRIALS Parse NURing trial CSV files into MATLAB tables.
     %
     %   Each trial file is now expected to have the form:
     %
     %       {HEADER}
-    %       user_id: 123
-    %       target_id: 284
-    %       target_screen_position_mm: [-216.03, 48.04]
-    %       fingertip_offset: [1.22, 33.85, 20.50]
+    %       user_id: 124
+    %       target_id: 286
+    %       target_screen_position_mm: [-183.92, 48.04]
+    %       fingertip_offset: [3.03, 32.73, 19.23]
+    %       completion_time: 10.2069
+    %       endpoint_error_mm: [-0.5205, 17.6598, 2.6478]
+    %       calibration_angle_count: 4
+    %       calibration_angles_deg: [0.000000, 90.000000, 180.000000, 270.000000]
+    %       control_points_theta: [0.000000, 1.570796, 3.141593, 4.712389]
+    %       control_points_radius: [9.685735, 9.682273, 7.470439, 8.990629]
+    %       control_points_accel: [0.497382, -2.264590, 3.190859, -1.423652]
+    %       stiffness_measurements: [0.185872, 0.059771, 0.120415, 0.242385]
     %       {DATA}
     %       t_secs,target_id,detected,tx_mm,ty_mm,tz_mm,dx_mm,dy_mm,dz_mm,...
-    %       0.0000,284,0,-181.7099,...
+    %       0.0000,286,0,-75.0993,...
     %       ...
     %
     %   [headers, trials, summary] = PARSENURINGTRIALS(rootDir) scans rootDir
     %   (the +TrialData folder) for participant subfolders, each containing
     %   trial CSV files named like:
-    %       123-06192026-200806-303.csv
-    %       ^pid ^date(MMddyyyy) ^time(HHmmss) ^targetMarker
+    %       124-286-06252026-184333.csv
+    %       ^pid ^target ^date(MMddyyyy) ^time(HHmmss)
     %
     %   and returns:
     %
@@ -36,8 +44,20 @@ function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
     %       endpoint_error_x_mm            (double)
     %       endpoint_error_y_mm            (double)
     %       endpoint_error_z_mm            (double)
+    %       calibration_angle_count        (double)
+    %       calibration_angles_deg         (cell, 1x1 containing a numeric vector)
+    %       control_points_theta           (cell, 1x1 containing a numeric vector)
+    %       control_points_radius          (cell, 1x1 containing a numeric vector)
+    %       control_points_accel           (cell, 1x1 containing a numeric vector)
+    %       stiffness_measurements         (cell, 1x1 containing a numeric vector)
     %       filename                       (string)
     %       filepath                       (string)
+    %
+    %   The calibration/control-point/stiffness fields are stored as cells
+    %   holding numeric row vectors (rather than fixed x/y/z-style columns)
+    %   since their length is given by calibration_angle_count and isn't
+    %   assumed to always be 4. Pull one out with e.g.:
+    %       angles = headers.calibration_angles_deg{1};
     %
     %   After each participant's block of trial rows, HEADERS also
     %   contains two synthetic summary rows -- one with the MEAN, one with
@@ -78,10 +98,35 @@ function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
     %
     %   SUMMARY is a table with one row per participant:
     %       User    (string) - participant_id
-    %       Qty     (double) - number of trials parsed for that participant
-    %       Trials  (string) - comma-separated list of that participant's
-    %                           target markers, e.g. "032, 042, 123, 332"
-    %   SUMMARY is also printed to the console automatically.
+    %       Data    (cell)   - 1x1 cell containing a per-trial table with
+    %                           columns:
+    %           target_id            (string)
+    %           start_euclidean_mm    (double) - sqrt(dx^2+dy^2+dz^2) at the
+    %                                             first data sample (t_secs(1))
+    %                                             of that trial
+    %           completion_time_s    (double)
+    %           endpoint_error_x_mm   (double)
+    %           endpoint_error_y_mm   (double)
+    %           endpoint_error_z_mm   (double)
+    %           endpoint_error_2D_mm  (double) - sqrt(x^2+y^2) of endpoint error
+    %           endpoint_error_3D_mm  (double) - sqrt(x^2+y^2+z^2) of endpoint error
+    %   SUMMARY is also printed to the console automatically, one user at a
+    %   time, as:
+    %       User 123:
+    %       <table>
+    %
+    %   USERMEANS / USERMEDIANS are tables with one row per participant,
+    %   giving the across-trial mean / median of each of the per-trial
+    %   metrics in SUMMARY.Data (NaNs omitted):
+    %       userID
+    %       mean_completion_time / median_completion_time
+    %       mean_endpoint_error_x / median_endpoint_error_x
+    %       mean_endpoint_error_y / median_endpoint_error_y
+    %       mean_endpoint_error_z / median_endpoint_error_z
+    %       mean_endpoint_error_2D / median_endpoint_error_2D
+    %       mean_endpoint_error_3D / median_endpoint_error_3D
+    %   These are also printed to the console automatically, right after
+    %   the per-user SUMMARY tables, as "User Means:" / "User Medians:".
     %
     %   [...] = PARSENURINGTRIALS(rootDir, 'Name', Value, ...) supports:
     %       'UseParallel'   (default true)   - use parfor over trial files if
@@ -135,6 +180,8 @@ function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
         headers = emptyHeadersTable();
         trials  = emptyTrialsTable();
         summary = emptySummaryTable();
+        userMeans   = emptyUserStatTable('avg');
+        userMedians = emptyUserStatTable('med');
         return;
     end
 
@@ -157,6 +204,8 @@ function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
         headers = emptyHeadersTable();
         trials  = emptyTrialsTable();
         summary = emptySummaryTable();
+        userMeans   = emptyUserStatTable('avg');
+        userMedians = emptyUserStatTable('med');
         return;
     end
 
@@ -195,6 +244,8 @@ function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
         headers = emptyHeadersTable();
         trials  = emptyTrialsTable();
         summary = emptySummaryTable();
+        userMeans   = emptyUserStatTable('avg');
+        userMedians = emptyUserStatTable('med');
         return;
     end
 
@@ -232,6 +283,12 @@ function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
     endpoint_error_x_mm         = cellfun(@(r) r.header.endpoint_error_x_mm, rows);
     endpoint_error_y_mm         = cellfun(@(r) r.header.endpoint_error_y_mm, rows);
     endpoint_error_z_mm         = cellfun(@(r) r.header.endpoint_error_z_mm, rows);
+    calibration_angle_count     = cellfun(@(r) r.header.calibration_angle_count, rows);
+    calibration_angles_deg      = cellfun(@(r) r.header.calibration_angles_deg, rows, 'UniformOutput', false);
+    control_points_theta        = cellfun(@(r) r.header.control_points_theta, rows, 'UniformOutput', false);
+    control_points_radius       = cellfun(@(r) r.header.control_points_radius, rows, 'UniformOutput', false);
+    control_points_accel        = cellfun(@(r) r.header.control_points_accel, rows, 'UniformOutput', false);
+    stiffness_measurements      = cellfun(@(r) r.header.stiffness_measurements, rows, 'UniformOutput', false);
     h_filename    = string(cellfun(@(r) r.filename, rows, 'UniformOutput', false));
     h_filepath    = string(cellfun(@(r) r.filepath, rows, 'UniformOutput', false));
 
@@ -240,6 +297,8 @@ function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
         fingertip_offset_x_mm, fingertip_offset_y_mm, fingertip_offset_z_mm, ...
         completion_time_s, ...
         endpoint_error_x_mm, endpoint_error_y_mm, endpoint_error_z_mm,...
+        calibration_angle_count, calibration_angles_deg, control_points_theta, ...
+        control_points_radius, control_points_accel, stiffness_measurements, ...
         h_filename, h_filepath);
     headers.Properties.VariableNames{1} = 'trial_key';
     headers.Properties.VariableNames{end-1} = 'filename';
@@ -247,18 +306,31 @@ function [headers, trials, summary] = ParseNURingTrials(rootDir, varargin)
 
     headers = sortrows(headers, {'user_id', 'target_id'});
 
-    % Add two summary rows (mean, then median) after each participant's
-    % block of trials, covering completion_time_s, endpoint_error_x_mm,
-    % and endpoint_error_y_mm.
-    headers = appendParticipantSummaryRows(headers);
+    % % Add two summary rows (mean, then median) after each participant's
+    % % block of trials, covering completion_time_s, endpoint_error_x_mm,
+    % % and endpoint_error_y_mm.
+    % headers = appendParticipantSummaryRows(headers);
 
     % ---------------------------------------------------------------------
-    % Build per-participant summary table: User | Qty | Trials
+    % Build per-participant summary table: User | Data{target_id, ...}
     % ---------------------------------------------------------------------
-    summary = buildSummaryTable(trials);
-    disp(summary);
+    summary = buildSummaryTable(headers, trials);
+    for i = 1:height(summary)
+        fprintf('User %s:\n', summary.User(i));
+        disp(summary.Data{i});
+    end
 
-    disp(headers);
+    % ---------------------------------------------------------------------
+    % Build and print across-trial per-user mean/median tables
+    % ---------------------------------------------------------------------
+    userMeans   = buildUserStatTable(summary, @(x) mean(x, 'omitnan'),   'avg');
+    userMedians = buildUserStatTable(summary, @(x) median(x, 'omitnan'), 'med');
+
+    fprintf('User Means:\n');
+    disp(userMeans);
+    fprintf('User Medians:\n');
+    disp(userMedians);
+
     disp ("ParseNURingTrials: Data parsed.") ;
 
 end
@@ -405,7 +477,16 @@ function header = parseTrialHeader(headerLines)
     %           -> fingertip_offset_x_mm, fingertip_offset_y_mm, fingertip_offset_z_mm
     %       endpoint_error_mm: [x, y, z]
     %           -> endpoint_error_x_mm, endpoint_error_y_mm, endpoint_error_z_mm
-    %   plus the scalar field completion_time -> completion_time_s.
+    %   plus the scalar field completion_time -> completion_time_s, and the
+    %   newer calibration/control-point/stiffness fields, which are kept as
+    %   whole numeric vectors (length isn't fixed, so they aren't split
+    %   into named x/y/z-style columns):
+    %       calibration_angle_count   -> calibration_angle_count (scalar)
+    %       calibration_angles_deg    -> calibration_angles_deg  (vector)
+    %       control_points_theta      -> control_points_theta    (vector)
+    %       control_points_radius     -> control_points_radius   (vector)
+    %       control_points_accel      -> control_points_accel    (vector)
+    %       stiffness_measurements    -> stiffness_measurements  (vector)
 
     header = struct( ...
         'user_id', "", ...
@@ -418,7 +499,13 @@ function header = parseTrialHeader(headerLines)
         'completion_time_s',     NaN, ...
         'endpoint_error_x_mm',   NaN, ...
         'endpoint_error_y_mm',   NaN, ...
-        'endpoint_error_z_mm',   NaN);
+        'endpoint_error_z_mm',   NaN, ...
+        'calibration_angle_count', NaN, ...
+        'calibration_angles_deg',  [], ...
+        'control_points_theta',    [], ...
+        'control_points_radius',   [], ...
+        'control_points_accel',    [], ...
+        'stiffness_measurements',  []);
 
     for i = 1:numel(headerLines)
         line = strtrim(headerLines{i});
@@ -467,6 +554,21 @@ function header = parseTrialHeader(headerLines)
                     header.endpoint_error_y_mm = -vals(2);
                     header.endpoint_error_z_mm =  vals(3);
                 end
+            case 'calibration_angle_count'
+                if iscell(val)
+                    val = val{1};
+                end
+                header.calibration_angle_count = str2double(val);
+            case 'calibration_angles_deg'
+                header.calibration_angles_deg = parseBracketedNumericList(val);
+            case 'control_points_theta'
+                header.control_points_theta = parseBracketedNumericList(val);
+            case 'control_points_radius'
+                header.control_points_radius = parseBracketedNumericList(val);
+            case 'control_points_accel'
+                header.control_points_accel = parseBracketedNumericList(val);
+            case 'stiffness_measurements'
+                header.stiffness_measurements = parseBracketedNumericList(val);
             otherwise
                 % Unknown header field: ignore (forward-compatible with
                 % future header fields that this function doesn't yet know
@@ -484,13 +586,11 @@ function vals = parseBracketedNumericList(str)
 end
         
 function meta = parseTrialFilename(name)
-    %PARSETRIALFILENAME Parse "PID-MMddyyyy-HHmmss-TARGET" filename (no
-    %ext). ORIGINAL
-    % tok = regexp(name, '^(?<pid>\d+)-(?<date>\d{8})-(?<time>\d{6})-(?<target>\d+)$', 'names');
-    %PARSETRIALFILENAME Parse "PID-TARGET-MMddyyyy-HHmmss" filename (no ext).
+    %PARSETRIALFILENAME Parse "PID-TARGET-MMddyyyy-HHmmss" filename (no ext),
+    %   e.g. "124-286-06252026-184333".
     tok = regexp(name, '^(?<pid>\d+)-(?<target>\d+)-(?<date>\d{8})-(?<time>\d{6})$', 'names');
     if isempty(tok)
-        error('Filename "%s" does not match expected PID-MMddyyyy-HHmmss-TARGET pattern', name);
+        error('Filename "%s" does not match expected PID-TARGET-MMddyyyy-HHmmss pattern', name);
     end
     meta.participant_id = tok.pid;
     meta.target_marker  = tok.target;
@@ -519,64 +619,108 @@ function tf = canUseParallel()
     end
 end
 
-function summary = buildSummaryTable(trials)
-    %BUILDSUMMARYTABLE Build a User | Qty | Trials summary from the trials
-    %table, one row per unique participant_id.
-    uniqueUsers = unique(trials.participant_id);
+function summary = buildSummaryTable(headers, trials)
+    %BUILDSUMMARYTABLE Build a per-user summary: one row per participant,
+    %   with User (string) and Data (cell containing a per-trial table):
+    %       target_id, start_euclidean_mm, completion_time_s,
+    %       endpoint_error_x_mm, endpoint_error_y_mm, endpoint_error_z_mm,
+    %       endpoint_error_2D_mm, endpoint_error_3D_mm
+    %   start_euclidean_mm is computed from the first sample (t_secs(1)) of
+    %   each trial's data: sqrt(dx_mm^2 + dy_mm^2 + dz_mm^2).
+    %   Synthetic MEAN/MEDIAN/blank rows from appendParticipantSummaryRows
+    %   are excluded -- this summary is built from real trials only.
+
+    realHeaders = headers(~ismember(headers.target_id, ["MEAN", "MEDIAN", ""]), :);
+
+    uniqueUsers = unique(realHeaders.user_id, 'stable');
     nUsers = numel(uniqueUsers);
 
-    User   = uniqueUsers;
-    Qty    = zeros(nUsers, 1);
-    Trials = strings(nUsers, 1);
+    User = uniqueUsers;
+    Data = cell(nUsers, 1);
 
     for i = 1:nUsers
-        isThisUser = trials.participant_id == uniqueUsers(i);
-        Qty(i) = sum(isThisUser);
-        markers = sort(unique(trials.target_marker(isThisUser)));
-        Trials(i) = strjoin(markers, ', ');
+        u = uniqueUsers(i);
+        sub = realHeaders(realHeaders.user_id == u, :);
+        sub = sortrows(sub, 'target_id');
+
+        nTrials = height(sub);
+        start_euclidean_mm = nan(nTrials, 1);
+        for j = 1:nTrials
+            trialRow = trials(trials.trial_key == sub.trial_key(j), :);
+            if isempty(trialRow)
+                continue;
+            end
+            tt = trialRow.data{1};
+            if height(tt) == 0
+                continue;
+            end
+            start_euclidean_mm(j) = sqrt(tt.dx_mm(1)^2 + tt.dy_mm(1)^2 + tt.dz_mm(1)^2);
+        end
+
+        target_id            = sub.target_id;
+        completion_time_s    = sub.completion_time_s;
+        endpoint_error_x_mm   = sub.endpoint_error_x_mm;
+        endpoint_error_y_mm   = sub.endpoint_error_y_mm;
+        endpoint_error_z_mm   = sub.endpoint_error_z_mm;
+        endpoint_error_2D_mm  = sqrt(endpoint_error_x_mm.^2 + endpoint_error_y_mm.^2);
+        endpoint_error_3D_mm  = sqrt(endpoint_error_x_mm.^2 + endpoint_error_y_mm.^2 + endpoint_error_z_mm.^2);
+
+        Data{i} = table(target_id, start_euclidean_mm, completion_time_s, ...
+            endpoint_error_x_mm, endpoint_error_y_mm, endpoint_error_z_mm, ...
+            endpoint_error_2D_mm, endpoint_error_3D_mm);
     end
 
-    summary = table(User, Qty, Trials);
+    summary = table(User, Data);
 end
 
-function headers = appendParticipantSummaryRows(headers)
-    %APPENDPARTICIPANTSUMMARYROWS Insert two summary rows after each
-    %   participant's block of trials in the (already user_id/target_id
-    %   sorted) headers table: one row of means, one row of medians, each
-    %   covering completion_time_s, endpoint_error_x_mm, and
-    %   endpoint_error_y_mm (endpoint_error_z_mm and all other fields are
-    %   left NaN/blank on these synthetic rows, since they aren't
-    %   aggregated). The summary rows are identified by target_id ==
-    %   "MEAN" / "MEDIAN" (and a matching trial_key suffix), so they can be
-    %   filtered out later with e.g.:
-    %       headers(~ismember(headers.target_id, ["MEAN","MEDIAN"]), :)
+function T = buildUserStatTable(summary, statFun, statName)
+    %BUILDUSERSTATTABLE Collapse each user's per-trial table in
+    %   SUMMARY.Data down to a single row via STATFUN (e.g. mean/median,
+    %   NaNs omitted), giving one row per user:
+    %       userID, <statName>_completion_time, <statName>_endpoint_error_x,
+    %       <statName>_endpoint_error_y, <statName>_endpoint_error_z,
+    %       <statName>_endpoint_error_2D, <statName>_endpoint_error_3D
+    %   STATNAME (e.g. "mean" or "median") is used both to label the
+    %   columns and is purely cosmetic -- STATFUN does the actual math.
 
-    if isempty(headers)
-        return;
+    nUsers = height(summary);
+    userID = summary.User;
+
+    completion_time = nan(nUsers, 1);
+    err_x  = nan(nUsers, 1);
+    err_y  = nan(nUsers, 1);
+    err_z  = nan(nUsers, 1);
+    err_2D = nan(nUsers, 1);
+    err_3D = nan(nUsers, 1);
+
+    for i = 1:nUsers
+        d = summary.Data{i};
+        completion_time(i) = statFun(d.completion_time_s);
+        err_x(i)  = statFun(d.endpoint_error_x_mm);
+        err_y(i)  = statFun(d.endpoint_error_y_mm);
+        err_z(i)  = statFun(d.endpoint_error_z_mm);
+        err_2D(i) = statFun(d.endpoint_error_2D_mm);
+        err_3D(i) = statFun(d.endpoint_error_3D_mm);
     end
 
-    uniqueUsers = unique(headers.user_id, 'stable'); % preserve sorted block order
-    blocks = cell(numel(uniqueUsers), 1);
+    T = table(userID, completion_time, err_x, err_y, err_z, err_2D, err_3D);
+    T.Properties.VariableNames = {'userID', ...
+        [statName, '_completion_time'], [statName, '_endpoint_error_x'], ...
+        [statName, '_endpoint_error_y'], [statName, '_endpoint_error_z'], ...
+        [statName, '_endpoint_error_2D'], [statName, '_endpoint_error_3D']};
 
-    for i = 1:numel(uniqueUsers)
-        u = uniqueUsers(i);
-        sub = headers(headers.user_id == u, :);
-
-        meanCT = mean(sub.completion_time_s, 'omitnan');
-        meanEX = mean(sub.endpoint_error_x_mm, 'omitnan');
-        meanEY = mean(sub.endpoint_error_y_mm, 'omitnan');
-
-        medCT  = median(sub.completion_time_s, 'omitnan');
-        medEX  = median(sub.endpoint_error_x_mm, 'omitnan');
-        medEY  = median(sub.endpoint_error_y_mm, 'omitnan');
-
-        meanRow   = makeSummaryRow(sub(1,:), u, "MEAN",   meanCT, meanEX, meanEY);
-        medianRow = makeSummaryRow(sub(1,:), u, "MEDIAN", medCT,  medEX,  medEY);
-
-        blocks{i} = [sub; meanRow; medianRow];
+    % Append an "ALL" row: pool every trial across every participant
+    % (not an average-of-averages) and apply the same stat function.
+    if nUsers > 0
+        allData = vertcat(summary.Data{:});
+        allRow = table("ALL", statFun(allData.completion_time_s), ...
+            statFun(allData.endpoint_error_x_mm), statFun(allData.endpoint_error_y_mm), ...
+            statFun(allData.endpoint_error_z_mm), statFun(allData.endpoint_error_2D_mm), ...
+            statFun(allData.endpoint_error_3D_mm));
+        allRow.Properties.VariableNames = T.Properties.VariableNames;
+        T = [T; allRow];
     end
 
-    headers = vertcat(blocks{:});
 end
 
 function row = makeSummaryRow(templateRow, userId, label, completionTime, errX, errY)
@@ -598,6 +742,12 @@ function row = makeSummaryRow(templateRow, userId, label, completionTime, errX, 
     row.endpoint_error_x_mm = errX;
     row.endpoint_error_y_mm = errY;
     row.endpoint_error_z_mm = NaN;
+    row.calibration_angle_count = NaN;
+    row.calibration_angles_deg  = {[]};
+    row.control_points_theta    = {[]};
+    row.control_points_radius   = {[]};
+    row.control_points_accel    = {[]};
+    row.stiffness_measurements  = {[]};
     row.filename = "";
     row.filepath = "";
 end
@@ -631,19 +781,43 @@ function T = emptyHeadersTable()
     endpoint_error_x_mm         = []; 
     endpoint_error_y_mm         = []; 
     endpoint_error_z_mm         = []; 
+    calibration_angle_count     = [];
+    calibration_angles_deg      = {};
+    control_points_theta        = {};
+    control_points_radius       = {};
+    control_points_accel        = {};
+    stiffness_measurements      = {};
     filename                    = string([]);
     filepath                    = string([]);
     T = table(trial_key, user_id, target_id, ...
         target_screen_position_x_mm, target_screen_position_y_mm, ...
         fingertip_offset_x_mm, fingertip_offset_y_mm, fingertip_offset_z_mm, ...
         completion_time_s, endpoint_error_x_mm, endpoint_error_y_mm, endpoint_error_z_mm,...
+        calibration_angle_count, calibration_angles_deg, control_points_theta, ...
+        control_points_radius, control_points_accel, stiffness_measurements, ...
         filename, filepath);
 end
 
 function T = emptySummaryTable()
     %EMPTYSUMMARYTABLE Return a correctly-typed empty summary table.
-    User   = string([]);
-    Qty    = [];
-    Trials = string([]);
-    T = table(User, Qty, Trials);
+    User = string([]);
+    Data = {};
+    T = table(User, Data);
+end
+
+function T = emptyUserStatTable(statName)
+    %EMPTYUSERSTATTABLE Return a correctly-typed empty userMeans/userMedians
+    %   table (column names labeled with STATNAME, e.g. "mean"/"median").
+    userID = string([]);
+    completion_time = [];
+    err_x  = [];
+    err_y  = [];
+    err_z  = [];
+    err_2D = [];
+    err_3D = [];
+    T = table(userID, completion_time, err_x, err_y, err_z, err_2D, err_3D);
+    T.Properties.VariableNames = {'userID', ...
+        [statName, '_completion_time'], [statName, '_endpoint_error_x'], ...
+        [statName, '_endpoint_error_y'], [statName, '_endpoint_error_z'], ...
+        [statName, '_endpoint_error_2D'], [statName, '_endpoint_error_3D']};
 end

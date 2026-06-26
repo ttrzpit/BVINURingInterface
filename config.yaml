@@ -199,7 +199,7 @@ fitts_board_assignments:
 # reverts to the normal whole-board random target picker. The pool is refreshed
 # each time the FITTS task is entered. Leave as [] to disable (normal picker).
 accuracy_trials:
-   random_pool: [57, 111, 124, 286, 267, 275, 383]
+   random_pool: [57, 111, 124, 267, 275, 286]
 
 # ---- Fitts target circle ------------------------------------------------------
 # radius_mm         : Drawn target circle radius [mm]

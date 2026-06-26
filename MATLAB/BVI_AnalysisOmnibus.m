@@ -8,8 +8,6 @@ clc;
 
 
 
-
-
 %% ========================================================================
 %  === STATISTICAL ANALYSIS ===============================================
 %  ========================================================================
@@ -26,7 +24,7 @@ clc;
 close all;
 
 % Select user and trial
-key = "u123_t111" ;
+key = "u126_t267" ;
 hdr = headers(headers.trial_key == key, :);   % adjust to your actual user/target IDs
 row = trials(trials.trial_key == key , :);
 tt  = row.data{1};

@@ -95,16 +95,16 @@ int main() {
                         cfg.camera.cameraMatrix,
                         cfg.camera.distCoeffs );
 
-    TouchHandler touch( cfg.touchscreen );
-    Cal3Handler cal3( cfg.touchscreen, cfg.camera, cfg.arucoCalGrid, cfg.cal3 );
+    TouchHandler     touch( cfg.touchscreen );
+    Cal3Handler      cal3( cfg.touchscreen, cfg.camera, cfg.arucoCalGrid, cfg.cal3 );
     FittsTaskHandler fitts( cfg.fittsBoard, cfg.touchscreen, cfg.camera );
     TrialLogger      trialLogger;
 
     ControllerHandler controller( cfg.controllerGains );
     PretensionHandler pretension( controller );
-    Cal1Handler cal1( controller, cfg.cal1 );
-    Cal2Handler cal2( controller, cal1.GetBoundary(), cfg.cal2 );
-    GestureHandler gesture( controller, cfg.gesture );
+    Cal1Handler       cal1( controller, cfg.cal1 );
+    Cal2Handler       cal2( controller, cal1.GetBoundary(), cfg.cal2 );
+    GestureHandler    gesture( controller, cfg.gesture );
 
     DisplayHandler display( cfg.display,
                             cv::Point2i( static_cast<int>( cfg.camera.cx ),
@@ -137,42 +137,42 @@ int main() {
     // show the exact frame the latest marker detection was computed from,
     // so the marker overlay never drifts relative to the image underneath.
     std::deque<CameraFrame> frameHistory;
-    constexpr size_t kFrameHistoryMax = 12;
+    constexpr size_t        kFrameHistoryMax = 12;
 
     SystemState prevState = SystemState::IDLE;
-    InputState prevInputState = InputState::IDLE;
-    int prevFittsTarget = 0;
+    InputState  prevInputState = InputState::IDLE;
+    int         prevFittsTarget = 0;
 
     // Board-pose fallback target (when the active marker isn't directly detected).
     // Recomputed only on new frames (solvePnP is the expensive path) and reused
     // between frames; invalidated as soon as the marker is directly re-acquired.
-    bool        fbTargetValid = false;
-    cv::Point3f fbTargetPosMm = {};
-    float       fbTargetRoll  = 0.0f;
+    bool                       fbTargetValid = false;
+    cv::Point3f                fbTargetPosMm = {};
+    float                      fbTargetRoll = 0.0f;
     std::array<cv::Point2f, 4> fbCorners = {};
 
     // Trial logging + distance-stratified target selection state.
     std::mt19937 targetRng{ std::random_device{}() };
-    int          distanceBandCursor = 0;   // cycles 0..numDistanceBands-1
-    bool         prevLogTouched      = false;
-    bool         primeLoggingAfterUserId = false;   // 'L' with no user ID set: prime once the ID is entered
-    int prevActiveTagId = 0;    ///< Detects kb.activeTagId changes -> ramps guidance force on new targets
+    int          distanceBandCursor = 0;    // cycles 0..numDistanceBands-1
+    bool         prevLogTouched = false;
+    bool         primeLoggingAfterUserId = false;    // 'L' with no user ID set: prime once the ID is entered
+    int          prevActiveTagId = 0;                ///< Detects kb.activeTagId changes -> ramps guidance force on new targets
 
     // Last-known camera-side target-circle position (persists when activeMarker
     // leaves the camera frame so the circle doesn't flicker off momentarily).
     cv::Point2i lastTargetCirclePx = {};
-    int lastTargetCircleRadiusPx = 0;
-    bool haveLastTargetCircle = false;
+    int         lastTargetCircleRadiusPx = 0;
+    bool        haveLastTargetCircle = false;
 
     // Active-target outline frozen at the trial-ending touch, drawn as a magenta
     // reference box until the next target is selected (fitts.HasTouchSample()).
     std::array<cv::Point2f, 4> touchedTargetCorners = {};
     bool                       touchedTargetBoxValid = false;
-    bool                       prevFittsTouchSample  = false;
+    bool                       prevFittsTouchSample = false;
 
     bool cal3CompletionHandled = false;
-    bool cal2ProfileApplied = false;    ///< Set once Cal2's K(theta) has been applied to the controller
-    bool cal1CompletionHandled = false; ///< Set once Cal1 (AROM) completion has returned the system to IDLE
+    bool cal2ProfileApplied = false;       ///< Set once Cal2's K(theta) has been applied to the controller
+    bool cal1CompletionHandled = false;    ///< Set once Cal1 (AROM) completion has returned the system to IDLE
 
     // Manual random-target debug pool ('r' cycles these IDs, no repeats, then
     // falls back to the normal picker). Refreshed on every FITTS entry.
@@ -182,16 +182,16 @@ int main() {
     // sequence, so the same marker is never pulled twice. Cleared on every 'F'
     // (FITTS entry below); auto-restarts once every selectable target is used.
     std::unordered_set<int> usedRandomTargets;
-    PcToTeensyPacket lastTxPkt = {};    // Pending TX values updated each frame - sent by TX thread at 200 Hz
+    PcToTeensyPacket        lastTxPkt = {};    // Pending TX values updated each frame - sent by TX thread at 200 Hz
 
     // Controller - dt is measured between loop iterations, independent of camera frame rate
     double lastControllerSecs = cv::getTickCount() / cv::getTickFrequency();
 
     // Motor test state - set by testA/testB/testC commands, cleared after 1 s
     using Clock = std::chrono::steady_clock;
-    bool motorTestActive = false;
-    char motorTestMotor = 'A';
-    uint16_t motorTestPwm = 2047;
+    bool              motorTestActive = false;
+    char              motorTestMotor = 'A';
+    uint16_t          motorTestPwm = 2047;
     Clock::time_point motorTestStart;
 
     // ---- Main loop ----------------------------------------------------------
@@ -278,7 +278,7 @@ int main() {
                 aruco.SetCalibrationDetection( false );    // Restore DICT_4X4_50
             } else if ( prevState == SystemState::FITTS ) {
                 aruco.SetFittsBoardVisible( false );
-                aruco.SetFittsBoardDetection( false );      // Restore DICT_4X4_50
+                aruco.SetFittsBoardDetection( false );    // Restore DICT_4X4_50
             } else {
                 aruco.SetGridVisible( false );
             }
@@ -298,7 +298,7 @@ int main() {
                 aruco.SetFittsBoardVisible( true );
                 fitts.Reset();
                 // Refresh the manual random-target debug pool for this session.
-                randomPoolRemaining         = cfg.accuracyTrials.randomPool;
+                randomPoolRemaining = cfg.accuracyTrials.randomPool;
                 randomPoolExhaustedNotified = false;
                 // Clear the random-target memory so a fresh Fitts sequence can
                 // reuse every marker exactly once before any repeats.
@@ -384,7 +384,7 @@ int main() {
         //    would return the same frame repeatedly and the loop would spin at
         //    hundreds of Hz with no useful work done.
         CameraFrame frame = camera.getLatestFrame();
-        bool isNewFrame = frame.ready && ( frame.timestamp != lastFrameTimestamp );
+        bool        isNewFrame = frame.ready && ( frame.timestamp != lastFrameTimestamp );
         if ( isNewFrame ) {
             lastFrameTimestamp = frame.timestamp;
 
@@ -500,15 +500,15 @@ int main() {
         if ( kb.pendingRandomTarget ) {
             const auto& sel = aruco.GetFittsSelectableTargetIds();
             if ( !sel.empty() ) {
-                const int prevId  = kb.fittsTargetId;
-                const float mmpp  = cfg.touchscreen.mmPerPixel;
-                int nextId = sel[0];
+                const int   prevId = kb.fittsTargetId;
+                const float mmpp = cfg.touchscreen.mmPerPixel;
+                int         nextId = sel[0];
 
                 if ( !randomPoolRemaining.empty() ) {
                     // Manual debug pool: pick a random unused ID from the
                     // operator-supplied pool (config: accuracy_trials.random_pool)
                     // and remove it so it never repeats until the pool refreshes.
-                    const int idx = std::uniform_int_distribution<int>( 0, (int)randomPoolRemaining.size() - 1 )( targetRng );
+                    const int idx = std::uniform_int_distribution<int>( 0, ( int )randomPoolRemaining.size() - 1 )( targetRng );
                     nextId = randomPoolRemaining[idx];
                     randomPoolRemaining.erase( randomPoolRemaining.begin() + idx );
                 } else {
@@ -534,38 +534,38 @@ int main() {
                     }
 
                     if ( prevId <= 0 || aruco.GetGridMarkerCenterPx( prevId ) == cv::Point2i{} ) {
-                        nextId = avail[ std::uniform_int_distribution<int>( 0, (int)avail.size() - 1 )( targetRng ) ];
+                        nextId = avail[std::uniform_int_distribution<int>( 0, ( int )avail.size() - 1 )( targetRng )];
                     } else {
-                        const cv::Point2i pPx = aruco.GetGridMarkerCenterPx( prevId );
-                        float dmin = 1e9f, dmax = 0.0f;
+                        const cv::Point2i                  pPx = aruco.GetGridMarkerCenterPx( prevId );
+                        float                              dmin = 1e9f, dmax = 0.0f;
                         std::vector<std::pair<int, float>> cand;
                         for ( int id : avail ) {
                             if ( id == prevId ) continue;    // never repeat the immediately previous target
                             const cv::Point2i cPx = aruco.GetGridMarkerCenterPx( id );
-                            const float dx = ( cPx.x - pPx.x ) * mmpp;
-                            const float dy = ( cPx.y - pPx.y ) * mmpp;
-                            const float d  = std::sqrt( dx * dx + dy * dy );
+                            const float       dx = ( cPx.x - pPx.x ) * mmpp;
+                            const float       dy = ( cPx.y - pPx.y ) * mmpp;
+                            const float       d = std::sqrt( dx * dx + dy * dy );
                             cand.push_back( { id, d } );
                             dmin = std::min( dmin, d );
                             dmax = std::max( dmax, d );
                         }
                         if ( cand.empty() ) {
                             // Only unused target left was prevId itself - just take it.
-                            nextId = avail[ std::uniform_int_distribution<int>( 0, (int)avail.size() - 1 )( targetRng ) ];
+                            nextId = avail[std::uniform_int_distribution<int>( 0, ( int )avail.size() - 1 )( targetRng )];
                         } else {
-                            const int   nBands = std::max( 1, cfg.fittsBoard.numDistanceBands );
-                            const int   band   = distanceBandCursor % nBands;
+                            const int nBands = std::max( 1, cfg.fittsBoard.numDistanceBands );
+                            const int band = distanceBandCursor % nBands;
                             distanceBandCursor = ( distanceBandCursor + 1 ) % nBands;
-                            const float w  = ( dmax - dmin ) / nBands;
-                            const float lo = dmin + band * w;
-                            const float hi = ( band == nBands - 1 ) ? dmax + 1.0f : lo + w;
+                            const float      w = ( dmax - dmin ) / nBands;
+                            const float      lo = dmin + band * w;
+                            const float      hi = ( band == nBands - 1 ) ? dmax + 1.0f : lo + w;
                             std::vector<int> inBand;
                             for ( auto& pr : cand )
                                 if ( pr.second >= lo && pr.second <= hi ) inBand.push_back( pr.first );
                             if ( inBand.empty() )
-                                for ( auto& pr : cand ) inBand.push_back( pr.first );  // fallback: any
+                                for ( auto& pr : cand ) inBand.push_back( pr.first );    // fallback: any
                             if ( !inBand.empty() )
-                                nextId = inBand[ std::uniform_int_distribution<int>( 0, (int)inBand.size() - 1 )( targetRng ) ];
+                                nextId = inBand[std::uniform_int_distribution<int>( 0, ( int )inBand.size() - 1 )( targetRng )];
                         }
                     }
                 }
@@ -585,8 +585,8 @@ int main() {
                     // [mm] (x right+, y down+) and the measured Cal3 fingertip
                     // offset (0,0,0 if Cal3 never ran).
                     const cv::Point2i tCenterPx = aruco.GetGridMarkerCenterPx( nextId );
-                    const float tScreenXmm = ( tCenterPx.x - cfg.touchscreen.width  * 0.5f ) * cfg.touchscreen.mmPerPixel;
-                    const float tScreenYmm = ( tCenterPx.y - cfg.touchscreen.height * 0.5f ) * cfg.touchscreen.mmPerPixel;
+                    const float       tScreenXmm = ( tCenterPx.x - cfg.touchscreen.width * 0.5f ) * cfg.touchscreen.mmPerPixel;
+                    const float       tScreenYmm = ( tCenterPx.y - cfg.touchscreen.height * 0.5f ) * cfg.touchscreen.mmPerPixel;
                     const cv::Point3f ftOff = cal3.GetFinalOffset();
                     trialLogger.SetTrialMeta( tScreenXmm, tScreenYmm,
                                               ftOff.x, ftOff.y, ftOff.z, cal3.IsComplete() );
@@ -600,9 +600,9 @@ int main() {
                         std::vector<float>( CONSTANT_CALIBRATION_ANGLES_DEG,
                                             CONSTANT_CALIBRATION_ANGLES_DEG + CONSTANT_CALIBRATION_ANGLES_COUNT ),
                         arom.valid,
-                        std::vector<float>( arom.theta.begin(),  arom.theta.end() ),
+                        std::vector<float>( arom.theta.begin(), arom.theta.end() ),
                         std::vector<float>( arom.radius.begin(), arom.radius.end() ),
-                        std::vector<float>( arom.accel.begin(),  arom.accel.end() ),
+                        std::vector<float>( arom.accel.begin(), arom.accel.end() ),
                         controller.HasStiffnessProfile(),
                         std::vector<float>( stiff.begin(), stiff.end() ) );
 
@@ -668,13 +668,13 @@ int main() {
         // target's known board location, so guidance keeps pulling back toward
         // the target instead of cutting out. The board-pose solve is the
         // expensive path, so it is recomputed only on new frames and reused.
-        bool        haveTarget  = false;
+        bool        haveTarget = false;
         cv::Point3f targetPosMm = {};
-        float       targetRoll  = 0.0f;
+        float       targetRoll = 0.0f;
         if ( activeMarker ) {
-            haveTarget    = true;
-            targetPosMm   = activeMarker->positionMm;
-            targetRoll    = activeMarker->rollRad;
+            haveTarget = true;
+            targetPosMm = activeMarker->positionMm;
+            targetRoll = activeMarker->rollRad;
             fbTargetValid = false;    // direct lock re-acquired; drop stale fallback
         } else if ( kb.systemState == SystemState::FITTS && kb.activeTagId > 0 ) {
             if ( isNewFrame ) {
@@ -682,9 +682,9 @@ int main() {
                     markers, kb.activeTagId, fbTargetPosMm, fbTargetRoll, &fbCorners );
             }
             if ( fbTargetValid ) {
-                haveTarget  = true;
+                haveTarget = true;
                 targetPosMm = fbTargetPosMm;
-                targetRoll  = fbTargetRoll;
+                targetRoll = fbTargetRoll;
             }
         }
 
@@ -704,8 +704,7 @@ int main() {
             cal3.GetFinalOffset(),
             cal3.GetRollRef(),
             cfg.target.offsetDefaultMm,
-            !guidanceSuppressedByTouch
-        );
+            !guidanceSuppressedByTouch );
 
         // Feed the resolved target position to the operator telemetry panel so
         // the "Target Telemetry" readout tracks the target via the board-pose
@@ -722,21 +721,21 @@ int main() {
         // operator-view overlays. Use the directly-detected marker when present;
         // otherwise project the board-pose fallback position so the circle and
         // guiding dot still show while the target marker is dropped out.
-        bool        haveTargetPx   = false;
+        bool        haveTargetPx = false;
         cv::Point2i targetCenterPx = {};
-        float       targetDepth    = 0.0f;
+        float       targetDepth = 0.0f;
         if ( activeMarker ) {
-            haveTargetPx   = true;
+            haveTargetPx = true;
             targetCenterPx = activeMarker->centerPx;
-            targetDepth    = activeMarker->positionMm.z;
+            targetDepth = activeMarker->positionMm.z;
         } else if ( haveTarget && targetPosMm.z > 1e-3f ) {
             // positionMm is camera-frame Y-up; image Y points down, hence the
             // negation on the Y projection term.
-            targetDepth    = targetPosMm.z;
+            targetDepth = targetPosMm.z;
             targetCenterPx = cv::Point2i(
                 static_cast<int>( std::round( cfg.camera.cx + cfg.camera.fx * targetPosMm.x / targetDepth ) ),
                 static_cast<int>( std::round( cfg.camera.cy - cfg.camera.fy * targetPosMm.y / targetDepth ) ) );
-            haveTargetPx   = true;
+            haveTargetPx = true;
         }
 
         // Operator-display cues for the new "fingerpad onto the marker centre"
@@ -744,17 +743,17 @@ int main() {
         // (corrX, corrY) in camera-frame Y-up mm; intrinsics live here so the
         // pixel maths stays outside the controller.
         if ( haveTargetPx && targetDepth > 1e-3f ) {
-            const auto tgtOfs        = controller.GetTargetOffsets();
-            const float corrX_screen = tgtOfs.corrX;   // (R*d).x
-            const float corrY_screen = tgtOfs.corrY;   // (R*d).y
-            const float depth        = targetDepth;
+            const auto  tgtOfs = controller.GetTargetOffsets();
+            const float corrX_screen = tgtOfs.corrX;    // (R*d).x
+            const float corrY_screen = tgtOfs.corrY;    // (R*d).y
+            const float depth = targetDepth;
 
-            int radiusPx  = static_cast<int>( std::round(
+            int radiusPx = static_cast<int>( std::round(
                 0.5 * ( cfg.camera.fx + cfg.camera.fy ) * cfg.target.radiusMm / depth ) );
             // Target circle = the fingerpad landing target = the marker centre.
-            lastTargetCirclePx        = targetCenterPx;
-            lastTargetCircleRadiusPx  = radiusPx;
-            haveLastTargetCircle      = true;
+            lastTargetCirclePx = targetCenterPx;
+            lastTargetCircleRadiusPx = radiusPx;
+            haveLastTargetCircle = true;
 
             // Green dot = guiding position ("virtual marker"): the image point the
             // marker centre must be steered onto so the fingerpad lands on it -
@@ -771,7 +770,7 @@ int main() {
         // Circle color: red (cal3 calibrated offset) or gray (default offset,
         // not yet calibrated). Applied to both camera-side and touchscreen circles.
         cv::Scalar targetCircleColor = cal3.IsComplete() ? Colors::RedMd : Colors::GraMd;
-        bool circlesActive = ( kb.activeTagId > 0 );
+        bool       circlesActive = ( kb.activeTagId > 0 );
 
         if ( circlesActive && haveLastTargetCircle ) {
             display.SetTargetCircle( true, lastTargetCirclePx, lastTargetCircleRadiusPx, targetCircleColor );
@@ -789,14 +788,14 @@ int main() {
             // target); the cal3 offset is applied in the guidance geometry, not
             // as a visible offset from the tag.
             cv::Point2i markerCenterPx = aruco.GetGridMarkerCenterPx( kb.fittsTargetId );
-            int radiusPx = static_cast<int>( std::round( cfg.target.radiusMm * cfg.touchscreen.pixelsPerMm ) );
+            int         radiusPx = static_cast<int>( std::round( cfg.target.radiusMm * cfg.touchscreen.pixelsPerMm ) );
             aruco.SetTargetOffsetCircle( true, markerCenterPx, radiusPx, targetCircleColor );
         } else {
             aruco.SetTargetOffsetCircle( false, {}, 0, targetCircleColor );
         }
 
         TeensyToPcPacket rxPkt = {};
-        bool hasRxPkt = serial.GetLatestPacket( rxPkt );
+        bool             hasRxPkt = serial.GetLatestPacket( rxPkt );
         if ( hasRxPkt ) {
             controller.Update( rxPkt, nowSecs, dt );
         }
@@ -1030,33 +1029,47 @@ int main() {
 
                 // Trial logging - one row per camera frame while a capture runs.
                 if ( trialLogger.IsActive() ) {
-                    cv::Point3f tpos; cv::Vec4f tquat; cv::Point3f tdisp; bool tDetected = false;
+                    cv::Point3f tpos;
+                    cv::Vec4f   tquat;
+                    cv::Point3f tdisp;
+                    bool        tDetected = false;
                     if ( fitts.GetTargetFullPose( markers, kb.fittsTargetId,
                                                   cal3.IsComplete(), cal3.GetFinalOffset(),
                                                   cal3.GetRollRef(),
                                                   tpos, tquat, tdisp, tDetected ) ) {
-                        const auto tele = controller.GetTelemetry();
+                        const auto  tele = controller.GetTelemetry();
                         TrialSample s;
                         // Stamp with the camera capture time (CameraHandler sets
                         // frame.timestamp), not the main-loop poll time, so the
                         // sample cadence reflects the true frame interval. Write()
                         // re-zeroes to the first row, so absolute value is fine.
-                        s.tSecs    = frame.timestamp;
+                        s.tSecs = frame.timestamp;
                         s.targetId = kb.fittsTargetId;
                         s.detected = tDetected ? 1 : 0;
-                        s.tx = tpos.x; s.ty = tpos.y; s.tz = tpos.z;
-                        s.dx = tdisp.x; s.dy = tdisp.y; s.dz = tdisp.z;
+                        s.tx = tpos.x;
+                        s.ty = tpos.y;
+                        s.tz = tpos.z;
+                        s.dx = tdisp.x;
+                        s.dy = tdisp.y;
+                        s.dz = tdisp.z;
                         // Virtual fingertip = target - Δp (camera frame Y-up): the
                         // system's estimate of the fingertip point, logged per frame.
-                        s.vx = tpos.x - tdisp.x; s.vy = tpos.y - tdisp.y;
-                        s.qx = tquat[0]; s.qy = tquat[1]; s.qz = tquat[2]; s.qw = tquat[3];
-                        s.pwmA = tele.outputPwm.x; s.pwmB = tele.outputPwm.y; s.pwmC = tele.outputPwm.z;
+                        // s.vx = tpos.x - tdisp.x; s.vy = tpos.y - tdisp.y; Original
+                        s.vx = tele.pos_virtual.x;
+                        s.vy = tele.pos_virtual.x;
+                        s.qx = tquat[0];
+                        s.qy = tquat[1];
+                        s.qz = tquat[2];
+                        s.qw = tquat[3];
+                        s.pwmA = tele.outputPwm.x;
+                        s.pwmB = tele.outputPwm.y;
+                        s.pwmC = tele.outputPwm.z;
                         trialLogger.AddSample( s );
                     }
                     // End the trial on touchscreen contact (rising edge).
                     if ( touchState.isTouched && !prevLogTouched ) {
-                        std::string saved = trialLogger.FinishTrial( (float)touchState.position.x,
-                                                                     (float)touchState.position.y,
+                        std::string saved = trialLogger.FinishTrial( ( float )touchState.position.x,
+                                                                     ( float )touchState.position.y,
                                                                      cfg.touchscreen.mmPerPixel );
                         if ( !saved.empty() )
                             keyboard.SetExternalStatus( "Log file saved as " + saved );
@@ -1069,7 +1082,7 @@ int main() {
                 aruco.SetTargetOutline( false, 0 );
                 display.SetTouchedTargetBox( false, touchedTargetCorners );
                 touchedTargetBoxValid = false;
-                prevFittsTouchSample  = false;
+                prevFittsTouchSample = false;
             }
         }
 
@@ -1088,7 +1101,7 @@ int main() {
             // relative to the image underneath. Falls back to the live
             // frame if that source frame has already aged out of history.
             const cv::Mat* displayFrame = &frame.undistorted;
-            double resultTs = aruco.GetLatestDetectionTimestamp();
+            double         resultTs = aruco.GetLatestDetectionTimestamp();
             for ( const auto& f : frameHistory ) {
                 if ( f.timestamp == resultTs ) {
                     displayFrame = &f.undistorted;

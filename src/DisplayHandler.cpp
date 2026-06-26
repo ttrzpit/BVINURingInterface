@@ -724,9 +724,9 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
         amplifierColor = Colors::GraBk;
     } else if ( controllerTele_.isTargetActive && controllerTele_.guidanceOutputEnabled ) {
         amplifierStateStr = "GUIDING";
-        amplifierColor = Colors::BluBk;
+        amplifierColor = Colors::GreMd;
     } else {
-        amplifierStateStr = "ACTIVE";
+        amplifierStateStr = "PAUSED";
         amplifierColor = Colors::GreBk;
     }
 
@@ -1104,6 +1104,8 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
                                      static_cast<int>( controllerTele_.pos_virtual.x * kVirtualPlotPxPerMm ),
                                      static_cast<int>( -controllerTele_.pos_virtual.y * kVirtualPlotPxPerMm ) );
     cv::circle( matController_, posPx, 6, Colors::CyaMd, -1 );
+
+    
 
     // Integral accumulation - the PID integral term (posErrorIntegral, mm*s)
     // drawn as a growing horizontal (X, red) and vertical (Y, blue) line pair

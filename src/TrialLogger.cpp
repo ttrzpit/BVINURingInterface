@@ -87,9 +87,9 @@ std::string TrialLogger::Write(float touchXpx, float touchYpx, float mmPerPixel)
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
 
-    // Filename: <userID>-<targetID>-ddmmyyyy-hhmmss.csv from the trial start wall
+    // Filename: <userID>-<targetID>-mmddyyyy-hhmmss.csv from the trial start wall
     // time. The user ID and target ID are both zero-padded to 3 digits (e.g.
-    // "123-056-24062026-163128.csv").
+    // "123-057-06252026-151048.csv").
     char stamp[32];
     std::tm tmv{};
 #if defined(_WIN32)
@@ -97,7 +97,7 @@ std::string TrialLogger::Write(float touchXpx, float touchYpx, float mmPerPixel)
 #else
     localtime_r(&startWall_, &tmv);
 #endif
-    std::strftime(stamp, sizeof(stamp), "%d%m%Y-%H%M%S", &tmv);
+    std::strftime(stamp, sizeof(stamp), "%m%d%Y-%H%M%S", &tmv);
 
     std::ostringstream nameStream;
     nameStream << std::setfill('0') << std::setw(3) << std::max(0, userId_) << '-'
