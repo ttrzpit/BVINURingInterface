@@ -311,12 +311,14 @@ function [headers, trials, summary, userMeans, userMedians] = ParseNURingTrials(
     % % and endpoint_error_y_mm.
     % headers = appendParticipantSummaryRows(headers);
 
+    fprintf('TRIAL SUMMARIES:\n\n');
+
     % ---------------------------------------------------------------------
     % Build per-participant summary table: User | Data{target_id, ...}
     % ---------------------------------------------------------------------
     summary = buildSummaryTable(headers, trials);
     for i = 1:height(summary)
-        fprintf('User %s:\n', summary.User(i));
+        fprintf('  User %s:\n', summary.User(i));
         disp(summary.Data{i});
     end
 
@@ -326,9 +328,9 @@ function [headers, trials, summary, userMeans, userMedians] = ParseNURingTrials(
     userMeans   = buildUserStatTable(summary, @(x) mean(x, 'omitnan'),   'avg');
     userMedians = buildUserStatTable(summary, @(x) median(x, 'omitnan'), 'med');
 
-    fprintf('User Means:\n');
+    fprintf('  User Means:\n');
     disp(userMeans);
-    fprintf('User Medians:\n');
+    fprintf('  User Medians:\n');
     disp(userMedians);
 
     disp ("ParseNURingTrials: Data parsed.") ;

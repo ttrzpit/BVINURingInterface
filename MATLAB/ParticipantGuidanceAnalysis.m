@@ -135,18 +135,18 @@ medEndpointErr    = median(endpoint_radial_err_mm, 'omitnan');
 meanEndpointErr2D = mean(endpoint_radial_err_2d_mm, 'omitnan');
 medEndpointErr2D  = median(endpoint_radial_err_2d_mm, 'omitnan');
 
-% summaryLabels = {'Mean R^2 [%]', 'Mean Slope [mm/s]', 'Mean Time [s]', ...
-%     'Mean Err3D [mm]', 'Median Err3D [mm]', ...
-%     'Mean Err2D [mm]', 'Median Err2D [mm]'};
-summaryLabels = [
-    "Mean R^2" + newline + "[%]"
-    "Mean Slope" + newline + "[mm/s]"
-    "Mean Time" + newline + "[s]"
-    "Mean Err3D" + newline + "[mm]"
-    "Median Err3D" + newline + "[mm]"
-    "Mean Err2D" + newline + "[mm]"
-    "Median Err2D" + newline + "[mm]"
-];
+summaryLabels = {'Mean R^2 [%]', 'Mean Slope [mm/s]', 'Mean Time [s]', ...
+    'Err3DAvg [mm]', 'Err3DMed [mm]', ...
+    'Err2DAvg [mm]', 'Err2DMed [mm]'};
+% summaryLabels = [
+%     "Mean R^2" + newline + "[%]"
+%     "Mean Slope" + newline + "[mm/s]"
+%     "Mean Time" + newline + "[s]"
+%     "Mean Err3D" + newline + "[mm]"
+%     "Median Err3D" + newline + "[mm]"
+%     "Mean Err2D" + newline + "[mm]"
+%     "Median Err2D" + newline + "[mm]"
+% ];
 summaryValues = [meanR2, meanSlope, meanCompletion, meanEndpointErr, medEndpointErr, ...
     meanEndpointErr2D, medEndpointErr2D];
 

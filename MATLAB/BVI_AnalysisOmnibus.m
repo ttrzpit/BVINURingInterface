@@ -5,8 +5,8 @@ clc;
 
 % Load trial data from the specified directory
 [headers, trials, summary] = ParseNURingTrials('+TrialData');
-
-
+%%
+disp(headers.stiffness_measurements)
 
 %% ========================================================================
 %  === STATISTICAL ANALYSIS ===============================================
@@ -24,7 +24,7 @@ clc;
 close all;
 
 % Select user and trial
-key = "u126_t267" ;
+key = "u127_t111" ;
 hdr = headers(headers.trial_key == key, :);   % adjust to your actual user/target IDs
 row = trials(trials.trial_key == key , :);
 tt  = row.data{1};
@@ -37,7 +37,7 @@ VisualizeNURingTrial(tt, ...
     'DrawEstimated', false, ...
     'Threshold', 500, ...
     'ShowVelocity', true, ...
-    'Animate', true, ...
+    'Animate', false, ...
     'SetZLimit', 0, ...
     'ColumnWidths', [0.4 0.3 0.3]) ;
 
@@ -46,34 +46,14 @@ VisualizeNURingTrial(tt, ...
 
 
 
-%% --- Single Trial Plot ---------------------------------------------
-close all;
-
-% Select user and trial
-key = "u123_t383" ;
-hdr = headers(headers.trial_key == key, :);   % adjust to your actual user/target IDs
-row = trials(trials.trial_key == key , :);
-tt  = row.data{1};
-
-% Plot
-PlotNURingTrial(tt, ...
-    'TargetScreenPosition', [hdr.target_screen_position_x_mm, hdr.target_screen_position_y_mm], ...
-    'TrialTitle', row.filename(1), ...
-    'DrawShadowXY', false, ...
-    'DrawEstimated', false, ...
-    'Threshold', 500, ...
-    'ShowVelocity', true, ...
-    'Animate', false, ...
-    'SetZLimit', 0) ;
-
 
 
 %% --- Linear Regression (single participant) -----------------------------
 close all; 
 
 % Select user
-user = "123" ;
+user = "124" ;
 
 % Plot
 results = ParticipantGuidanceAnalysis(user, headers, trials, ...
-    'MatchFingersightScale', true ) ; 
+    'MatchFingersightScale', false ) ; 
