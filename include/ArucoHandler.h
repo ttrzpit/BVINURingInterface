@@ -97,6 +97,15 @@ public:
      *         displayed frame with the marker overlay (see main.cpp). */
     double GetLatestDetectionTimestamp() const { return resultTimestamp_.load(); }
 
+    /** Detection thread throughput measured over a 1-second window [Hz].
+     *  Zero until the first full second has elapsed. */
+    float GetDetectionHz()    const { return detectionHz_.load();    }
+
+    /** Lag between the camera-capture timestamp of the frame currently being
+     *  processed and the result timestamp of the last completed detection [ms].
+     *  Zero when the thread is idle or caught up. */
+    float GetDetectionLagMs() const { return detectionLagMs_.load(); }
+
     // ---- Touchscreen display (main thread only) -----------------------------
 
     /**
@@ -329,4 +338,6 @@ private:
     // Timestamp of the frame behind latestResult_ - written by the detection
     // thread, read from the main thread, so a plain atomic (no mutex) suffices.
     std::atomic<double> resultTimestamp_{0.0};
+    std::atomic<float>  detectionHz_{ 0.0f };     // detection thread throughput [Hz]
+    std::atomic<float>  detectionLagMs_{ 0.0f };  // frame→result lag [ms]
 };

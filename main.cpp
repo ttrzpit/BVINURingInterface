@@ -1056,7 +1056,7 @@ int main() {
                         // system's estimate of the fingertip point, logged per frame.
                         // s.vx = tpos.x - tdisp.x; s.vy = tpos.y - tdisp.y; Original
                         s.vx = tele.pos_virtual.x;
-                        s.vy = tele.pos_virtual.x;
+                        s.vy = tele.pos_virtual.y;
                         s.qx = tquat[0];
                         s.qy = tquat[1];
                         s.qz = tquat[2];
@@ -1095,6 +1095,7 @@ int main() {
                                   cal2.GetCurrentHeadingIndex() );
             display.SetGestureIndicator( gesture.IsIndicatorActive( nowSecs ), gesture.GetLastGesture() );
             display.SetLoggingStatus( trialLogger.IsPrimed(), trialLogger.IsActive() );
+            display.SetArucoStats( aruco.GetDetectionHz(), aruco.GetDetectionLagMs() );
 
             // Pair the displayed image with the frame the current marker
             // detection was computed from, so the overlay never drifts

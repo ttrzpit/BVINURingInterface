@@ -2,6 +2,7 @@
 
 #include "Colors.h"
 
+#include <chrono>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
@@ -84,30 +85,68 @@ std::vector<DetectedMarker> ArucoHandler::GetLatestDetection() {
 }
 
 void ArucoHandler::DetectLoop() {
+    // Rolling 1-second Hz counter (mirrors the pattern in DisplayHandler).
+    int    freqCount       = 0;
+    double freqWindowStart = 0.0;
+    bool   freqInit        = false;
+
     while (detectRunning_) {
+        double  submitTimestamp;
         cv::Mat frame;
-        double  frameTimestamp;
         {
             std::unique_lock<std::mutex> lock(frameMutex_);
-            // Sleep until a new frame arrives or Stop() signals exit
+            // Sleep until a new frame arrives or Stop() signals exit.
             frameCv_.wait(lock, [this] { return frameReady_ || !detectRunning_; });
             if (!detectRunning_) break;
 
             // Move the frame into a local variable before releasing the lock so
             // the main loop can submit the next frame immediately - the two
             // threads never touch the same buffer at the same time.
-            frame = std::move(pendingFrame_);
-            frameTimestamp = pendingTimestamp_;
-            frameReady_ = false;
+            frame           = std::move(pendingFrame_);
+            submitTimestamp = pendingTimestamp_;
+            frameReady_     = false;
         }
 
+        // Wall time before detection — used for Hz window and lag.
+        const double tStart =
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+
+        if (!freqInit) { freqWindowStart = tStart; freqInit = true; }
+
         auto result = RunDetection(frame);
+
+        const double tEnd =
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
 
         {
             std::lock_guard<std::mutex> lock(resultMutex_);
             latestResult_ = std::move(result);
         }
-        resultTimestamp_ = frameTimestamp;
+        resultTimestamp_ = submitTimestamp;
+
+        // --- Hz measurement --------------------------------------------------
+        freqCount++;
+        const double elapsed = tEnd - freqWindowStart;
+        if (elapsed >= 1.0) {
+            detectionHz_ = static_cast<float>(freqCount / elapsed);
+            freqCount        = 0;
+            freqWindowStart  = tEnd;
+        }
+
+        // --- Lag measurement -------------------------------------------------
+        // After RunDetection() finishes, if pendingFrame_ already holds a newer
+        // frame, the gap between that frame's capture time and the one we just
+        // processed is the detection lag — i.e. how far behind the camera the
+        // detector has fallen.
+        {
+            std::lock_guard<std::mutex> lock(frameMutex_);
+            if (frameReady_ && pendingTimestamp_ > submitTimestamp)
+                detectionLagMs_ = static_cast<float>((pendingTimestamp_ - submitTimestamp) * 1000.0);
+            else
+                detectionLagMs_ = 0.0f;   // caught up
+        }
     }
 }
 

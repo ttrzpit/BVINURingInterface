@@ -171,6 +171,9 @@ public:
     /** @brief Trial-logging status for the operator panel indicator. */
     void SetLoggingStatus(bool primed, bool active);
 
+    /** Supply ArUco detection thread stats for display in the controller panel. */
+    void SetArucoStats(float detectionHz, float lagMs);
+
     /** @brief Provide the active target's estimated outline (4 corners projected
      *         from the board pose) for the operator view, used to draw the green
      *         box / ID / guidance line when the target marker is not directly
@@ -323,6 +326,8 @@ private:
     int    freqFrameCount_  = 0;
     double freqWindowStart_ = 0.0;
     float  measuredFreqHz_  = 0.0f;
+    float  arucoDetectionHz_  = 0.0f;   // detection thread throughput [Hz]
+    float  arucoLagMs_        = 0.0f;   // frame→result lag [ms]
 
     // Panel update throttle - telemetry and controller panels refresh at 10 Hz
     double lastPanelUpdateTime_ = 0.0;

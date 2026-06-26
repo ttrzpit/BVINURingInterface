@@ -609,6 +609,11 @@ void DisplayHandler::SetLoggingStatus( bool primed, bool active ) {
     loggingActive_ = active;
 }
 
+void DisplayHandler::SetArucoStats( float detectionHz, float lagMs ) {
+    arucoDetectionHz_ = detectionHz;
+    arucoLagMs_ = lagMs;
+}
+
 void DisplayHandler::SetEstimatedActiveTarget( bool visible, int tagId,
                                                const std::array<cv::Point2f, 4> &corners ) {
     estTargetVisible_ = visible;
@@ -663,7 +668,6 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
         ss << std::fixed << std::setprecision( p ) << v;
         return ss.str();
     };
-
 
     // --- System Readiness Panel ---------------------------------------------------------------------------
     AddControllerHeadingCell( "System Readiness", "A1", 15, 1, "center", headerFontSize );
@@ -732,14 +736,20 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
 
     // States
     AddControllerSubheadingCell( "PC State", "A2", 4, 1, "center", bodyFontSize );
-    AddControllerSubheadingCell( "Camera", "A3", 4, 1, "center", bodyFontSize );
+    AddControllerSubheadingCell( "Cam/ArU/Lag", "A3", 4, 1, "center", bodyFontSize );
     AddControllerSubheadingCell( "Serial", "A4", 4, 1, "center", bodyFontSize );
     AddControllerSubheadingCell( "Teensy State", "A5", 4, 1, "center", bodyFontSize );
     AddControllerSubheadingCell( "Amplifier State", "A6", 4, 1, "center", bodyFontSize );
     AddControllerBodyCell( systemStateStr, "E2", 4, 1, "center", bodyFontSize,
                            kb.systemState == SystemState::IDLE ? Colors::RedBk : Colors::GreBk );    // PC program state
-    AddControllerBodyCell( std::to_string( static_cast<int>( measuredFreqHz_ ) ) + " Hz", "E3", 4, 1, "center", bodyFontSize,
-                           measuredFreqHz_ >= 60.0f ? Colors::GreBk : Colors::RedBk );    // Camera detection loop frequency
+
+    AddControllerBodyCell( std::to_string( static_cast<int>( measuredFreqHz_ ) ), "E3", 1, 1, "center", tableFontSize,
+                           measuredFreqHz_ >= 60.0f ? Colors::GreBk : Colors::RedBk );    // Camera capture Hz
+    AddControllerBodyCell( std::to_string( static_cast<int>( arucoDetectionHz_ ) ), "F3", 1, 1, "center", tableFontSize,
+                           arucoDetectionHz_ >= 20.0f ? Colors::GreBk : Colors::YelBk );    // ArUco detect Hz
+    AddControllerBodyCell( FmtFloat( arucoLagMs_, 0 ) + " ms", "G3", 2, 1, "center", tableFontSize,
+                           arucoLagMs_ < 20.0f ? Colors::GreBk : Colors::RedBk );    // Detection lag
+
     AddControllerBodyCell( std::to_string( static_cast<int>( serial.txFrequencyHz ) ) + " Hz", "E4", 4, 1, "center", bodyFontSize,
                            ( serial.isConnected && serial.txFrequencyHz >= 150.0f ) ? Colors::GreBk : Colors::RedBk );    // Serial TX frequency
     AddControllerBodyCell( teensyStateStr, "E5", 4, 1, "center", bodyFontSize,
@@ -1105,8 +1115,6 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
                                      static_cast<int>( -controllerTele_.pos_virtual.y * kVirtualPlotPxPerMm ) );
     cv::circle( matController_, posPx, 6, Colors::CyaMd, -1 );
 
-    
-
     // Integral accumulation - the PID integral term (posErrorIntegral, mm*s)
     // drawn as a growing horizontal (X, red) and vertical (Y, blue) line pair
     // centered on the circle center, so the operator can watch the integrator
@@ -1114,8 +1122,8 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
     // circle radius.
     {
         constexpr float kIntegralPlotPxPerMmS = 3.6f;
-        int ix = std::clamp( static_cast<int>( controllerTele_.posErrorIntegral.x * kIntegralPlotPxPerMmS ), -radius, radius );
-        int iy = std::clamp( static_cast<int>( -controllerTele_.posErrorIntegral.y * kIntegralPlotPxPerMmS ), -radius, radius );
+        int             ix = std::clamp( static_cast<int>( controllerTele_.posErrorIntegral.x * kIntegralPlotPxPerMmS ), -radius, radius );
+        int             iy = std::clamp( static_cast<int>( -controllerTele_.posErrorIntegral.y * kIntegralPlotPxPerMmS ), -radius, radius );
         cv::line( matController_, center, center + cv::Point2i( ix, 0 ), Colors::YelDk, 3 );
         cv::line( matController_, center, center + cv::Point2i( 0, iy ), Colors::YelDk, 3 );
         // cv::circle( matController_, center + cv::Point2i( ix, 0 ), 4, Colors::RedMd, -1 );
