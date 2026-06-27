@@ -311,9 +311,9 @@ controller_gains:
    gain_kD: 0.0
    gain_kI: 0.02
    integral_enable_radius_mm: 100.0
-   integral_z_based: 0          # 0 = in-plane (X/Y) radius, 1 = 3D distance incl. Z depth
+   integral_z_based: 1          # 0 = in-plane (X/Y) radius, 1 = 3D distance incl. Z depth
    integral_enable_speed_mm_s: 60.0
-   integral_leak: 0.9
+   integral_leak: 0.92
    deflection_force_max: 20.0
    tension_preload_min: 0.1
    tension_preload_max: 2.0
