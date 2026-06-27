@@ -326,3 +326,4 @@ controller_gains:
    initial_ramp_percentage: 0.5    # ramp_type 2: ramp to full power over the first 20% of depth closed
    max_current_amps: 1.89
    encoder_counts_per_rev: 4096
+
