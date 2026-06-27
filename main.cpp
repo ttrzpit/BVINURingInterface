@@ -24,14 +24,17 @@
 
 #include <array>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <deque>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <random>
 #include <string>
+#include <unistd.h>
 #include <unordered_set>
 #include <vector>
 
@@ -61,6 +64,25 @@ void signalHandler( int signum ) {
     g_running = false;
 }
 
+// Resolve <executable_dir>/../logging so trial logs always land in the project's
+// logging/ directory (the sibling of build/), regardless of the working
+// directory the binary was launched from. TrialLogger's "../logging" default is
+// relative to the launch CWD, so running from the project root instead of build/
+// silently redirected logs one level too high (Code/logging vs
+// BVINURingInterface/logging). Anchoring to the executable removes that ambiguity.
+static std::string ResolveProjectLoggingDir() {
+    char    buf[PATH_MAX];
+    ssize_t n = ::readlink( "/proc/self/exe", buf, sizeof( buf ) - 1 );
+    if ( n <= 0 ) return "../logging";    // fallback: original relative default
+    buf[n] = '\0';
+
+    std::error_code       ec;
+    std::filesystem::path exeDir = std::filesystem::path( buf ).parent_path();
+    std::filesystem::path logDir = std::filesystem::weakly_canonical( exeDir / ".." / "logging", ec );
+    if ( ec ) logDir = exeDir / ".." / "logging";    // keep the un-normalized path on error
+    return logDir.string();
+}
+
 int main() {
     std::signal( SIGINT, signalHandler );
 
@@ -79,6 +101,10 @@ int main() {
     if ( !cfg.load( "config.yaml" ) ) {
         std::cout << "Main: config.yaml not found - using built-in defaults.\n";
     }
+
+    // Trial logs go to <executable_dir>/../logging, independent of launch CWD.
+    const std::string loggingDir = ResolveProjectLoggingDir();
+    std::cout << "Main: trial logs -> " << loggingDir << "\n";
 
     // ---- Construct handlers -------------------------------------------------
     // Each handler receives only the sub-config it needs (not the whole Config).
@@ -99,7 +125,7 @@ int main() {
     TouchHandler     touch( cfg.touchscreen );
     Cal3Handler      cal3( cfg.touchscreen, cfg.camera, cfg.arucoCalGrid, cfg.cal3 );
     FittsTaskHandler fitts( cfg.fittsBoard, cfg.touchscreen, cfg.camera );
-    TrialLogger      trialLogger;
+    TrialLogger      trialLogger( loggingDir );
 
     ControllerHandler controller( cfg.controllerGains );
     PretensionHandler pretension( controller );

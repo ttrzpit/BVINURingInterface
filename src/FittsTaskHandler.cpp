@@ -139,10 +139,16 @@ bool FittsTaskHandler::EstimateTargetFromBoard( const std::vector<DetectedMarker
     // Physically plausible target-depth band for this rig [mm]. A value outside
     // this band can only come from a degenerate homography or a false decode
     // poisoning the fit; rejecting it keeps a single bad frame from driving
-    // guidance. The board's closest real approach is the fingertip standoff
-    // (~90 mm at touch), so a 50 mm floor never clips real data; the ceiling is
-    // generous headroom past the farthest target (~1050 mm observed).
-    constexpr double kMinPlausibleDepthMm = 50.0;
+    // guidance. The earlier 50 mm floor assumed a ~90 mm fingertip standoff, but
+    // the measured Cal3 standoff is ~22 mm, so at touch (camera ~22 mm from the
+    // screen) the apparent-size depth - and especially the homography
+    // EXTRAPOLATION of the target once the vertical offset pushes it off-frame -
+    // legitimately drops below 50 mm. A 50 mm floor then rejected the whole
+    // estimate, dropping the lock (Guiding Pos "--", guidance falling back to the
+    // lost-target hold) even with other markers in view. Lowered to 15 mm so the
+    // board estimate survives the close-range / off-frame case while still
+    // rejecting clearly-degenerate near-zero depths. Ceiling unchanged.
+    constexpr double kMinPlausibleDepthMm = 15.0;
     constexpr double kMaxPlausibleDepthMm = 2000.0;
 
     double edgePx = 0.0;
@@ -153,13 +159,41 @@ bool FittsTaskHandler::EstimateTargetFromBoard( const std::vector<DetectedMarker
     edgePx *= 0.25;
     if ( edgePx < 1e-3 ) return false;
 
-    const double f     = 0.5 * ( camCfg_.fx + camCfg_.fy );
-    const double depth = f * ( fm->sizePx * mmpp ) / edgePx;
-    if ( depth < kMinPlausibleDepthMm || depth > kMaxPlausibleDepthMm ) return false;
+    const double f             = 0.5 * ( camCfg_.fx + camCfg_.fy );
+    const double apparentDepth = f * ( fm->sizePx * mmpp ) / edgePx;
+    // Validity gate on the apparent (homography) depth: a sane projected scale
+    // means the homography fit is sane. Out of band -> degenerate fit / false
+    // decode, so reject the whole estimate. (Validity is gated here, not on the
+    // solvePnP depth below, so the lock survives whenever a sane homography
+    // exists - i.e. as long as any board marker is visible.)
+    if ( apparentDepth < kMinPlausibleDepthMm || apparentDepth > kMaxPlausibleDepthMm ) return false;
 
-    // Camera-relative target position from the image ray + depth (Y-up, to match
-    // DetectedMarker::positionMm). Stable because both centre px (homography) and
-    // depth (projected target scale) come from the same ambiguity-free fit.
+    // Depth: prefer the tilt-aware solvePnP board pose, evaluated at the target's
+    // board location. The apparent-size depth over-reads when the marker is
+    // viewed obliquely (the size formula assumes a face-on view); solvePnP
+    // recovers the full board orientation, so the target-centre depth is unbiased
+    // and matches the ruler-measured Cal3 standoff at touch. Fall back to the
+    // apparent depth if the pose doesn't solve, and clamp to the plausibility
+    // band so a bad off-frame extrapolation can't drive a wild position. Doing
+    // this here (not only in the trial logger) keeps guidance, the operator
+    // display, and the log all on the same accurate depth.
+    double    depth = apparentDepth;
+    cv::Vec3d rvec, tvec;
+    if ( ComputeArucoPose( markers, rvec, tvec ) && tvec[2] > 1e-6 ) {
+        cv::Mat Rpose;
+        cv::Rodrigues( rvec, Rpose );
+        const float  bx = ( fm->xPx + fm->sizePx * 0.5f ) * mmpp;
+        const float  by = ( fm->yPx + fm->sizePx * 0.5f ) * mmpp;
+        // p_cam.z = (R * (bx, by, 0)^T + t).z   (board point lies on the Z=0 plane)
+        const double depthCam = Rpose.at<double>( 2, 0 ) * bx + Rpose.at<double>( 2, 1 ) * by + tvec[2];
+        if ( depthCam > 1e-3 )
+            depth = std::clamp( depthCam, kMinPlausibleDepthMm, kMaxPlausibleDepthMm );
+    }
+
+    // Camera-relative target position = the ambiguity-free homography image ray
+    // (centre px) scaled to the solvePnP depth (Y-up, to match
+    // DetectedMarker::positionMm). Correcting the depth also corrects X/Y, which
+    // scale with it.
     const double X = ( centerPx.x - camCfg_.cx ) / camCfg_.fx * depth;
     const double Y = ( centerPx.y - camCfg_.cy ) / camCfg_.fy * depth;
     posOut = cv::Point3f( static_cast<float>( X ),
@@ -197,12 +231,22 @@ bool FittsTaskHandler::GetTargetFullPose( const std::vector<DetectedMarker>& mar
             break;
         }
 
-    // --- Clean target trajectory (camera frame, Y-up) ------------------------
-    // Use the ambiguity-free homography + apparent-scale estimator rather than
-    // solvePnP, whose planar-pose ambiguity throws the depth +/-50 mm when the
-    // board is far away. This is the same estimate that drives live guidance.
+    // --- Target position (camera frame, Y-up) -------------------------------
+    // EstimateTargetFromBoard now returns the tilt-aware solvePnP depth (with the
+    // ambiguity-free homography image ray), so posMmOut - and the displacement
+    // below - are already on the accurate depth shared with guidance and the
+    // operator display. Nothing depth-related to correct here.
     float rollRad = 0.0f;
     if ( !EstimateTargetFromBoard( markers, targetId, posMmOut, rollRad ) ) return false;
+
+    // --- Board orientation for the logged quaternion -------------------------
+    // Same solvePnP pose; report identity if it doesn't solve (too few markers /
+    // far-range ambiguity). The position above is unaffected by this.
+    cv::Vec3d  rvec, tvec;
+    cv::Mat    R;
+    const bool havePose = ComputeArucoPose( markers, rvec, tvec ) && tvec[2] > 1e-6;
+    if ( havePose )
+        cv::Rodrigues( rvec, R );
 
     // --- Fingertip-compensated displacement Δp = target - fingertip ----------
     // Uses the FULL 3D Cal3 offset (incl. its Z standoff), so dz -> 0 when the
@@ -226,16 +270,11 @@ bool FittsTaskHandler::GetTargetFullPose( const std::vector<DetectedMarker>& mar
     }
 
     // --- Orientation (nice-to-have, OpenCV Y-down) ---------------------------
-    // board->camera rotation from solvePnP, as a quaternion. May be noisy far
-    // away (planar-pose ambiguity); position above is unaffected by it.
-    cv::Vec3d rvec, tvec;
-    if ( !ComputeArucoPose( markers, rvec, tvec ) || tvec[2] <= 1e-6 ) {
+    // board->camera rotation from the solvePnP pose above, as a quaternion.
+    if ( !havePose ) {
         quatXyzwOut = cv::Vec4f( 0.f, 0.f, 0.f, 1.f );
         return true;
     }
-
-    cv::Mat R;
-    cv::Rodrigues( rvec, R );
 
     // Rotation matrix (board->camera) -> quaternion (x,y,z,w).
     const double m00 = R.at<double>( 0, 0 ), m01 = R.at<double>( 0, 1 ), m02 = R.at<double>( 0, 2 );

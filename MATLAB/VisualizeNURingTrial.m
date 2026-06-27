@@ -462,7 +462,12 @@ function fig = VisualizeNURingTrial(tt, varargin)
     % Projection onto the front plane: visual-Y/depth (tz) held constant at
     % yl(1) = 0 (nearest depth), spanning tx and ty
     if (drawShadowXY)
-        plot3(ax3d, tx, repmat(yl(1), size(tx)), ty, '-', 'Color', [Colors.bluMd 0.25], 'LineWidth', Globals.lineWidthData, 'HandleVisibility','off');
+        hShadowXY = plot3(ax3d, tx, repmat(yl(1), size(tx)), ty, '-', ...
+            'Color', [Colors.bluMd 0.25], ...
+            'LineWidth', Globals.lineWidthData, ...
+            'HandleVisibility','off');
+    else
+        hShadowXY = [];
     end
 
     % === Touchscreen outline ===
@@ -743,7 +748,7 @@ function fig = VisualizeNURingTrial(tt, varargin)
     if animatePlots
         AnimateAndExportVideo(fig, t, tx, ty, tz, txm, tym, tzm, vxm, vym, vzm, ...
             ax3d, axX, axY, axZ, ...
-            hTrajLine, hTrajDots, hStartPt, hEndPt, hShadowX, hShadowY, ...
+            hTrajLine, hTrajDots, hStartPt, hEndPt, hShadowX, hShadowY, hShadowXY, ...
             hPosLineX, hPosLineY, hPosLineZ, ...
             hVelLineX, hVelLineY, hVelLineZ, ...
             showVelocity, sourceFilename, trialTitle, videoFrameRate, ...
@@ -778,7 +783,7 @@ end
 % =========================================================================
 function AnimateAndExportVideo(fig, t, tx, ty, tz, txm, tym, tzm, vxm, vym, vzm, ...
         ax3d, axX, axY, axZ, ...
-        hTrajLine, hTrajDots, hStartPt, hEndPt, hShadowX, hShadowY, ...
+        hTrajLine, hTrajDots, hStartPt, hEndPt, hShadowX, hShadowY, hShadowXY, ...
         hPosLineX, hPosLineY, hPosLineZ, ...
         hVelLineX, hVelLineY, hVelLineZ, ...
         showVelocity, sourceFilename, trialTitle, videoFrameRate, ...
@@ -914,6 +919,9 @@ function AnimateAndExportVideo(fig, t, tx, ty, tz, txm, tym, tzm, vxm, vym, vzm,
     % moving "current position" marker on each axis.
     % ---------------------------------------------------------------
     set([hTrajLine, hTrajDots, hStartPt, hEndPt, hShadowX, hShadowY], 'Visible', 'off');
+    if ~isempty(hShadowXY)
+        set(hShadowXY, 'Visible', 'off');
+    end
     set([hPosLineX, hPosLineY, hPosLineZ], 'Visible', 'off');
     if showVelocity
         set([hVelLineX, hVelLineY, hVelLineZ], 'Visible', 'off');
@@ -926,6 +934,15 @@ function AnimateAndExportVideo(fig, t, tx, ty, tz, txm, tym, tzm, vxm, vym, vzm,
     % Animated counterparts of the red/green wall-projection shadows
     hAnimShadowX = plot3(ax3d, nan, nan, nan, '-', 'Color', [Colors.redMd 0.25], 'LineWidth', Globals.lineWidthData, 'HandleVisibility','off');
     hAnimShadowY = plot3(ax3d, nan, nan, nan, '-', 'Color', [Colors.greMd 0.25], 'LineWidth', Globals.lineWidthData, 'HandleVisibility','off');
+
+    if ~isempty(hShadowXY)
+        hAnimShadowXY = plot3(ax3d, nan, nan, nan, '-', ...
+            'Color', [Colors.bluMd 0.25], ...
+            'LineWidth', Globals.lineWidthData, ...
+            'HandleVisibility','off');
+    else
+        hAnimShadowXY = [];
+    end
     hold(ax3d, 'off');
 
     % NOTE: hold is kept 'on' through ALL object creation on a given right-
@@ -994,6 +1011,13 @@ function AnimateAndExportVideo(fig, t, tx, ty, tz, txm, tym, tzm, vxm, vym, vzm,
         set(hAnimShadowX, 'XData', tx(1:k), 'YData', tz(1:k), 'ZData', repmat(zl(1), size(tx(1:k))));
         set(hAnimShadowY, 'XData', repmat(-xl(1), size(tz(1:k))), 'YData', tz(1:k), 'ZData', ty(1:k));
 
+        if ~isempty(hAnimShadowXY)
+            set(hAnimShadowXY, ...
+                'XData', tx(1:k), ...
+                'YData', repmat(yl(1), size(tx(1:k))), ...
+                'ZData', ty(1:k));
+        end
+
         % Position subplots (marker frame)
         set(hAnimLineX, 'XData', t(1:k), 'YData', txm(1:k));
         set(hAnimPtX,   'XData', t(k),   'YData', txm(k));
@@ -1043,11 +1067,17 @@ function AnimateAndExportVideo(fig, t, tx, ty, tz, txm, tym, tzm, vxm, vym, vzm,
     % exactly what they were initialized to before this function ran.)
     % ---------------------------------------------------------------
     delete([hAnimTraj, hAnimPoint, hAnimShadowX, hAnimShadowY, hAnimLineX, hAnimPtX, hAnimLineY, hAnimPtY, hAnimLineZ, hAnimPtZ]);
+    if ~isempty(hAnimShadowXY)
+        delete(hAnimShadowXY);
+    end
     if showVelocity
         delete([hAnimVelLineX, hAnimVelLineY, hAnimVelLineZ]);
     end
     delete([hAnimPwmLine, hAnimPwmPt]);
     set([hTrajLine, hTrajDots, hStartPt, hEndPt, hShadowX, hShadowY], 'Visible', 'on');
+    if ~isempty(hShadowXY)
+        set(hShadowXY, 'Visible', 'on');
+    end
     set([hPosLineX, hPosLineY, hPosLineZ], 'Visible', 'on');
     if showVelocity
         set([hVelLineX, hVelLineY, hVelLineZ], 'Visible', 'on');
