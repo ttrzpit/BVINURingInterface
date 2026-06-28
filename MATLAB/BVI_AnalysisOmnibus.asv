@@ -4,8 +4,8 @@ clear all;
 clc;
 
 % Load trial data from the specified directory
- [headers, trials, summary] = ParseNURingTrials('+TrialData', 'Participants', {'988'});
-%[headers, trials, summary] = ParseNURingTrials('+TrialData', 'Participants', {});
+% [headers, trials, summary] = ParseNURingTrials('+TrialData', 'Participants', {'999'});
+[headers, trials, summary] = ParseNURingTrials('+TrialData', 'Participants', {});
 
 %% ========================================================================
 %  === STATISTICAL ANALYSIS ===============================================
@@ -23,7 +23,7 @@ clc;
 close all;
 
 % Select user and trial
-key = "u988_t166" ;
+key = "u801_t334" ;
 hdr = headers(headers.trial_key == key, :);   % adjust to your actual user/target IDs
 row = trials(trials.trial_key == key , :);
 tt  = row.data{1};
