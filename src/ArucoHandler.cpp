@@ -178,11 +178,44 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
     const int idMin = activeValidIdMin_.load();
     const int idMax = activeValidIdMax_.load();
 
+    const int activeId = activeTagId_.load();
+
     for (int i = 0; i < static_cast<int>(detectedIds.size()); i++) {
         int id = detectedIds[i];
 
         // Discard markers outside the active valid range
         if (id < idMin || id > idMax) continue;
+
+        const bool isActiveTarget = (id == activeId);
+
+        // Subpixel-refine ONLY the active target's corners. Global refinement is
+        // disabled (see initDetector) to keep detectMarkers() fast on the dense
+        // board; the target is the one marker whose 3D pose (and thus precise
+        // corners) is consumed. Guard against the cornerSubPix window reaching
+        // outside the image - markers are only kept ~min_distance_to_border px
+        // from the edge, which is less than the refine window radius. Refining
+        // before centerPx/cornersPx/rollRad are read below feeds them all the
+        // refined corners.
+        if (isActiveTarget && refineActiveTargetCorners_ && !grayFrame.empty()) {
+            constexpr int win    = 5;        // cornerSubPix half-window (OpenCV aruco default)
+            constexpr int margin = win + 1;
+            bool          safe   = true;
+            for (const auto& pt : corners[i]) {
+                if (pt.x < margin || pt.y < margin ||
+                    pt.x >= grayFrame.cols - margin || pt.y >= grayFrame.rows - margin) {
+                    safe = false;
+                    break;
+                }
+            }
+            if (safe) {
+                cv::cornerSubPix(
+                    grayFrame, corners[i],
+                    cv::Size(win, win), cv::Size(-1, -1),
+                    cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::MAX_ITER,
+                                     detectorCfg_.cornerRefinementMaxIterations,
+                                     detectorCfg_.cornerRefinementMinAccuracy));
+            }
+        }
 
         DetectedMarker marker;
         marker.id = id;
@@ -201,7 +234,7 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
         // dense Fitts board this avoids ~120 wasted solvePnP calls per frame
         // (which slowed detection throughput and made the overlay refresh choppy).
         // All other markers still carry centerPx / corners / rollRad below.
-        if (id == activeTagId_.load()) {
+        if (isActiveTarget) {
             // Physical marker size for pose. On the multi-scale Fitts board the
             // coarse and fine markers have different sizes, so resolve per-ID
             // from the layout (rendered pixel extent → mm); otherwise use the
@@ -699,10 +732,20 @@ void ArucoHandler::initDetector() {
     detectorParams_.polygonalApproxAccuracyRate = detectorCfg_.polygonalApproxAccuracyRate;
     detectorParams_.minCornerDistanceRate = detectorCfg_.minCornerDistanceRate;
     detectorParams_.minDistanceToBorder = detectorCfg_.minDistanceToBorder;
-    detectorParams_.cornerRefinementMethod =
-        static_cast<cv::aruco::CornerRefineMethod>(detectorCfg_.cornerRefinementMethod);
+    // Corner refinement is the dominant per-marker cost inside detectMarkers(), and
+    // on the dense Fitts board (450+ markers) refining every marker is what makes
+    // the detector fall behind at the mid-range distance where the most markers
+    // decode at once. Only the active guidance target actually needs subpixel
+    // corners (for its 3D pose); the board homography fits hundreds of corners by
+    // least squares and is unaffected by per-marker subpixel precision. So the
+    // detectors are built with NO global refinement, and RunDetection() refines
+    // only the active target's corners (see refineActiveTargetCorners_).
+    detectorParams_.cornerRefinementMethod        = cv::aruco::CORNER_REFINE_NONE;
     detectorParams_.cornerRefinementMaxIterations = detectorCfg_.cornerRefinementMaxIterations;
-    detectorParams_.cornerRefinementMinAccuracy = detectorCfg_.cornerRefinementMinAccuracy;
+    detectorParams_.cornerRefinementMinAccuracy   = detectorCfg_.cornerRefinementMinAccuracy;
+    refineActiveTargetCorners_ =
+        ( detectorCfg_.cornerRefinementMethod ==
+          static_cast<int>( cv::aruco::CORNER_REFINE_SUBPIX ) );
     detectorParams_.detectInvertedMarker = detectorCfg_.detectInvertedMarker;
     detectorParams_.perspectiveRemovePixelPerCell = detectorCfg_.perspectiveRemovePixelPerCell;
     detectorParams_.perspectiveRemoveIgnoredMarginPerCell = detectorCfg_.perspectiveRemoveIgnoredMarginPerCell;

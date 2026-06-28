@@ -168,27 +168,23 @@ bool FittsTaskHandler::EstimateTargetFromBoard( const std::vector<DetectedMarker
     // exists - i.e. as long as any board marker is visible.)
     if ( apparentDepth < kMinPlausibleDepthMm || apparentDepth > kMaxPlausibleDepthMm ) return false;
 
-    // Depth: prefer the tilt-aware solvePnP board pose, evaluated at the target's
-    // board location. The apparent-size depth over-reads when the marker is
-    // viewed obliquely (the size formula assumes a face-on view); solvePnP
-    // recovers the full board orientation, so the target-centre depth is unbiased
-    // and matches the ruler-measured Cal3 standoff at touch. Fall back to the
-    // apparent depth if the pose doesn't solve, and clamp to the plausibility
-    // band so a bad off-frame extrapolation can't drive a wild position. Doing
-    // this here (not only in the trial logger) keeps guidance, the operator
-    // display, and the log all on the same accurate depth.
-    double    depth = apparentDepth;
-    cv::Vec3d rvec, tvec;
-    if ( ComputeArucoPose( markers, rvec, tvec ) && tvec[2] > 1e-6 ) {
-        cv::Mat Rpose;
-        cv::Rodrigues( rvec, Rpose );
-        const float  bx = ( fm->xPx + fm->sizePx * 0.5f ) * mmpp;
-        const float  by = ( fm->yPx + fm->sizePx * 0.5f ) * mmpp;
-        // p_cam.z = (R * (bx, by, 0)^T + t).z   (board point lies on the Z=0 plane)
-        const double depthCam = Rpose.at<double>( 2, 0 ) * bx + Rpose.at<double>( 2, 1 ) * by + tvec[2];
-        if ( depthCam > 1e-3 )
-            depth = std::clamp( depthCam, kMinPlausibleDepthMm, kMaxPlausibleDepthMm );
-    }
+    // Depth from the ambiguity-free homography apparent-size projection (computed
+    // above as apparentDepth). We deliberately do NOT override this with a planar
+    // solvePnP pose. solvePnP on a coplanar board has a two-fold tilt ambiguity
+    // that flips when the visible marker set changes (e.g. a coarse perimeter
+    // marker leaving the FOV). The target-centre depth read off that pose,
+    //   depthCam = R20*bx + R21*by + tz,
+    // multiplies the tilt terms by the target's board offset (bx, by up to a few
+    // hundred mm), so even a few degrees of tilt flip becomes tens of mm of depth
+    // swing - and because X/Y below are the homography image ray SCALED by depth,
+    // the whole target position then jumps, even though the board is rigid and
+    // coplanar (the reported symptom). The apparent-size depth uses only the
+    // projected target scale, never tilt, so it changes continuously as markers
+    // enter/leave the FOV and guidance stays stable. Trade-off: it over-reads
+    // slightly under oblique viewing, but this board is viewed near face-on and
+    // stability beats a small static bias. (ComputeArucoPose is still used for the
+    // logged board orientation in GetTargetFullPose, just not for depth here.)
+    const double depth = apparentDepth;
 
     // Camera-relative target position = the ambiguity-free homography image ray
     // (centre px) scaled to the solvePnP depth (Y-up, to match

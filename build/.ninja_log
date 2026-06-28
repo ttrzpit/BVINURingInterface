@@ -54,3 +54,9 @@
 1	1210	1782687702565222790	CMakeFiles/BVINURingInterface.dir/main.cpp.o	6a77a15712398559
 2	1494	1782687702849226787	CMakeFiles/BVINURingInterface.dir/src/DisplayHandler.cpp.o	6767c9695750bb33
 1494	1647	1782687703000228912	BVINURingInterface	37f3a59808aa109c
+2	569	1782688567167190021	CMakeFiles/BVINURingInterface.dir/src/FittsTaskHandler.cpp.o	a9fdc93f5ef58ffc
+2	653	1782688567251191019	CMakeFiles/BVINURingInterface.dir/src/Cal3Handler.cpp.o	46ac73dced643a42
+1	738	1782688567336192030	CMakeFiles/BVINURingInterface.dir/src/ArucoHandler.cpp.o	a6c2b3cfc02e7bb8
+1	1035	1782688567633195559	CMakeFiles/BVINURingInterface.dir/main.cpp.o	6a77a15712398559
+2	1268	1782688567865198316	CMakeFiles/BVINURingInterface.dir/src/DisplayHandler.cpp.o	6767c9695750bb33
+1268	1402	1782688567997199885	BVINURingInterface	37f3a59808aa109c

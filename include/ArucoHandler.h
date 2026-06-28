@@ -283,6 +283,15 @@ private:
     cv::aruco::ArucoDetector      detector_;         // built from dictionary_
     cv::aruco::ArucoDetector      calDetector_;      // built from calGridDictionary_ (DICT_4X4_1000)
 
+    // Global corner refinement is disabled on the detectors above (it is the
+    // dominant per-marker cost in detectMarkers() and would refine every one of
+    // the 450+ markers on the dense Fitts board). Instead, only the active target
+    // marker's corners are subpixel-refined in RunDetection(). This flag is true
+    // when the configured corner_refinement_method is subpixel (1) - the only
+    // method reproducible with cv::cornerSubPix; other methods skip target
+    // refinement (detection still runs, just without the extra subpixel pass).
+    bool refineActiveTargetCorners_ = false;
+
     // Active detection mode - written from main thread, read from detect thread.
     // Atomics avoid the need for a mutex in the RunDetection() hot path.
     std::atomic<bool> useCalDetector_{ false };
