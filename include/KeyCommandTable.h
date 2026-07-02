@@ -85,6 +85,17 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { { 'r' }, InputState::FIT_SEL, InputState::FIT_RUN, "Active marker set to [MARKER_ID].", KeyAction::RANDOM_FITTS_TARGET },
     { { 'r' }, InputState::FIT_RUN, InputState::FIT_RUN, "Active marker set to [MARKER_ID].", KeyAction::RANDOM_FITTS_TARGET },
 
+    // ---- OBJECTS (Task 2 - object guidance) ------------------------------------
+    // Mirrors the Fitts 'F' block. 'O' from IDLE opens object selection; the
+    // calibration-incomplete gate (OBJ_WARN) is set up in KeyboardHandler::ProcessKey.
+    { { 'O' }, InputState::IDLE, InputState::OBJ_SEL, "Select object mode: [r] Random, [m] Manual...", KeyAction::NONE },
+    { { 'p' }, InputState::OBJ_WARN, InputState::OBJ_SEL, "Select object mode: [r] Random, [m] Manual...", KeyAction::NONE },
+    { { 'r' }, InputState::OBJ_WARN, InputState::IDLE, "Returning to idle - complete calibrations, then press O.", KeyAction::NONE },
+    { { 'm' }, InputState::OBJ_SEL, InputState::OBJ_ACT, "Which object marker ID (00-99)...", KeyAction::NONE },
+    { { 'm' }, InputState::OBJ_RUN, InputState::OBJ_ACT, "Which object marker ID (00-99)...", KeyAction::NONE },
+    { { 'r' }, InputState::OBJ_SEL, InputState::OBJ_RUN, "Object marker set to [OBJECT_ID].", KeyAction::RANDOM_OBJECT_TARGET },
+    { { 'r' }, InputState::OBJ_RUN, InputState::OBJ_RUN, "Object marker set to [OBJECT_ID].", KeyAction::RANDOM_OBJECT_TARGET },
+
     // ---- TENSION / PRETENSION ---------------------------------------------------
     // 'T' opens the tensioning menu: [p] runs the full guided pretensioning
     // sequence (PretensionHandler, step 1/4); [a]/[b]/[c]/[d] jump straight
@@ -286,6 +297,10 @@ inline const std::vector<NumericEntryFormat> kNumericEntryTable = {
     // ACCURACY - nnn (0-250) -> Fitts target marker (clamped to the board's fine
     // target range in KeyboardHandler::ExecuteAction)
     { InputState::FIT_ACT, 3, false, 0, 500, InputState::FIT_RUN, KeyAction::SET_FITTS_TARGET, "Active marker set to [MARKER_ID]." },
+
+    // OBJECTS - nn (00-99) -> object marker ID (DICT_6X6_100). Unknown IDs resolve
+    // to no target in WorldObjectHandler, so no board-range clamp is applied.
+    { InputState::OBJ_ACT, 2, false, 0, 99, InputState::OBJ_RUN, KeyAction::SET_OBJECT_TARGET, "Object marker set to [OBJECT_ID]." },
 
     // PRETENSION step 3/4 - n.n (0.0-10.0) -> tension setpoint [N] for [MOTOR]
     { InputState::TEN_SEL_A, 3, true, 0, 100, InputState::SAME, KeyAction::SET_TENSION, "" },

@@ -45,6 +45,10 @@ enum class InputState {
     FIT_SEL,
     FIT_RUN,
     FIT_ACT,
+    OBJ_WARN,    // Calibration-incomplete confirmation prompt before OBJECTS
+    OBJ_SEL,     // Object task: choose [r] random / [m] manual
+    OBJ_RUN,     // Object task running (an object target is active)
+    OBJ_ACT,     // Numeric entry of an object marker ID
     TEN_SEL_ALL,
     TEN_SEL_A,
     TEN_SEL_B,
@@ -76,6 +80,7 @@ enum class SystemState {
     CALIBRATING,      ///< General calibration - ArUco grid shown on touchscreen
     CAL3,             ///< Calibration Stage 3: camera-to-fingertip offset collection
     FITTS,            ///< Fitts task running
+    OBJECTS,          ///< Object-guidance task running (world board + tagged objects)
     PRETENSION,       ///< Guided pretensioning / encoder-zeroing / home-recording sequence
     TENSION_ADJUST    ///< Standalone tension adjustment (manual tension mode, no guided sequence)
 };
@@ -111,6 +116,8 @@ enum class KeyAction {
     SET_MOTOR_PWM,
     RANDOM_FITTS_TARGET,
     SET_FITTS_TARGET,
+    RANDOM_OBJECT_TARGET,
+    SET_OBJECT_TARGET,
     PRETENSION_ADVANCE,
     ADJUST_TENSION_INC,
     ADJUST_TENSION_DEC,
@@ -171,6 +178,7 @@ struct KeyboardState {
     InputState           inputState = InputState::IDLE;                         ///< Current single-key input state
     SystemState          systemState = SystemState::IDLE;                       ///< Coarse state, derived from inputState
     int                  fittsTargetId = 0;                                     ///< Randomly selected Fitts target (0 = none)
+    int                  activeObjectId = 0;                                    ///< Active OBJECTS-mode object marker ID (0 = none)
     int                  lastInputKey = -1;                                     ///< Raw key code of the last processed input (-1 = none yet)
     SerialAction         pendingSerialAction = SerialAction::NONE;              ///< One-shot serial toggle request
     MotorTestRequest     pendingMotorTest;                                      ///< One-shot motor PWM test request
@@ -181,6 +189,7 @@ struct KeyboardState {
     bool                 pendingStiffnessGainToggle = false;                    ///< One-shot: 'k' pressed (toggle K(theta) application)
     bool                 pendingSetHomePosition = false;                        ///< One-shot: 'Z' pressed (record current encoder pose as home)
     bool                 pendingRandomTarget = false;                           ///< One-shot: 'r' pressed - main picks the (distance-stratified) target
+    bool                 pendingRandomObjectTarget = false;                     ///< One-shot: 'r' in OBJECTS - main picks from object_marker_pool
     bool                 pendingLoggingToggle = false;                          ///< One-shot: 'L' pressed - main toggles the trial logger
     bool                 pendingEStopToggle = false;                            ///< One-shot: spacebar pressed - main toggles the guidance-output e-stop
     std::string          inputBuffer;                                           ///< Numeric value currently being typed
@@ -237,6 +246,9 @@ class KeyboardHandler {
     /** @brief Clear the one-shot 'r' random-target request (main consumed it). */
     void ClearRandomTarget() { state_.pendingRandomTarget = false; }
 
+    /** @brief Clear the one-shot 'r' random-object-target request (OBJECTS mode). */
+    void ClearRandomObjectTarget() { state_.pendingRandomObjectTarget = false; }
+
     /** @brief Clear the one-shot 'L' logging-toggle request (main consumed it). */
     void ClearLoggingToggle() { state_.pendingLoggingToggle = false; }
 
@@ -262,6 +274,10 @@ class KeyboardHandler {
         state_.fittsTargetId = id;
         state_.activeTagId = id;
     }
+
+    /** @brief Set the active OBJECTS-mode object marker ID directly (e.g. the
+     *         random pool pick made in main.cpp). Mirrors SetFittsTargetId. */
+    void SetActiveObjectId( int id ) { state_.activeObjectId = id; }
 
     /** @brief Configure the inclusive Fitts target ID range (the fine-marker
      *         band of the multi-scale board). Drives random target selection

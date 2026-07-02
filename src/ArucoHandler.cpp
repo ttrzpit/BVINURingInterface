@@ -35,7 +35,8 @@ ArucoHandler::ArucoHandler(const ArucoMarkerConfig& markerCfg,
       calGridCfg_(calGridCfg), touchCfg_(touchCfg),
       fittsLayout_(fittsBoardCfg, touchCfg),
       camMatrix_(camMatrix.clone()), distCoeffs_(distCoeffs.clone()),
-      calGridDictionary_(cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_1000)) {
+      calGridDictionary_(cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_1000)),
+      objDictionary_(cv::aruco::getPredefinedDictionary(cv::aruco::DICT_6X6_100)) {
     initDetector();
     renderGridImage();
     renderCalibrationGridImage();
@@ -160,7 +161,8 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
     std::vector<std::vector<cv::Point2f>> corners;
 
     const cv::aruco::ArucoDetector& det =
-        useCalDetector_.load() ? calDetector_ : detector_;
+        useObjDetector_.load() ? objDetector_
+                               : (useCalDetector_.load() ? calDetector_ : detector_);
 
     // Phase 1 diagnostic: time the detectMarkers() call in isolation - it is the
     // dominant per-frame cost and scales with the number of markers decoded.
@@ -580,6 +582,33 @@ void ArucoHandler::SetFittsBoardDetection(bool fitts) {
     }
 }
 
+void ArucoHandler::SetObjectDetection(bool objects) {
+    if (objects) {
+        // OBJECTS mode: DICT_6X6_100 covers the world board (1-36) and object
+        // markers (50-90). WorldObjectHandler solves every pose on the main
+        // thread from the returned corners, so no per-ID board sizing here.
+        // DICT_6X6_100 holds IDs 0-99; keep the whole range so no valid marker
+        // is filtered out.
+        constexpr int kObjIdMin = 0;
+        constexpr int kObjIdMax = 99;
+        useObjDetector_.store(true);
+        useCalDetector_.store(false);      // objDetector_ takes priority, but keep state clean
+        useFittsBoardSizes_.store(false);  // no Fitts per-ID sizing in OBJECTS mode
+        activeValidIdMin_.store(kObjIdMin);
+        activeValidIdMax_.store(kObjIdMax);
+        std::cout << "ArucoHandler: Detection → DICT_6X6_100 (IDs "
+                  << kObjIdMin << "–" << kObjIdMax << ", OBJECTS mode)\n";
+    } else {
+        useObjDetector_.store(false);
+        useCalDetector_.store(false);
+        useFittsBoardSizes_.store(false);
+        activeValidIdMin_.store(detectCfg_.validIdMin);
+        activeValidIdMax_.store(detectCfg_.validIdMax);
+        std::cout << "ArucoHandler: Detection → DICT_4X4_50 (IDs "
+                  << detectCfg_.validIdMin << "–" << detectCfg_.validIdMax << ")\n";
+    }
+}
+
 // =============================================================================
 // Private
 // =============================================================================
@@ -752,8 +781,9 @@ void ArucoHandler::initDetector() {
     detectorParams_.errorCorrectionRate = detectorCfg_.errorCorrectionRate;
     detectorParams_.useAruco3Detection = detectorCfg_.useAruco3Detection;
 
-    detector_    = cv::aruco::ArucoDetector(dictionary_,       detectorParams_);
+    detector_    = cv::aruco::ArucoDetector(dictionary_,        detectorParams_);
     calDetector_ = cv::aruco::ArucoDetector(calGridDictionary_, detectorParams_);
+    objDetector_ = cv::aruco::ArucoDetector(objDictionary_,     detectorParams_);
 
     // Seed the active ID range from config - matches the Fitts/default mode
     activeValidIdMin_.store(detectCfg_.validIdMin);

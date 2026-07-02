@@ -161,6 +161,17 @@ public:
      */
     void SetFittsBoardDetection(bool fitts);
 
+    /**
+     * @brief Switch detection for OBJECTS mode (world board + tagged objects).
+     *        true  → DICT_6X6_100, IDs covering the world board (1-36) and object
+     *                markers (50-90); per-marker pose is solved on the main thread
+     *                by WorldObjectHandler from the returned corners, so no
+     *                per-ID sizing is needed here.
+     *        false → restore DICT_4X4_1000 and the default ID range / marker size.
+     *        Thread-safe - takes effect on the next detection cycle.
+     */
+    void SetObjectDetection(bool objects);
+
     /** @brief Set the active guidance target ID. The detection thread solves
      *         full 3D pose only for this marker; pass 0 when no target is active.
      *         Thread-safe - takes effect on the next detection cycle. */
@@ -282,6 +293,7 @@ private:
     cv::aruco::DetectorParameters detectorParams_;
     cv::aruco::ArucoDetector      detector_;         // built from dictionary_
     cv::aruco::ArucoDetector      calDetector_;      // built from calGridDictionary_ (DICT_4X4_1000)
+    cv::aruco::ArucoDetector      objDetector_;      // built from objDictionary_ (DICT_6X6_100, OBJECTS mode)
 
     // Global corner refinement is disabled on the detectors above (it is the
     // dominant per-marker cost in detectMarkers() and would refine every one of
@@ -295,6 +307,7 @@ private:
     // Active detection mode - written from main thread, read from detect thread.
     // Atomics avoid the need for a mutex in the RunDetection() hot path.
     std::atomic<bool> useCalDetector_{ false };
+    std::atomic<bool> useObjDetector_{ false };   // OBJECTS mode → objDetector_ (DICT_6X6_100)
     std::atomic<int>  activeValidIdMin_{ 0 };
     std::atomic<int>  activeValidIdMax_{ 45 };
 
@@ -339,6 +352,10 @@ private:
     // Calibration grid uses a larger dictionary (DICT_4X4_1000) so it can
     // accommodate more markers than the Fitts grid (DICT_4X4_50).
     cv::aruco::Dictionary calGridDictionary_;
+
+    // OBJECTS mode uses DICT_6X6_100 (world board 1-36 + object markers 50-90),
+    // separate from the Fitts/Cal DICT_4X4_* dictionaries.
+    cv::aruco::Dictionary objDictionary_;
 
     static constexpr const char* TOUCHSCREEN_WIN = "ArUco Display";
 

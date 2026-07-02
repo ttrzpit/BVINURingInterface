@@ -36,6 +36,7 @@
 #include "KeyboardHandler.h"  // KeyboardState
 #include "PacketTypes.h"      // SerialState
 #include "TouchHandler.h"     // TouchState
+#include "WorldObjectHandler.h" // ObjectOverlay
 
 
 class DisplayHandler {
@@ -188,6 +189,26 @@ public:
      *         next target is selected. Pass visible=false to hide it. */
     void SetTouchedTargetBox(bool visible, const std::array<cv::Point2f, 4> &corners);
 
+    /** @brief Provide the OBJECTS-mode overlay geometry (per-object marker
+     *         outline, wireframe, base gizmo, target dot, name label - all
+     *         pre-projected to operator-view pixels by WorldObjectHandler).
+     *         Drawn only while visible=true (OBJECTS mode); pass visible=false in
+     *         every other state so the operator view is unchanged. The vector is
+     *         copied, so the caller's WorldObjectHandler may be updated freely. */
+    void SetObjectOverlays(bool visible, const std::vector<ObjectOverlay> &overlays);
+
+    /** @brief OBJECTS-mode status line drawn on the operator view (world marker
+     *         count, world-pose state, active object LIVE/ANCHORED/etc.) - a rig
+     *         diagnostic so the operator can see why guidance is or isn't locked.
+     *         Pass visible=false outside OBJECTS mode. */
+    void SetObjectStatusLine(bool visible, const std::string &text);
+
+    /** @brief Detected world-board marker outlines (4 image-px corners each) for
+     *         OBJECTS mode, drawn as faint blue squares so the operator can see
+     *         which world markers are anchoring the scene. Pass visible=false
+     *         outside OBJECTS mode. */
+    void SetWorldMarkerOutlines(bool visible, const std::vector<std::array<cv::Point2f, 4>> &outlines);
+
     // ---- Controller panel ---------------------------------------------------
 
     void ClearController();
@@ -219,6 +240,7 @@ private:
     void DrawMarkerOverlays(cv::Mat &frame,
                             const std::vector<DetectedMarker> &markers,
                             int activeTagId);
+    void DrawObjectOverlays(cv::Mat &frame);
     void DrawTelemetryBar(cv::Mat &frame,
                           const std::vector<DetectedMarker> &markers,
                           const TouchState &touch, const KeyboardState &kb);
@@ -286,6 +308,14 @@ private:
 
     bool                       touchedBoxVisible_ = false;
     std::array<cv::Point2f, 4> touchedBoxCorners_ = {};
+
+    // OBJECTS-mode overlays (updated via SetObjectOverlays)
+    bool                       objectOverlaysVisible_ = false;
+    std::vector<ObjectOverlay> objectOverlays_        = {};
+    bool                       objectStatusVisible_   = false;
+    std::string                objectStatusLine_      = {};
+    bool                       worldOutlinesVisible_  = false;
+    std::vector<std::array<cv::Point2f, 4>> worldOutlines_ = {};
 
     bool        touchFingertipVisible_ = false;
     cv::Point2i touchFingertipPx_      = {};

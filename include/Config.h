@@ -26,7 +26,8 @@
 
 
 #include <array>
-#include <opencv2/core.hpp>  // cv::Mat, cv::FileStorage
+#include <map>
+#include <opencv2/core.hpp>  // cv::Mat, cv::FileStorage, cv::Point3f
 #include <string>
 #include <vector>
 
@@ -196,6 +197,81 @@ struct AccuracyTrialsConfig {
     std::vector<int> randomPool;  // Marker IDs to cycle through on 'r' (empty = disabled)
 };
 
+// ---- Object-Guidance World (OBJECTS mode, 'O') ------------------------------
+// A physical ArUco "world board" (marker_positions, ids 1–36) establishes a rig
+// world frame, and a set of physical objects (target_objects, ids 50–90) each
+// tagged by an ArUco marker are guided to. All markers use DICT_6X6_100 - a
+// different dictionary from the Fitts/Cal DICT_4X4_* grids, so OBJECTS mode
+// swaps the detector (see ArucoHandler::SetObjectDetection). Ported from the
+// ~/Code/ArUcoTest prototype. Geometry (marker frame, mm): origin = marker
+// centre, +X right, +Y up, +Z out of the marker face (toward the camera); the
+// object body extends toward -Z.
+
+// Shape of a virtual object drawn from its marker.
+enum class ObjectType { Box, Cylinder };
+
+// One physical object tagged by an object marker. Holds the raw parsed shape
+// definition in the MARKER frame (mm); wireframe edges and pose/anchoring are
+// computed at runtime by WorldObjectHandler.
+struct ObjectDef {
+    int          id   = -1;
+    std::string  name;
+    ObjectType   type = ObjectType::Box;
+    float        markerSizeMm = 0.0f;   // Physical side of THIS object's marker [mm]
+
+    // Box: 8 explicit corners in the marker frame (order: top UL/UR/BL/BR,
+    // then bottom UL/UR/BL/BR).
+    std::vector<cv::Point3f> points;
+
+    // Cylinder: radius + total height [mm].
+    float radiusMm = 0.0f;
+    float heightMm = 0.0f;
+
+    // Cylinder (legacy "tangent"): marker sits on a plane tangent to the side,
+    // axis parallel to +Y at z = -radius; marker centre this far up from the base.
+    float markerCenterHeightMm = 0.0f;
+
+    // Cylinder (general, preferred): base circle centred at baseOrigin, extruded
+    // along baseNormal for heightMm. baseOrigin is the object origin (gizmo drawn
+    // there). All in the marker frame.
+    bool        cylGeneral = false;    // true = general (base_origin), false = legacy tangent
+    cv::Point3f baseOrigin{0, 0, 0};
+    cv::Point3f baseNormal{0, 0, 1};
+
+    // Guidance target the ring drives to, stored ABSOLUTE in the marker frame:
+    //   BOX      - target_point_mm is relative to the marker origin (stored as-is).
+    //   CYLINDER - target_point_mm is relative to baseOrigin (stored baseOrigin + tp).
+    cv::Point3f targetPoint{0, 0, 0};
+    bool        hasTarget = false;
+};
+
+struct ObjectWorldConfig {
+    // Physical side length of the WORLD board markers [mm]. Used to solve each
+    // world marker's own 6DOF pose (for the relative/local object anchoring).
+    // Must match the printed board.
+    float worldMarkerSizeMm = 100.0f;
+
+    // Roll trim [deg] added to the world-board camera roll used to orient the Cal3
+    // fingertip offset for objects. The world-board roll reference and the Cal3
+    // touchscreen roll reference can differ by a fixed rig-geometry constant; if
+    // the guided landing spot is rotated a consistent amount around the target,
+    // trim it here. 0 = none.
+    float rollOffsetDeg = 0.0f;
+
+    // World board marker centres (id -> world XYZ mm). Under the relative-anchoring
+    // model these coordinates are not needed for guidance (each world marker is
+    // its own local reference); the map is still used to know which ids are world
+    // markers, and is available for overlays / a nominal origin.
+    std::map<int, cv::Point3f> markerPositions;
+
+    // Object marker IDs to randomise among for the 'r' selection (no repeat
+    // until exhausted).
+    std::vector<int> objectMarkerPool;
+
+    // Virtual objects tagged by object markers (id -> definition).
+    std::map<int, ObjectDef> targetObjects;
+};
+
 // ---- Touchscreen Monitor ----------------------------------------------------
 
 struct TouchscreenConfig {
@@ -350,6 +426,7 @@ class Config {
     ArucoCalibrationGridConfig arucoCalGrid;
     FittsBoardConfig fittsBoard;
     AccuracyTrialsConfig accuracyTrials;
+    ObjectWorldConfig objectWorld;  // OBJECTS mode: world board + tagged objects
     TouchscreenConfig touchscreen;
     DisplayConfig display;
     TelemetryConfig telemetry;

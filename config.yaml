@@ -216,6 +216,168 @@ accuracy_trials:
    target_set_11: [298, 299, 300, 301, 302, 303, 304, 328, 329, 330, 331, 332, 333, 334, 355, 356, 357, 358, 359, 360, 361, 379, 380, 381, 382, 383, 384, 385 ]
    target_set_12: [305, 306, 307, 308, 309, 310, 311, 335, 336, 337, 338, 339, 340, 341, 362, 363, 364, 365, 386, 387, 388, 389 ]
 
+
+# === Object-Guidance World (OBJECTS mode, 'O') =================================
+# A physical ArUco "world board" (marker_positions, ids 1-36) establishes a rig
+# world frame, and a set of physical objects (target_objects, ids 50-90), each
+# tagged by an ArUco marker, are guided to. ALL markers here use DICT_6X6_100 -
+# a different dictionary from the Fitts/Cal DICT_4X4_* grids, so OBJECTS mode
+# swaps the detector. Ported from the ~/Code/ArUcoTest prototype.
+#
+# Frame (marker's own frame, mm): origin = marker centre, +X right, +Y up,
+#   +Z out of the marker face (toward the camera). Object body extends toward -Z.
+#
+# World board frame (marker_positions): two perpendicular planes meeting on the
+#   X axis - z = 0 "wall" markers span X/Y; y = 0 "floor" markers span X/Z.
+object_world:
+
+   # Physical side length of the WORLD board markers [mm]. Currently unused by the
+   # global-PnP world pose (which uses marker CENTRES), kept for reference / future
+   # corner-based options.
+   world_marker_size_mm: 100.0
+
+   # Roll trim [deg] for orienting the Cal3 fingertip offset in OBJECTS mode. The
+   # offset is rotated by the camera roll read from the world board; if the world
+   # board and the Cal3 touchscreen references differ by a constant, the guided
+   # landing spot is rotated a fixed amount around the target - trim it out here.
+   roll_offset_deg: 0.0
+
+   # --- World board marker centres (id -> XYZ mm) in the rig/world frame ------
+   # IMPORTANT: these ARE the world geometry used to solve the world->camera pose
+   # each frame (marker centre <-> config position). Their ACCURACY directly sets
+   # stability and accuracy: ~1 mm positions give a steady, sub-mm pose; several-mm
+   # errors reintroduce jitter and a constant target offset. Measure them as
+   # precisely as possible (ideally from the board's design/print layout).
+   marker_positions:
+      - { id: 1,  x: -365.0, y: 357.5, z:   0.0 }
+      - { id: 2,  x: -225.5, y: 345.0, z:   0.0 }
+      - { id: 3,  x:  -66.0, y: 352.5, z:   0.0 }
+      - { id: 4,  x:   73.5, y: 355.0, z:   0.0 }
+      - { id: 5,  x:  218.0, y: 347.5, z:   0.0 }
+      - { id: 6,  x:  372.5, y: 350.0, z:   0.0 }
+      - { id: 7,  x: -370.0, y: 215.0, z:   0.0 }
+      - { id: 8,  x: -215.5, y: 217.5, z:   0.0 }
+      - { id: 9,  x:  -73.5, y: 225.0, z:   0.0 }
+      - { id: 10, x:   68.5, y: 227.5, z:   0.0 }
+      - { id: 11, x:  228.0, y: 220.0, z:   0.0 }
+      - { id: 12, x:  370.0, y: 222.5, z:   0.0 }
+      - { id: 13, x: -360.0, y:  87.5, z:   0.0 }
+      - { id: 14, x: -220.5, y:  90.0, z:   0.0 }
+      - { id: 15, x:  -76.0, y:  97.5, z:   0.0 }
+      - { id: 16, x:   78.5, y:  85.0, z:   0.0 }
+      - { id: 17, x:  215.5, y:  92.5, z:   0.0 }
+      - { id: 18, x:  370.0, y:  95.0, z:   0.0 }
+      - { id: 19, x: -367.5, y:   0.0, z:  90.0 }
+      - { id: 20, x: -225.5, y:   0.0, z:  87.5 }
+      - { id: 21, x:  -68.5, y:   0.0, z:  95.0 }
+      - { id: 22, x:   76.0, y:   0.0, z:  92.5 }
+      - { id: 23, x:  228.0, y:   0.0, z:  85.0 }
+      - { id: 24, x:  365.0, y:   0.0, z:  82.5 }
+      - { id: 25, x: -362.5, y:   0.0, z: 217.5 }
+      - { id: 26, x: -218.0, y:   0.0, z: 215.0 }
+      - { id: 27, x:  -78.5, y:   0.0, z: 225.0 }
+      - { id: 28, x:   81.0, y:   0.0, z: 220.0 }
+      - { id: 29, x:  220.5, y:   0.0, z: 212.5 }
+      - { id: 30, x:  365.0, y:   0.0, z: 225.0 }
+      - { id: 31, x: -372.5, y:   0.0, z: 345.0 }
+      - { id: 32, x: -213.0, y:   0.0, z: 342.5 }
+      - { id: 33, x:  -71.0, y:   0.0, z: 350.0 }
+      - { id: 34, x:   71.0, y:   0.0, z: 347.5 }
+      - { id: 35, x:  225.5, y:   0.0, z: 355.0 }
+      - { id: 36, x:  367.5, y:   0.0, z: 352.5 }
+
+   # --- Object marker IDs to randomise among for the 'r' selection -----------
+   object_marker_pool: [ 60, 61, 62, 70, 71, 72 ]
+
+   # --- Virtual objects tagged by object markers -----------------------------
+   # type: "cylinder" (general) - base_origin_mm + base_normal_mm + radius + height.
+   #   target_point_mm is relative to base_origin_mm.
+   # type: "box" - 8 explicit corner points (marker-frame mm), order:
+   #   top UL/UR/BL/BR then bottom UL/UR/BL/BR. target_point_mm is relative to
+   #   the marker origin.
+   target_objects:
+      # Pen
+      - id:                 60
+        name:               "pen"
+        type:               "cylinder"
+        marker_size_mm:     40
+        cylinder_radius_mm: 7
+        cylinder_height_mm: 138
+        base_origin_mm:     { x: -65, y: 41, z:  5 }
+        base_normal_mm:     { x:   1, y:  0, z:  0 }
+        target_point_mm:    { x:  95, y:  0, z:  0 }
+
+      # Can
+      - id:                 61
+        name:               "can"
+        type:               "cylinder"
+        marker_size_mm:     40
+        cylinder_radius_mm: 27
+        cylinder_height_mm: 134
+        base_origin_mm:     { x:   0, y: 61, z:  0 }
+        base_normal_mm:     { x:   0, y:  0, z:  1 }
+        target_point_mm:    { x:   0, y:  0, z: 133 }
+
+      # Coin
+      - id:                 62
+        name:               "coin"
+        type:               "cylinder"
+        marker_size_mm:     40
+        cylinder_radius_mm: 12
+        cylinder_height_mm: 2
+        base_origin_mm:     { x:   0, y: 46, z: -2 }
+        base_normal_mm:     { x:   0, y:  0, z:  1 }
+        target_point_mm:    { x:   0, y:  0, z:  1 }
+
+      # Cell phone
+      - id:                 70
+        name:               "cellphone"
+        type:               "box"
+        marker_size_mm:     40
+        points:
+           - { x: -32.0, y:  32.0, z:   0.0 }   # 1 top    UL
+           - { x:  92.0, y:  32.0, z:   0.0 }   # 2 top    UR
+           - { x: -32.0, y: -32.0, z:   0.0 }   # 3 top    BL
+           - { x:  92.0, y: -32.0, z:   0.0 }   # 4 top    BR
+           - { x: -32.0, y:  32.0, z: -13.0 }   # 5 bottom UL
+           - { x:  92.0, y:  32.0, z: -13.0 }   # 6 bottom UR
+           - { x: -32.0, y: -32.0, z: -13.0 }   # 7 bottom BL
+           - { x:  92.0, y: -32.0, z: -13.0 }   # 8 bottom BR
+        target_point_mm:    { x: 55, y:  0, z:  0 }
+
+      # Knife
+      - id:                 71
+        name:               "knife"
+        type:               "box"
+        marker_size_mm:     40
+        points:
+           - { x: -146.0, y: 52.0, z:  2.0 }   # 1 top    UL
+           - { x:   82.0, y: 52.0, z:  2.0 }   # 2 top    UR
+           - { x: -146.0, y: 30.0, z:  2.0 }   # 3 top    BL
+           - { x:   82.0, y: 30.0, z:  2.0 }   # 4 top    BR
+           - { x: -146.0, y: 52.0, z: -2.0 }   # 5 bottom UL
+           - { x:   82.0, y: 52.0, z: -2.0 }   # 6 bottom UR
+           - { x: -146.0, y: 30.0, z: -2.0 }   # 7 bottom BL
+           - { x:   82.0, y: 30.0, z: -2.0 }   # 8 bottom BR
+        target_point_mm:    { x: 46, y: 41, z:  2 }
+
+      # Fork
+      - id:                 72
+        name:               "fork"
+        type:               "box"
+        marker_size_mm:     40
+        points:
+           - { x: -92.0, y: 50.0, z:  6.0 }   # 1 top    UL
+           - { x:  92.0, y: 50.0, z:  6.0 }   # 2 top    UR
+           - { x: -92.0, y: 26.0, z:  6.0 }   # 3 top    BL
+           - { x:  92.0, y: 26.0, z:  6.0 }   # 4 top    BR
+           - { x: -92.0, y: 50.0, z: -6.0 }   # 5 bottom UL
+           - { x:  92.0, y: 50.0, z: -6.0 }   # 6 bottom UR
+           - { x: -92.0, y: 26.0, z: -6.0 }   # 7 bottom BL
+           - { x:  92.0, y: 26.0, z: -6.0 }   # 8 bottom BR
+        target_point_mm:    { x: 52, y: 38, z:  6 }
+
+
 # ---- Fitts target circle ------------------------------------------------------
 # radius_mm         : Drawn target circle radius [mm]
 # offset_default_mm : Default Y offset (below the tag center) shown as a gray

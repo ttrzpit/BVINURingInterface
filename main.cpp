@@ -55,6 +55,7 @@
 #include "SerialHandler.h"
 #include "TouchHandler.h"
 #include "TrialLogger.h"
+#include "WorldObjectHandler.h"
 
 // Global shutdown flag - written by SIGINT handler, read by the main loop
 static volatile bool g_running = true;
@@ -122,10 +123,11 @@ int main() {
                         cfg.camera.cameraMatrix,
                         cfg.camera.distCoeffs );
 
-    TouchHandler     touch( cfg.touchscreen );
-    Cal3Handler      cal3( cfg.touchscreen, cfg.camera, cfg.arucoCalGrid, cfg.cal3 );
-    FittsTaskHandler fitts( cfg.fittsBoard, cfg.touchscreen, cfg.camera );
-    TrialLogger      trialLogger( loggingDir );
+    TouchHandler       touch( cfg.touchscreen );
+    Cal3Handler        cal3( cfg.touchscreen, cfg.camera, cfg.arucoCalGrid, cfg.cal3 );
+    FittsTaskHandler   fitts( cfg.fittsBoard, cfg.touchscreen, cfg.camera );
+    WorldObjectHandler worldObj( cfg.objectWorld, cfg.camera );   // OBJECTS mode ('O')
+    TrialLogger        trialLogger( loggingDir );
 
     ControllerHandler controller( cfg.controllerGains );
     PretensionHandler pretension( controller );
@@ -184,6 +186,11 @@ int main() {
     bool         prevLogTouched = false;
     bool         primeLoggingAfterUserId = false;    // 'L' with no user ID set: prime once the ID is entered
     int          prevActiveTagId = 0;                ///< Detects kb.activeTagId changes -> ramps guidance force on new targets
+    int          prevActiveObjectId = 0;             ///< Detects kb.activeObjectId changes -> ramp reset in OBJECTS mode
+    double       lastObjDiagSecs = 0.0;              ///< Throttles the OBJECTS once/sec console diagnostic
+    // OBJECTS random pool ('r' cycles these object marker IDs, no repeats until
+    // exhausted, then refills). Refreshed on every OBJECTS entry.
+    std::vector<int> objectPoolRemaining;
 
     // Last-known camera-side target-circle position (persists when activeMarker
     // leaves the camera frame so the circle doesn't flicker off momentarily).
@@ -306,6 +313,8 @@ int main() {
             } else if ( prevState == SystemState::FITTS ) {
                 aruco.SetFittsBoardVisible( false );
                 aruco.SetFittsBoardDetection( false );    // Restore DICT_4X4_50
+            } else if ( prevState == SystemState::OBJECTS ) {
+                aruco.SetObjectDetection( false );        // Restore DICT_4X4_50 (no touchscreen grid was shown)
             } else {
                 aruco.SetGridVisible( false );
             }
@@ -330,6 +339,15 @@ int main() {
                 // Clear the random-target memory so a fresh Fitts sequence can
                 // reuse every marker exactly once before any repeats.
                 usedRandomTargets.clear();
+            } else if ( kb.systemState == SystemState::OBJECTS ) {
+                // OBJECTS: world board (1-36) + physical tagged objects (50-90),
+                // DICT_6X6_100. No touchscreen grid - the objects are physical.
+                // WorldObjectHandler does all PnP on the main thread from the
+                // detected corners; guidance flows through the same SetTarget path
+                // as FITTS. Refresh the random object pool for this session.
+                aruco.SetObjectDetection( true );
+                worldObj.Reset();
+                objectPoolRemaining = cfg.objectWorld.objectMarkerPool;
             }
             // IDLE and any other state - window already closed above
 
@@ -366,6 +384,9 @@ int main() {
                 prevFittsTarget = 0;
                 prevActiveTagId = 0;
                 trialLogger.Cancel();    // drop any in-progress capture on FITTS exit
+            }
+            if ( prevState == SystemState::OBJECTS ) {
+                prevActiveObjectId = 0;
             }
             prevState = kb.systemState;
         }
@@ -641,6 +662,25 @@ int main() {
             keyboard.ClearRandomTarget();
         }
 
+        // 'r' in OBJECTS - pick a random object marker from the config pool
+        // (object_marker_pool), no repeat until the pool is exhausted, then
+        // refill. Mirrors the Fitts debug-pool picker.
+        if ( kb.pendingRandomObjectTarget ) {
+            if ( !cfg.objectWorld.objectMarkerPool.empty() ) {
+                if ( objectPoolRemaining.empty() )
+                    objectPoolRemaining = cfg.objectWorld.objectMarkerPool;   // refill after exhaustion
+                const int idx = std::uniform_int_distribution<int>(
+                    0, ( int )objectPoolRemaining.size() - 1 )( targetRng );
+                const int nextId = objectPoolRemaining[idx];
+                objectPoolRemaining.erase( objectPoolRemaining.begin() + idx );
+                keyboard.SetActiveObjectId( nextId );
+                keyboard.SetExternalStatus( "Object marker set to " + std::to_string( nextId ) + "." );
+            } else {
+                keyboard.SetExternalStatus( "No object_marker_pool configured in config.yaml." );
+            }
+            keyboard.ClearRandomObjectTarget();
+        }
+
         // In FITTS state, arm the new target whenever it changes. The board is
         // persistent (all markers stay shown); only the target-offset circle
         // and the fitts task state move to the new target marker.
@@ -661,6 +701,24 @@ int main() {
             // Tell the detection thread which marker needs full 3D pose - it
             // skips pose for all others, keeping the dense board cheap.
             aruco.SetActiveTagId( kb.activeTagId );
+        }
+
+        // OBJECTS: point the handler at the newly-selected object and restart the
+        // guidance ramp when it changes (mirrors the Fitts activeTagId block). No
+        // SetActiveTagId here - WorldObjectHandler solves every pose itself on the
+        // main thread, so the detection thread's single-target fast path is unused.
+        if ( kb.systemState == SystemState::OBJECTS && kb.activeObjectId != prevActiveObjectId ) {
+            controller.ResetRamp( nowSecs );
+            worldObj.OnNewTarget( kb.activeObjectId );
+            prevActiveObjectId = kb.activeObjectId;
+            haveLastTargetCircle = false;
+        }
+
+        // OBJECTS: solve the world board pose + resolve the active object's target
+        // from the detected markers (main-thread PnP). Recomputed on new frames
+        // only; the resolved target + overlays persist between frames.
+        if ( kb.systemState == SystemState::OBJECTS && isNewFrame ) {
+            worldObj.Update( markers );
         }
 
         // f. Controller - runs every loop iteration so dt tracks wall-clock
@@ -713,6 +771,14 @@ int main() {
                 targetPosMm = fbTargetPosMm;
                 targetRoll = fbTargetRoll;
             }
+        } else if ( kb.systemState == SystemState::OBJECTS && worldObj.HasTarget() ) {
+            // OBJECTS guidance target: the active object's target_point resolved
+            // to camera frame Y-up by WorldObjectHandler (from the object marker
+            // when visible, else its world anchor). Flows through the same
+            // SetTarget path as FITTS.
+            haveTarget  = true;
+            targetPosMm = worldObj.GetTargetPosMm();
+            targetRoll  = worldObj.GetTargetRoll();
         }
 
         // Once the participant has touched the screen for the current target,
@@ -1123,6 +1189,38 @@ int main() {
             display.SetGestureIndicator( gesture.IsIndicatorActive( nowSecs ), gesture.GetLastGesture() );
             display.SetLoggingStatus( trialLogger.IsPrimed(), trialLogger.IsActive() );
             display.SetArucoStats( aruco.GetDetectionHz(), aruco.GetDetectionLagMs() );
+
+            // OBJECTS overlays (green live / yellow anchored wireframes, gizmo,
+            // target dot) + faint blue world-marker outlines. Hidden elsewhere.
+            display.SetObjectOverlays( kb.systemState == SystemState::OBJECTS, worldObj.GetOverlays() );
+            display.SetWorldMarkerOutlines( kb.systemState == SystemState::OBJECTS, worldObj.GetWorldOutlines() );
+
+            // OBJECTS status line + once/sec console diagnostic: shows why guidance
+            // is (or isn't) locked - world marker count, world-pose availability,
+            // and the active object's LIVE/ANCHORED/lost state. Essential for
+            // diagnosing "guidance stops when the marker is occluded" on the rig.
+            if ( kb.systemState == SystemState::OBJECTS ) {
+                std::string objState;
+                if ( kb.activeObjectId <= 0 )                             objState = "no object selected";
+                else if ( worldObj.HasTarget() && worldObj.TargetIsLive() ) objState = "LIVE";
+                else if ( worldObj.HasTarget() )                          objState = "ANCHORED (held)";
+                else if ( !worldObj.HasActiveAnchor() )                   objState = "object not seen yet - show it once";
+                else if ( !worldObj.HasWorldPose() )                      objState = "world board not visible (need >=4 markers)";
+                else                                                      objState = "lost";
+
+                const std::string status =
+                    "OBJ  world mk: " + std::to_string( worldObj.GetWorldMarkerCount() ) +
+                    "  pose: " + std::string( worldObj.HasWorldPose() ? "OK" : "--" ) +
+                    "  |  target: " + objState;
+                display.SetObjectStatusLine( true, status );
+
+                if ( nowSecs - lastObjDiagSecs >= 1.0 ) {
+                    lastObjDiagSecs = nowSecs;
+                    std::cout << "[OBJ] " << status << "  (id " << kb.activeObjectId << ")\n";
+                }
+            } else {
+                display.SetObjectStatusLine( false, "" );
+            }
 
             // // --- Phase 1 detection diagnostics: once-per-second console summary
             // // Quantifies the gap between camera delivery and pose-update rate

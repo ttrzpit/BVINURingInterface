@@ -4,8 +4,8 @@ clear all;
 clc;
 
 % Load trial data from the specified directory
- [headers, trials, summary] = ParseNURingTrials('+TrialData', 'Participants', {'888'});
-%[headers, trials, summary] = ParseNURingTrials('+TrialData', 'Participants', {});
+ [headers, trials, summary] = ParseNURingTrials('+TrialData', 'Participants', {'555'});
+% [headers, trials, summary] = ParseNURingTrials('+TrialData', 'Participants', {});
 
 %% ========================================================================
 %  === STATISTICAL ANALYSIS ===============================================
@@ -23,7 +23,7 @@ clc;
 close all;
 
 % Select user and trial
-key = "u888_t357" ;
+key = "u555_t178" ;
 hdr = headers(headers.trial_key == key, :);   % adjust to your actual user/target IDs
 row = trials(trials.trial_key == key , :);
 tt  = row.data{1};
@@ -36,7 +36,7 @@ VisualizeNURingTrial(tt, ...
     'DrawEstimated', false, ...
     'Threshold', 500, ...
     'ShowVelocity', true, ...
-    'Animate', false, ...
+    'Animate', true, ...
     'SetZLimit', 0, ...
     'ColumnWidths', [0.4 0.3 0.3]) ;
 
@@ -46,11 +46,11 @@ VisualizeNURingTrial(tt, ...
 close all; 
 
 % Select user
-user = "124" ;
+user = "888" ;
 
 % Plot
 results = ParticipantGuidanceAnalysis(user, headers, trials, ...
-    'MatchFingersightScale', true ) ; 
+    'MatchFingersightScale', false) ; 
 
 
 
@@ -59,4 +59,4 @@ close all;
 
 % Plot
 results = StudyGuidanceAnalysis(headers, trials, ...
-    'MatchFingersightScale', false ) ; 
+    'MatchFingersightScale', true ) ; 

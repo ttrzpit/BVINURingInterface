@@ -125,6 +125,7 @@ void DisplayHandler::Update( const cv::Mat                     &frame,
 
         DrawCameraElements( canvas );
         DrawMarkerOverlays( canvas, markers, kb.activeTagId );
+        DrawObjectOverlays( canvas );
 
         if ( targetCircleVisible_ ) {
             // FITTS target - active tag center offset "under" by the Cal3 Y
@@ -541,7 +542,7 @@ void DisplayHandler::DrawTelCell( const std::string &text,
     }
 
     cv::putText( matTelemetry_, text, cv::Point( textX, textY ), fontFace, fontSize,
-                 textColor, 1, cv::LINE_AA );
+                 textColor, 1, cv::LINE_4 );
 }
 
 cv::Point2i DisplayHandler::ParseCellRef( const std::string &ref ) const {
@@ -624,6 +625,22 @@ void DisplayHandler::SetEstimatedActiveTarget( bool visible, int tagId,
 void DisplayHandler::SetTouchedTargetBox( bool visible, const std::array<cv::Point2f, 4> &corners ) {
     touchedBoxVisible_ = visible;
     touchedBoxCorners_ = corners;
+}
+
+void DisplayHandler::SetObjectOverlays( bool visible, const std::vector<ObjectOverlay> &overlays ) {
+    objectOverlaysVisible_ = visible;
+    objectOverlays_        = overlays;
+}
+
+void DisplayHandler::SetObjectStatusLine( bool visible, const std::string &text ) {
+    objectStatusVisible_ = visible;
+    objectStatusLine_    = text;
+}
+
+void DisplayHandler::SetWorldMarkerOutlines( bool visible,
+                                             const std::vector<std::array<cv::Point2f, 4>> &outlines ) {
+    worldOutlinesVisible_ = visible;
+    worldOutlines_        = outlines;
 }
 
 void DisplayHandler::SetCal1State( bool recording, const std::vector<cv::Point2f> &samples,
@@ -1245,7 +1262,7 @@ void DisplayHandler::DrawControllerCell( const std::string &text, const std::str
     }
 
     cv::putText( matController_, text, cv::Point( textX, textY ), fontFace, fontSize,
-                 textColor, 1, cv::LINE_AA );
+                 textColor, 1, cv::LINE_4 );
 }
 
 cv::Rect DisplayHandler::ControllerCellRect( const std::string &ref, int colSpan, int rowSpan ) const {
@@ -1352,6 +1369,101 @@ void DisplayHandler::DrawMarkerOverlays(
             corners[k] = cv::Point( static_cast<int>( touchedBoxCorners_[k].x ),
                                     static_cast<int>( touchedBoxCorners_[k].y ) );
         cv::polylines( frame, corners, true, Colors::MagMd, 2 );
+    }
+}
+
+void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
+    // OBJECTS mode only - every other state passes visible=false so the operator
+    // view is unchanged. All points are already projected to operator-view pixels
+    // by WorldObjectHandler; here we only draw. Colours mirror the ArUcoTest
+    // prototype: green while the object marker is directly detected, yellow when
+    // the object is drawn from its world anchor (its own marker occluded).
+    if ( !objectOverlaysVisible_ ) return;
+
+    // Rig-diagnostic status line (world markers / pose / active-object state),
+    // top-left under the "Target:" label. Black shadow then white for contrast.
+    if ( objectStatusVisible_ && !objectStatusLine_.empty() ) {
+        cv::putText( frame, objectStatusLine_, cv::Point( 11, 47 ), cv::FONT_HERSHEY_SIMPLEX,
+                     0.55, cv::Scalar( 0, 0, 0 ), 3, cv::LINE_4 );
+        cv::putText( frame, objectStatusLine_, cv::Point( 10, 46 ), cv::FONT_HERSHEY_SIMPLEX,
+                     0.55, Colors::White, 1, cv::LINE_4 );
+    }
+
+    const int W = frame.cols, H = frame.rows;
+    // A projected point may land far outside the frame (e.g. a marker seen at a
+    // grazing angle); OpenCV clips lines fine, but reject wildly out-of-range /
+    // non-finite coords so a single bad pose can never scribble across the HUD.
+    auto sane = [&]( const cv::Point2f &p ) {
+        return std::isfinite( p.x ) && std::isfinite( p.y ) &&
+               p.x > -4 * W && p.x < 5 * W && p.y > -4 * H && p.y < 5 * H;
+    };
+    auto ipt = []( const cv::Point2f &p ) {
+        return cv::Point( static_cast<int>( std::lround( p.x ) ),
+                          static_cast<int>( std::lround( p.y ) ) );
+    };
+
+    // Faint blue outline around each detected world-board marker, so the operator
+    // can see which markers are anchoring the scene. Drawn first (under the object
+    // overlays). Muted blue, thin.
+    if ( worldOutlinesVisible_ ) {
+        
+        for ( const auto &q : worldOutlines_ ) {
+            bool ok = true;
+            std::vector<cv::Point> poly( 4 );
+            for ( int k = 0; k < 4; k++ ) {
+                if ( !sane( q[k] ) ) { ok = false; break; }
+                poly[k] = ipt( q[k] );
+            }
+            if ( ok ) cv::polylines( frame, poly, true, Colors::BluMd, 2, cv::LINE_4 );
+        }
+    }
+
+    for ( const auto &o : objectOverlays_ ) {
+        const cv::Scalar col = o.visible ? Colors::GreMd : Colors::YelMd;
+
+        // Wireframe (each edge pre-culled to endpoints in front of the camera).
+        for ( const auto &[a, b] : o.edges )
+            if ( sane( a ) && sane( b ) )
+                cv::line( frame, ipt( a ), ipt( b ), col, 1, cv::LINE_4 );
+
+        // Marker outline when anchored (a live marker is outlined by the
+        // detection overlay / active-tag box already).
+        if ( o.hasOutline ) {
+            bool ok = true;
+            std::vector<cv::Point> poly( 4 );
+            for ( int k = 0; k < 4; k++ ) {
+                if ( !sane( o.outline[k] ) ) { ok = false; break; }
+                poly[k] = ipt( o.outline[k] );
+            }
+            if ( ok ) cv::polylines( frame, poly, true, col, 1, cv::LINE_4 );
+        }
+
+        // Base-origin XYZ gizmo (general cylinders): +X red, +Y green, +Z blue.
+        if ( o.hasGizmo && sane( o.gizmoO ) ) {
+            if ( sane( o.gizmoX ) ) cv::line( frame, ipt( o.gizmoO ), ipt( o.gizmoX ), Colors::RedMd, 2, cv::LINE_4 );
+            if ( sane( o.gizmoY ) ) cv::line( frame, ipt( o.gizmoO ), ipt( o.gizmoY ), Colors::GreMd, 2, cv::LINE_4 );
+            if ( sane( o.gizmoZ ) ) cv::line( frame, ipt( o.gizmoO ), ipt( o.gizmoZ ), Colors::BluMd, 2, cv::LINE_4 );
+        }
+
+        // Guidance-target dot (magenta). For the ACTIVE object also draw the
+        // guidance line from the camera principal point to the target, matching
+        // the FITTS "where guidance is pulling" cue.
+        if ( o.hasTargetDot && sane( o.targetDot ) ) {
+            if ( o.active )
+                cv::line( frame, principalPoint_, ipt( o.targetDot ), Colors::GreMd, 2, cv::LINE_4 );
+            cv::circle( frame, ipt( o.targetDot ), 5, Colors::MagMd, cv::FILLED, cv::LINE_4 );
+        }
+
+        // Name label at the marker origin (black shadow + magenta text). The
+        // active object is marked; anchored objects note the anchored fallback.
+        if ( o.hasLabel && sane( o.labelPos ) ) {
+            std::string label = o.name;
+            if ( o.anchored ) label += " (memory)";
+            if ( o.active )   label += " *";
+            const cv::Point p = ipt( o.labelPos );
+            cv::putText( frame, label, p, cv::FONT_HERSHEY_SIMPLEX, 0.75, Colors::White, 5, cv::LINE_4 );
+            cv::putText( frame, label, p, cv::FONT_HERSHEY_SIMPLEX, 0.75, Colors::MagDk, 2, cv::LINE_4 );
+        }
     }
 }
 

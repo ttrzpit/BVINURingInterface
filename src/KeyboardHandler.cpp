@@ -73,6 +73,28 @@ void KeyboardHandler::ProcessKey(int key) {
         return;
     }
 
+    // ---- Start of an OBJECTS session: clear any stale target -----------------
+    // Mirrors the 'F' block above. Drop the active FITTS marker AND any prior
+    // object target so guidance can't latch onto a stale target before a fresh
+    // object is picked ('r' random / 'm' manual). OBJECTS drives guidance from
+    // activeObjectId (not activeTagId), so activeTagId is cleared to 0 to keep
+    // main.cpp's Fitts guidance path dormant while in OBJECTS mode.
+    if (key == 'O' && state_.inputState == InputState::IDLE) {
+        state_.activeTagId    = 0;
+        state_.activeObjectId = 0;
+    }
+
+    // ---- Objects-entry calibration gate --------------------------------------
+    // Same gate as 'F': if calibrations are incomplete, 'O' diverts to a
+    // (p)roceed/(r)eturn prompt (OBJ_WARN -> OBJ_SEL / IDLE).
+    if (key == 'O' && state_.inputState == InputState::IDLE && !calibrationsComplete_) {
+        state_.inputState   = InputState::OBJ_WARN;
+        state_.systemState  = DeriveSystemState(state_.inputState);
+        state_.outputBuffer = "Calibrations not complete, (p)roceed or (r)eturn";
+        state_.lastInputKey = key;
+        return;
+    }
+
     // ---- Single-key table dispatch -------------------------------------------
     DispatchTableCommand(key);
 }
@@ -242,6 +264,19 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
             state_.activeTagId   = value;
             break;
 
+        case KeyAction::RANDOM_OBJECT_TARGET:
+            // The pick needs object_marker_pool, which lives in main with the
+            // object-world config - just flag the request here (mirrors random Fitts).
+            state_.pendingRandomObjectTarget = true;
+            break;
+
+        case KeyAction::SET_OBJECT_TARGET:
+            // Object marker ID from numeric entry (0-99). WorldObjectHandler
+            // safely ignores an ID with no configured object (no target resolves),
+            // so no board-range clamp is needed here.
+            state_.activeObjectId = value;
+            break;
+
         case KeyAction::PRETENSION_ADVANCE:
             state_.pendingPretensionAdvance = true;
             break;
@@ -335,6 +370,7 @@ std::string KeyboardHandler::FormatDisplayText(const std::string& tmpl, int valu
     };
 
     replace("[MARKER_ID]", std::to_string(state_.fittsTargetId));
+    replace("[OBJECT_ID]", std::to_string(state_.activeObjectId));
 
     if (value >= 0) {
         replace("[VAL]", FormatNumericValue(value, isDecimal));
@@ -449,6 +485,10 @@ SystemState DeriveSystemState(InputState state) {
         case InputState::FIT_RUN:
         case InputState::FIT_ACT:
             return SystemState::FITTS;
+        case InputState::OBJ_SEL:
+        case InputState::OBJ_RUN:
+        case InputState::OBJ_ACT:
+            return SystemState::OBJECTS;
         case InputState::PRE_TENSION:
         case InputState::TEN_SEL_ALL:
         case InputState::TEN_SEL_A:

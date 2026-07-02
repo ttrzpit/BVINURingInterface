@@ -2,6 +2,14 @@
 
 #include <iostream>
 
+// Read an {x, y, z} FileNode into a cv::Point3f (zero if the node is absent).
+static cv::Point3f readPoint3f(const cv::FileNode& n) {
+    if (n.empty()) return {0.0f, 0.0f, 0.0f};
+    return {static_cast<float>((double)n["x"]),
+            static_cast<float>((double)n["y"]),
+            static_cast<float>((double)n["z"])};
+}
+
 // =============================================================================
 // Config.cpp - Loads config.yaml using OpenCV FileStorage
 //
@@ -161,6 +169,79 @@ bool Config::load(const std::string& filepath) {
             at["random_pool"] >> accuracyTrials.randomPool;
     }
 
+    // ---- Object-guidance world (OBJECTS mode) -------------------------------
+    // Ported from the ~/Code/ArUcoTest prototype. Parses the world board marker
+    // centres, the random object pool, and the tagged object definitions.
+    cv::FileNode ow = fs["object_world"];
+    if (!ow.empty()) {
+        if (!ow["world_marker_size_mm"].empty())
+            ow["world_marker_size_mm"] >> objectWorld.worldMarkerSizeMm;
+        if (!ow["roll_offset_deg"].empty())
+            ow["roll_offset_deg"] >> objectWorld.rollOffsetDeg;
+
+        // World board marker centres (id -> XYZ mm).
+        cv::FileNode mp = ow["marker_positions"];
+        for (const cv::FileNode& e : mp) {
+            const int id = static_cast<int>((int)e["id"]);
+            objectWorld.markerPositions[id] =
+                cv::Point3f(static_cast<float>((double)e["x"]),
+                            static_cast<float>((double)e["y"]),
+                            static_cast<float>((double)e["z"]));
+        }
+
+        // Object marker IDs for the random ('r') selection.
+        if (!ow["object_marker_pool"].empty())
+            ow["object_marker_pool"] >> objectWorld.objectMarkerPool;
+
+        // Tagged objects: id, name, type, marker_size_mm + shape-specific fields.
+        for (const cv::FileNode& o : ow["target_objects"]) {
+            ObjectDef t;
+            t.id   = static_cast<int>((int)o["id"]);
+            t.name = o["name"].empty() ? std::string() : (std::string)o["name"];
+            t.markerSizeMm = o["marker_size_mm"].empty()
+                                 ? 0.0f : static_cast<float>((double)o["marker_size_mm"]);
+
+            const std::string type = o["type"].empty() ? "box" : (std::string)o["type"];
+            if (type == "cylinder") {
+                t.type = ObjectType::Cylinder;
+                if (!o["base_origin_mm"].empty()) {
+                    // General cylinder: base_origin / base_normal / target_point.
+                    t.cylGeneral = true;
+                    t.radiusMm   = static_cast<float>((double)o["cylinder_radius_mm"]);
+                    t.heightMm   = static_cast<float>((double)o["cylinder_height_mm"]);
+                    t.baseOrigin = readPoint3f(o["base_origin_mm"]);
+                    t.baseNormal = readPoint3f(o["base_normal_mm"]);
+                    if (!o["target_point_mm"].empty()) {
+                        t.targetPoint = t.baseOrigin + readPoint3f(o["target_point_mm"]);
+                        t.hasTarget   = true;   // target is relative to the base origin
+                    }
+                } else {
+                    // Legacy tangent cylinder: radius / height / marker_center_height.
+                    t.radiusMm             = static_cast<float>((double)o["radius_mm"]);
+                    t.heightMm             = static_cast<float>((double)o["height_mm"]);
+                    t.markerCenterHeightMm = static_cast<float>((double)o["marker_center_height_mm"]);
+                }
+                if (t.radiusMm <= 0.0f || t.heightMm <= 0.0f)
+                    std::cerr << "Config:       Object '" << t.name << "' (id " << t.id
+                              << "): cylinder needs positive radius and height.\n";
+            } else {
+                t.type = ObjectType::Box;
+                for (const cv::FileNode& p : o["points"])
+                    t.points.emplace_back(static_cast<float>((double)p["x"]),
+                                          static_cast<float>((double)p["y"]),
+                                          static_cast<float>((double)p["z"]));
+                if (t.points.size() != 8)
+                    std::cerr << "Config:       Object '" << t.name << "' (id " << t.id
+                              << "): box expects 8 points, got " << t.points.size() << ".\n";
+                if (!o["target_point_mm"].empty()) {
+                    t.targetPoint = readPoint3f(o["target_point_mm"]);  // relative to marker origin
+                    t.hasTarget   = true;
+                }
+            }
+            objectWorld.targetObjects[t.id] = std::move(t);
+        }
+    }
+
     // ---- Touchscreen --------------------------------------------------------
     cv::FileNode ts = fs["touchscreen"];
     if (!ts.empty()) {
@@ -295,6 +376,10 @@ bool Config::load(const std::string& filepath) {
               << ", " << arucoMarker.validIdMax << "]\n";
     std::cout << "Config:       Fitts board fine " << fittsBoard.fineMarkerSizeMm
               << " mm / coarse " << fittsBoard.coarseMarkerSizeMm << " mm\n";
+    std::cout << "Config:       Object world " << objectWorld.markerPositions.size()
+              << " board positions, " << objectWorld.targetObjects.size()
+              << " objects, " << objectWorld.objectMarkerPool.size()
+              << " in random pool\n";
     return true;
 }
 
