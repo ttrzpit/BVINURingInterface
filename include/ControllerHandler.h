@@ -157,6 +157,22 @@ public:
     /** @brief Restart the force ramp-up and setpoint filter (call when a new target is presented). */
     void ResetRamp(double nowSecs);
 
+    /**
+     * @brief Override the camera->fingertip offset used to place the guidance
+     *        target, bypassing the internal (cal3Offset, scalar-roll) computation.
+     *        Used by OBJECTS mode's full-pose path, which rotates the Cal3 offset
+     *        by the live world->camera pose (RigAlignmentHandler) and hands the
+     *        result in directly. Call every frame: active=false restores the
+     *        normal scalar-roll path (FITTS and un-aligned OBJECTS).
+     * @param active           True to use fingertipOffsetCam instead of R_roll*d.
+     * @param fingertipOffsetCam  Fingertip offset in the camera frame, Y-up
+     *                            (X right, Y up, Z depth) - same frame as markerPosMm.
+     */
+    void SetFingertipOffsetOverride(bool active, cv::Point3f fingertipOffsetCam) {
+        fingertipOverrideActive_ = active;
+        fingertipOverride_       = fingertipOffsetCam;
+    }
+
     // ---- Output gating --------------------------------------------------------
     // The pipeline always computes PWM values every cycle; main.cpp only forwards
     // them to the Teensy when output is enabled (otherwise it sends 2047 / off).
@@ -467,6 +483,13 @@ private:
 
     // ---- Fingertip-to-target displacement Δp (set each Update) -------------------
     cv::Point3f displacement_ = {};
+
+    // ---- Fingertip offset override (OBJECTS full-pose path, set by SetFingertipOffsetOverride) --
+    // When active, pos_fingertip is taken directly from fingertipOverride_ (camera
+    // frame, Y-up) instead of R_roll * cal3Offset - the offset already rotated by
+    // the live world->camera pose. Cleared to false for FITTS / un-aligned OBJECTS.
+    bool        fingertipOverrideActive_ = false;
+    cv::Point3f fingertipOverride_       = {};
 
     // ---- Measured current/force (Stage 0, from amplifier-reported current) ---
     float measuredCurrent_A_ = 0.0f, measuredCurrent_B_ = 0.0f, measuredCurrent_C_ = 0.0f;

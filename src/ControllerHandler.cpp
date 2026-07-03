@@ -182,7 +182,17 @@ void ControllerHandler::Update( const TeensyToPcPacket& rx,
         }
 
         const cv::Point3f pos_camera( 0.0f, 0.0f, 0.0f );
-        const cv::Point3f pos_fingertip = ComputeFingertip( pos_camera, R_roll, offset );
+        // Fingertip offset (camera frame, Y-up). Normally R_roll * cal3Offset;
+        // in OBJECTS full-pose mode SetFingertipOffsetOverride() supplies the
+        // offset already rotated by the live world->camera pose (which handles
+        // pitch/yaw, not just roll - see RigAlignmentHandler), so use it directly.
+        cv::Point3f pos_fingertip;
+        if ( fingertipOverrideActive_ ) {
+            pos_fingertip = fingertipOverride_;
+            offset        = pos_fingertip;    // display only (ox/oy below)
+        } else {
+            pos_fingertip = ComputeFingertip( pos_camera, R_roll, offset );
+        }
         // Target is the marker CENTRE itself: drive the fingerpad onto the tag,
         // using the cal3 offset (rolled) purely as the camera->fingertip geometry.
         const cv::Point3f pos_target_3d = targetMarkerPosMm_;

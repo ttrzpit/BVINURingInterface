@@ -277,6 +277,12 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
             state_.activeObjectId = value;
             break;
 
+        case KeyAction::FINISH_OBJECT_SCAN:
+            // Enter in OBJ_SCAN - main calls WorldObjectHandler::FinishScan()
+            // and reports how many objects were mapped.
+            state_.pendingFinishObjectScan = true;
+            break;
+
         case KeyAction::PRETENSION_ADVANCE:
             state_.pendingPretensionAdvance = true;
             break;
@@ -485,10 +491,13 @@ SystemState DeriveSystemState(InputState state) {
         case InputState::FIT_RUN:
         case InputState::FIT_ACT:
             return SystemState::FITTS;
+        case InputState::OBJ_SCAN:
         case InputState::OBJ_SEL:
         case InputState::OBJ_RUN:
         case InputState::OBJ_ACT:
             return SystemState::OBJECTS;
+        case InputState::RIG_CAP:
+            return SystemState::RIG_ALIGN;
         case InputState::PRE_TENSION:
         case InputState::TEN_SEL_ALL:
         case InputState::TEN_SEL_A:

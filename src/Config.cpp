@@ -1,5 +1,6 @@
 #include "Config.h"
 
+#include <fstream>
 #include <iostream>
 
 // Read an {x, y, z} FileNode into a cv::Point3f (zero if the node is absent).
@@ -239,6 +240,35 @@ bool Config::load(const std::string& filepath) {
                 }
             }
             objectWorld.targetObjects[t.id] = std::move(t);
+        }
+    }
+
+    // ---- Rig alignment sidecar (rig_screen_to_world) ------------------------
+    // Loaded from rig_alignment.yaml alongside the main config (written once by
+    // RigAlignmentHandler, the 'R' rig-alignment capture). Absence is normal -
+    // OBJECTS mode falls back to the legacy scalar-roll path until it is captured.
+    {
+        const auto slash = filepath.find_last_of("/\\");
+        const std::string dir = (slash == std::string::npos) ? std::string()
+                                                             : filepath.substr(0, slash + 1);
+        const std::string rigPath = dir + "rig_alignment.yaml";
+        // Probe with ifstream first so a missing sidecar (the normal state until
+        // 'R' rig alignment is run) doesn't emit OpenCV's noisy open-failure error.
+        const bool rigExists = std::ifstream(rigPath).good();
+        cv::FileStorage rigFs;
+        if (rigExists) rigFs.open(rigPath, cv::FileStorage::READ);
+        if (rigExists && rigFs.isOpened() && !rigFs["rig_screen_to_world"].empty()) {
+            cv::Mat R;
+            rigFs["rig_screen_to_world"] >> R;
+            if (R.rows == 3 && R.cols == 3) {
+                cv::Mat Rd;
+                R.convertTo(Rd, CV_64F);
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j)
+                        objectWorld.rigScreenToWorldR(i, j) = Rd.at<double>(i, j);
+                objectWorld.rigValid = true;
+                std::cout << "Config:       Rig alignment loaded from " << rigPath << "\n";
+            }
         }
     }
 

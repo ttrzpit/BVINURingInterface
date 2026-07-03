@@ -46,9 +46,11 @@ enum class InputState {
     FIT_RUN,
     FIT_ACT,
     OBJ_WARN,    // Calibration-incomplete confirmation prompt before OBJECTS
+    OBJ_SCAN,    // Object task: scan/training phase - map objects into the world frame
     OBJ_SEL,     // Object task: choose [r] random / [m] manual
     OBJ_RUN,     // Object task running (an object target is active)
     OBJ_ACT,     // Numeric entry of an object marker ID
+    RIG_CAP,     // One-time rig alignment capture (screen<->world-board rotation)
     TEN_SEL_ALL,
     TEN_SEL_A,
     TEN_SEL_B,
@@ -81,6 +83,7 @@ enum class SystemState {
     CAL3,             ///< Calibration Stage 3: camera-to-fingertip offset collection
     FITTS,            ///< Fitts task running
     OBJECTS,          ///< Object-guidance task running (world board + tagged objects)
+    RIG_ALIGN,        ///< One-time rig alignment capture (screen<->world-board rotation)
     PRETENSION,       ///< Guided pretensioning / encoder-zeroing / home-recording sequence
     TENSION_ADJUST    ///< Standalone tension adjustment (manual tension mode, no guided sequence)
 };
@@ -118,6 +121,7 @@ enum class KeyAction {
     SET_FITTS_TARGET,
     RANDOM_OBJECT_TARGET,
     SET_OBJECT_TARGET,
+    FINISH_OBJECT_SCAN,
     PRETENSION_ADVANCE,
     ADJUST_TENSION_INC,
     ADJUST_TENSION_DEC,
@@ -190,6 +194,7 @@ struct KeyboardState {
     bool                 pendingSetHomePosition = false;                        ///< One-shot: 'Z' pressed (record current encoder pose as home)
     bool                 pendingRandomTarget = false;                           ///< One-shot: 'r' pressed - main picks the (distance-stratified) target
     bool                 pendingRandomObjectTarget = false;                     ///< One-shot: 'r' in OBJECTS - main picks from object_marker_pool
+    bool                 pendingFinishObjectScan = false;                       ///< One-shot: Enter in OBJ_SCAN - main ends the object scan phase
     bool                 pendingLoggingToggle = false;                          ///< One-shot: 'L' pressed - main toggles the trial logger
     bool                 pendingEStopToggle = false;                            ///< One-shot: spacebar pressed - main toggles the guidance-output e-stop
     std::string          inputBuffer;                                           ///< Numeric value currently being typed
@@ -248,6 +253,9 @@ class KeyboardHandler {
 
     /** @brief Clear the one-shot 'r' random-object-target request (OBJECTS mode). */
     void ClearRandomObjectTarget() { state_.pendingRandomObjectTarget = false; }
+
+    /** @brief Clear the one-shot Enter finish-object-scan request (OBJ_SCAN). */
+    void ClearFinishObjectScan() { state_.pendingFinishObjectScan = false; }
 
     /** @brief Clear the one-shot 'L' logging-toggle request (main consumed it). */
     void ClearLoggingToggle() { state_.pendingLoggingToggle = false; }

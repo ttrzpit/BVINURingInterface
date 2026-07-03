@@ -252,11 +252,26 @@ struct ObjectWorldConfig {
     float worldMarkerSizeMm = 100.0f;
 
     // Roll trim [deg] added to the world-board camera roll used to orient the Cal3
-    // fingertip offset for objects. The world-board roll reference and the Cal3
+    // fingertip offset for objects. LEGACY scalar-roll fallback path only: used
+    // when the full-pose rig alignment below is unavailable (rigValid == false) or
+    // no world pose is solved. The world-board roll reference and the Cal3
     // touchscreen roll reference can differ by a fixed rig-geometry constant; if
     // the guided landing spot is rotated a consistent amount around the target,
-    // trim it here. 0 = none.
+    // trim it here. 0 = none. Prefer capturing rigScreenToWorldR ('R' rig
+    // alignment) which removes the need for this trim entirely.
     float rollOffsetDeg = 0.0f;
+
+    // ---- Rig alignment (full-pose OBJECTS fingertip) ------------------------
+    // Fixed rotation from the touchscreen/Cal3 frame to the world-board frame,
+    // captured ONCE per rig by RigAlignmentHandler ('R') and persisted to the
+    // sidecar file rig_alignment.yaml (loaded by Config::load). It ties the
+    // Cal3 fingertip offset (measured in the screen frame) to the world board so
+    // OBJECTS guidance can rotate the offset by the live world->camera pose each
+    // frame instead of a scalar roll - the automatic replacement for
+    // rollOffsetDeg. Not a per-participant quantity; only changes if the screen
+    // or world board physically moves. Identity + rigValid=false until captured.
+    cv::Matx33d rigScreenToWorldR = cv::Matx33d::eye();
+    bool        rigValid          = false;
 
     // World board marker centres (id -> world XYZ mm). Under the relative-anchoring
     // model these coordinates are not needed for guidance (each world marker is

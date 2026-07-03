@@ -1,0 +1,12 @@
+%YAML:1.0
+---
+rig_screen_to_world: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [ 0.42896497564354935, -0.051796169704758477,
+       -0.90183491087617829, 0.088167480895773656, -0.99118721020258305,
+       0.098865614059255966, -0.89900808949843303, -0.12192239800273048,
+       -0.42061785967983056 ]
+samples: 30
+note: "screen(Cal3)->world-board rotation; captured by RigAlignmentHandler (\'R\')."

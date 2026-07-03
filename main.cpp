@@ -25,6 +25,7 @@
 #include <array>
 #include <chrono>
 #include <climits>
+#include <algorithm>
 #include <cmath>
 #include <csignal>
 #include <cstdio>
@@ -52,6 +53,7 @@
 #include "KeyboardHandler.h"
 #include "PacketTypes.h"
 #include "PretensionHandler.h"
+#include "RigAlignmentHandler.h"
 #include "SerialHandler.h"
 #include "TouchHandler.h"
 #include "TrialLogger.h"
@@ -127,6 +129,8 @@ int main() {
     Cal3Handler        cal3( cfg.touchscreen, cfg.camera, cfg.arucoCalGrid, cfg.cal3 );
     FittsTaskHandler   fitts( cfg.fittsBoard, cfg.touchscreen, cfg.camera );
     WorldObjectHandler worldObj( cfg.objectWorld, cfg.camera );   // OBJECTS mode ('O')
+    RigAlignmentHandler rigAlign( cfg.arucoCalGrid, cfg.touchscreen,
+                                  cfg.objectWorld, cfg.camera );   // one-time screen<->world capture ('R')
     TrialLogger        trialLogger( loggingDir );
 
     ControllerHandler controller( cfg.controllerGains );
@@ -205,6 +209,7 @@ int main() {
     bool                       prevFittsTouchSample = false;
 
     bool cal3CompletionHandled = false;
+    bool rigCompletionHandled  = false;    ///< Set once the 'R' rig-alignment capture has saved + returned to IDLE
     bool cal2ProfileApplied = false;       ///< Set once Cal2's K(theta) has been applied to the controller
     bool cal1CompletionHandled = false;    ///< Set once Cal1 (AROM) completion has returned the system to IDLE
 
@@ -315,6 +320,8 @@ int main() {
                 aruco.SetFittsBoardDetection( false );    // Restore DICT_4X4_50
             } else if ( prevState == SystemState::OBJECTS ) {
                 aruco.SetObjectDetection( false );        // Restore DICT_4X4_50 (no touchscreen grid was shown)
+            } else if ( prevState == SystemState::RIG_ALIGN ) {
+                aruco.SetCalibrationGridVisible( false );  // Hide the cal grid shown for the capture
             } else {
                 aruco.SetGridVisible( false );
             }
@@ -348,6 +355,14 @@ int main() {
                 aruco.SetObjectDetection( true );
                 worldObj.Reset();
                 objectPoolRemaining = cfg.objectWorld.objectMarkerPool;
+            } else if ( kb.systemState == SystemState::RIG_ALIGN ) {
+                // RIG ALIGNMENT: show the touchscreen calibration grid so the
+                // camera can see it alongside the physical world board. The
+                // capture runs its OWN detectors on the raw frame (main thread),
+                // so no aruco detection-mode switch is needed here.
+                aruco.SetCalibrationGridVisible( true );
+                rigAlign.Reset();
+                rigCompletionHandled = false;
             }
             // IDLE and any other state - window already closed above
 
@@ -466,6 +481,25 @@ int main() {
                 aruco.SetCalibrationDetection( false );
                 // Multi-step process finished - return to the default IDLE state
                 // and wait for the next command.
+                keyboard.SetInputState( InputState::IDLE );
+            }
+        }
+
+        // RIG ALIGNMENT - one-time screen<->world-board rotation capture. Runs its
+        // own dual-dictionary detection on the raw grayscale frame (main thread),
+        // averages R_screen->world, then writes rig_alignment.yaml and returns to
+        // IDLE. The result is applied to the live cfg immediately so OBJECTS mode
+        // uses the full-pose fingertip path without a restart.
+        if ( kb.systemState == SystemState::RIG_ALIGN ) {
+            if ( isNewFrame ) rigAlign.Update( frame.gray );
+            keyboard.SetExternalStatus( rigAlign.GetStatus() );
+
+            if ( rigAlign.IsComplete() && !rigCompletionHandled ) {
+                rigCompletionHandled = true;
+                cfg.objectWorld.rigScreenToWorldR = rigAlign.GetScreenToWorldR();
+                cfg.objectWorld.rigValid          = true;
+                rigAlign.Save( "rig_alignment.yaml" );
+                aruco.SetCalibrationGridVisible( false );
                 keyboard.SetInputState( InputState::IDLE );
             }
         }
@@ -664,21 +698,49 @@ int main() {
 
         // 'r' in OBJECTS - pick a random object marker from the config pool
         // (object_marker_pool), no repeat until the pool is exhausted, then
-        // refill. Mirrors the Fitts debug-pool picker.
+        // refill. Mirrors the Fitts debug-pool picker. Only objects mapped
+        // during the scan phase are eligible: an unscanned object has no
+        // world-frame anchor, so its target would vanish the moment its marker
+        // leaves the frame (which the reaching hand guarantees).
         if ( kb.pendingRandomObjectTarget ) {
             if ( !cfg.objectWorld.objectMarkerPool.empty() ) {
-                if ( objectPoolRemaining.empty() )
+                auto scannedOf = [&]( const std::vector<int>& ids ) {
+                    std::vector<int> out;
+                    for ( int id : ids )
+                        if ( worldObj.IsObjectScanned( id ) ) out.push_back( id );
+                    return out;
+                };
+                std::vector<int> candidates = scannedOf( objectPoolRemaining );
+                if ( candidates.empty() ) {
                     objectPoolRemaining = cfg.objectWorld.objectMarkerPool;   // refill after exhaustion
-                const int idx = std::uniform_int_distribution<int>(
-                    0, ( int )objectPoolRemaining.size() - 1 )( targetRng );
-                const int nextId = objectPoolRemaining[idx];
-                objectPoolRemaining.erase( objectPoolRemaining.begin() + idx );
-                keyboard.SetActiveObjectId( nextId );
-                keyboard.SetExternalStatus( "Object marker set to " + std::to_string( nextId ) + "." );
+                    candidates = scannedOf( objectPoolRemaining );
+                }
+                if ( candidates.empty() ) {
+                    keyboard.SetExternalStatus( "No scanned objects in the pool - re-enter 'O' and scan with a world marker in view." );
+                } else {
+                    const int nextId = candidates[std::uniform_int_distribution<int>(
+                        0, ( int )candidates.size() - 1 )( targetRng )];
+                    objectPoolRemaining.erase(
+                        std::find( objectPoolRemaining.begin(), objectPoolRemaining.end(), nextId ) );
+                    keyboard.SetActiveObjectId( nextId );
+                    keyboard.SetExternalStatus( "Object marker set to " + std::to_string( nextId ) + "." );
+                }
             } else {
                 keyboard.SetExternalStatus( "No object_marker_pool configured in config.yaml." );
             }
             keyboard.ClearRandomObjectTarget();
+        }
+
+        // Enter in OBJ_SCAN - end the object scan/training phase. Objects mapped
+        // so far keep their world-frame anchors (and keep refreshing whenever
+        // their marker is re-seen); target selection ('r'/'m') is now open.
+        if ( kb.pendingFinishObjectScan ) {
+            const int nScanned = worldObj.FinishScan();
+            keyboard.SetExternalStatus(
+                nScanned > 0
+                    ? "Scan complete - " + std::to_string( nScanned ) + " object(s) mapped. [r] Random, [m] Manual..."
+                    : "Scan ended with NO objects mapped - targets only resolve while their marker is visible." );
+            keyboard.ClearFinishObjectScan();
         }
 
         // In FITTS state, arm the new target whenever it changes. The board is
@@ -719,6 +781,13 @@ int main() {
         // only; the resolved target + overlays persist between frames.
         if ( kb.systemState == SystemState::OBJECTS && isNewFrame ) {
             worldObj.Update( markers );
+        }
+
+        // Scan/training phase: live progress on the Output row (mirrors the CAL3
+        // status pattern). Runs after the finish-scan handler above, so the
+        // "Scan complete" message isn't overwritten on the finishing frame.
+        if ( kb.systemState == SystemState::OBJECTS && worldObj.IsScanning() ) {
+            keyboard.SetExternalStatus( worldObj.GetScanStatus() );
         }
 
         // f. Controller - runs every loop iteration so dt tracks wall-clock
@@ -798,6 +867,27 @@ int main() {
             cal3.GetRollRef(),
             cfg.target.offsetDefaultMm,
             !guidanceSuppressedByTouch );
+
+        // OBJECTS full-pose fingertip: once the rig alignment is captured and a
+        // world->camera rotation is available this frame, rotate the Cal3 offset
+        // (screen frame) into the current camera view via R_screen->world and the
+        // live world pose, and hand it to the controller directly - the automatic
+        // replacement for the scalar roll_offset_deg trim (and robust to camera
+        // pitch/yaw). Falls back to the scalar-roll path when unavailable.
+        bool        objFullPose = false;
+        cv::Point3f objFingertipCamYup{};
+        if ( kb.systemState == SystemState::OBJECTS && cfg.objectWorld.rigValid &&
+             cal3.IsComplete() && worldObj.HasEffectiveWorldR() ) {
+            const cv::Matx33d Rwc = worldObj.GetEffectiveWorldR();   // world -> camera (Y-down)
+            const cv::Point3f d   = cal3.GetFinalOffset();          // screen frame (X right, Y down, Z toward cam)
+            const cv::Vec3d   dWorld = cfg.objectWorld.rigScreenToWorldR * cv::Vec3d( d.x, d.y, d.z );
+            const cv::Vec3d   dCam   = Rwc * dWorld;                 // world -> camera (Y-down)
+            objFingertipCamYup = cv::Point3f( static_cast<float>( dCam[0] ),
+                                              static_cast<float>( -dCam[1] ),   // Y-down -> Y-up
+                                              static_cast<float>( dCam[2] ) );
+            objFullPose = true;
+        }
+        controller.SetFingertipOffsetOverride( objFullPose, objFingertipCamYup );
 
         // Feed the resolved target position to the operator telemetry panel so
         // the "Target Telemetry" readout tracks the target via the board-pose
@@ -1201,11 +1291,12 @@ int main() {
             // diagnosing "guidance stops when the marker is occluded" on the rig.
             if ( kb.systemState == SystemState::OBJECTS ) {
                 std::string objState;
-                if ( kb.activeObjectId <= 0 )                             objState = "no object selected";
+                if ( worldObj.IsScanning() )                              objState = "SCANNING (" + std::to_string( worldObj.ScannedCount() ) + " mapped)";
+                else if ( kb.activeObjectId <= 0 )                        objState = "no object selected";
                 else if ( worldObj.HasTarget() && worldObj.TargetIsLive() ) objState = "LIVE";
                 else if ( worldObj.HasTarget() )                          objState = "ANCHORED (held)";
-                else if ( !worldObj.HasActiveAnchor() )                   objState = "object not seen yet - show it once";
-                else if ( !worldObj.HasWorldPose() )                      objState = "world board not visible (need >=4 markers)";
+                else if ( !worldObj.HasActiveAnchor() )                   objState = "object not scanned - show it with a world marker";
+                else if ( !worldObj.HasWorldPose() )                      objState = "world board not visible (need >=1 marker)";
                 else                                                      objState = "lost";
 
                 const std::string status =

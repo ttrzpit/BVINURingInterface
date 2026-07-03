@@ -49,10 +49,6 @@ static bool projectMarkerPt(const cv::Matx33d& R, const cv::Vec3d& t,
     return true;
 }
 
-static cv::Point2f cornerCentroid(const std::array<cv::Point2f, 4>& c) {
-    return (c[0] + c[1] + c[2] + c[3]) * 0.25f;
-}
-
 // Solve a square marker's pose (marker -> camera) from its 4 detected corners.
 static bool solveSquare(const std::array<cv::Point2f, 4>& px, float halfMm,
                         const cv::Mat& K, const cv::Mat& D,
@@ -84,10 +80,38 @@ WorldObjectHandler::WorldObjectHandler(const ObjectWorldConfig& objCfg,
         rt.edges = BuildEdges(def);
         objects_[id] = std::move(rt);
     }
+
+    // World-board corner geometry from the configured CENTRES + marker size.
+    // Plane from the centre itself (y = 0 -> floor spanning X/Z, else wall at
+    // z = 0 spanning X/Y); orientation from the mounting convention: wall
+    // markers are upright (marker +Y = world +Y), floor markers lie with their
+    // top edge toward the wall (marker +Y = world -Z, face up: +Z = world +Y).
+    // Corner order matches ArUco detection order (TL, TR, BR, BL).
+    const float h = objCfg_.worldMarkerSizeMm * 0.5f;
+    const cv::Vec3d cornersMarker[4] = {
+        {-h, h, 0.0}, {h, h, 0.0}, {h, -h, 0.0}, {-h, -h, 0.0}
+    };
+    for (const auto& [id, c] : objCfg_.markerPositions) {
+        WorldMarkerGeom g;
+        const bool onFloor = std::abs(c.y) < 1e-4f;
+        g.Rmw = onFloor ? cv::Matx33d(1, 0, 0,
+                                      0, 0, 1,
+                                      0, -1, 0)
+                        : cv::Matx33d::eye();
+        g.centerWorld = cv::Vec3d(c.x, c.y, c.z);
+        for (int k = 0; k < 4; ++k) {
+            const cv::Vec3d w = g.Rmw * cornersMarker[k] + g.centerWorld;
+            g.cornersWorld[k] = cv::Point3f(static_cast<float>(w[0]),
+                                            static_cast<float>(w[1]),
+                                            static_cast<float>(w[2]));
+        }
+        worldGeom_[id] = g;
+    }
 }
 
 void WorldObjectHandler::Reset() {
     activeId_    = 0;
+    scanning_    = true;    // every OBJECTS session starts in the scan phase
     poseOk_      = false;
     worldMarkerCount_ = 0;
     hasTarget_   = false;
@@ -97,6 +121,38 @@ void WorldObjectHandler::Reset() {
     overlays_.clear();
     worldOutlines_.clear();
     for (auto& [id, rt] : objects_) rt.anchor = ObjectAnchor{};
+}
+
+int WorldObjectHandler::FinishScan() {
+    scanning_ = false;
+    return ScannedCount();
+}
+
+bool WorldObjectHandler::IsObjectScanned(int id) const {
+    const auto it = objects_.find(id);
+    return it != objects_.end() && it->second.anchor.has;
+}
+
+int WorldObjectHandler::ScannedCount() const {
+    int n = 0;
+    for (const auto& [id, rt] : objects_)
+        if (rt.anchor.has) ++n;
+    return n;
+}
+
+std::string WorldObjectHandler::GetScanStatus() const {
+    std::string names;
+    int         n = 0;
+    for (const auto& [id, rt] : objects_) {
+        if (!rt.anchor.has) continue;
+        if (n++) names += ", ";
+        names += rt.def->name;
+    }
+    std::string s = "SCANNING - mapped " + std::to_string(n) + "/" +
+                    std::to_string(static_cast<int>(objects_.size()));
+    if (n) s += " (" + names + ")";
+    s += " - [Enter] to finish";
+    return s;
 }
 
 void WorldObjectHandler::OnNewTarget(int objectMarkerId) {
@@ -181,6 +237,7 @@ WorldObjectHandler::BuildEdges(const ObjectDef& o) {
 void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
     hasTarget_  = false;
     targetLive_ = false;
+    hasEffectiveWorldR_ = false;
     overlays_.clear();
     worldOutlines_.clear();
     worldMarkerCount_ = 0;
@@ -191,18 +248,25 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
     const cv::Mat& D = camCfg_.distCoeffs;
 
     // --- 1. Gather detections -------------------------------------------------
-    // World markers -> (config XYZ centre <-> detected centroid) for the world
-    // pose. Object markers -> their own live pose (solved from their 4 corners).
+    // World markers -> (world-frame corner <-> detected corner) correspondences
+    // for the world pose. Object markers -> their own live pose (solved from
+    // their 4 corners).
     struct OPose { cv::Matx33d R; cv::Vec3d t; float roll; };
-    std::vector<cv::Point3f> worldObj;   // config centres
-    std::vector<cv::Point2f> worldImg;   // detected centroids
+    std::vector<cv::Point3f> worldObj;   // world-frame marker corners (config geometry)
+    std::vector<cv::Point2f> worldImg;   // detected corners
+    const WorldMarkerGeom*   soloGeom = nullptr;   // last world marker seen (1-marker path)
+    const DetectedMarker*    soloMk   = nullptr;
     std::map<int, OPose>     objPoses;   // object id -> live pose
 
     for (const auto& m : markers) {
-        const auto wIt = objCfg_.markerPositions.find(m.id);
-        if (wIt != objCfg_.markerPositions.end()) {           // world board marker
-            worldObj.push_back(wIt->second);
-            worldImg.push_back(cornerCentroid(m.cornersPx));
+        const auto wIt = worldGeom_.find(m.id);
+        if (wIt != worldGeom_.end()) {                        // world board marker
+            for (int k = 0; k < 4; ++k) {
+                worldObj.push_back(wIt->second.cornersWorld[k]);
+                worldImg.push_back(m.cornersPx[k]);
+            }
+            soloGeom = &wIt->second;
+            soloMk   = &m;
             worldOutlines_.push_back(m.cornersPx);
             ++worldMarkerCount_;
             continue;
@@ -215,15 +279,46 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
         }
     }
 
-    // --- 2. World -> camera pose (multi-marker, config geometry, RANSAC) -------
-    if (static_cast<int>(worldObj.size()) >= 4) {
+    // --- 2. World -> camera pose (corner correspondences, config geometry) -----
+    // Corners give 4 points per marker, so ONE world marker is already enough
+    // for a pose (the old centre-based solve needed >= 4 markers).
+    if (worldMarkerCount_ >= 2) {
+        // Multi-marker: RANSAC keeps the misdetected-marker rejection.
         cv::Vec3d rvec, tvec;
-        if (cv::solvePnPRansac(worldObj, worldImg, K, D, rvec, tvec, false, 100, kRansacReprojPx)
-            && finite3(rvec) && finite3(tvec)) {
-            cv::Mat Rm; cv::Rodrigues(rvec, Rm);
-            worldR_ = toMatx33(Rm);
-            worldT_ = tvec;
-            poseOk_ = true;
+        try {
+            if (cv::solvePnPRansac(worldObj, worldImg, K, D, rvec, tvec, false, 100, kRansacReprojPx)
+                && finite3(rvec) && finite3(tvec)) {
+                cv::Mat Rm; cv::Rodrigues(rvec, Rm);
+                worldR_ = toMatx33(Rm);
+                worldT_ = tvec;
+                poseOk_ = true;
+            }
+        } catch (const cv::Exception&) {
+            poseOk_ = false;   // degenerate correspondence set - treat as no pose
+        }
+    } else if (worldMarkerCount_ == 1) {
+        // Single marker: its own IPPE square pose composed with its known world
+        // placement. R_world->cam = R_marker->cam * R_marker->world^T. No RANSAC
+        // is possible with 4 points, so gate on the reprojection error instead.
+        cv::Matx33d Rmc; cv::Vec3d tmc;
+        if (solveSquare(soloMk->cornersPx, objCfg_.worldMarkerSizeMm * 0.5f, K, D, Rmc, tmc)
+            && tmc[2] > 1.0) {
+            const cv::Matx33d Rwc = Rmc * soloGeom->Rmw.t();
+            const cv::Vec3d   twc = tmc - Rwc * soloGeom->centerWorld;
+            double errPx = 0.0;
+            int    nProj = 0;
+            for (int k = 0; k < 4; ++k) {
+                cv::Point2f p;
+                if (projectMarkerPt(Rwc, twc, soloGeom->cornersWorld[k], fx, fy, cx, cy, p)) {
+                    errPx += cv::norm(p - soloMk->cornersPx[k]);
+                    ++nProj;
+                }
+            }
+            if (nProj == 4 && errPx / 4.0 <= kRansacReprojPx && finite3(twc)) {
+                worldR_ = Rwc;
+                worldT_ = twc;
+                poseOk_ = true;
+            }
         }
     }
 
@@ -266,6 +361,7 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
         ov.visible  = live;
         ov.anchored = !live;
         ov.active   = (id == activeId_);
+        ov.worldRefCount = poseOk_ ? worldMarkerCount_ : 0;
 
         for (const auto& [A, B] : rt.edges) {
             cv::Point2f a, b;
@@ -312,7 +408,9 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
         overlays_.push_back(std::move(ov));
 
         // ---- Active-object guidance target -----------------------------------
-        if (id == activeId_ && obj.hasTarget) {
+        // Suppressed during the scan phase: anchors are being collected, no
+        // guidance until the operator confirms the scan (FinishScan()).
+        if (!scanning_ && id == activeId_ && obj.hasTarget) {
             const cv::Vec3d Xc =
                 Ruse * cv::Vec3d(obj.targetPoint.x, obj.targetPoint.y, obj.targetPoint.z) + tuse;
             if (finite3(Xc) && Xc[2] > 1.0) {
@@ -321,6 +419,20 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
                                            static_cast<float>(Xc[2]));
                 hasTarget_  = true;
                 targetLive_ = live;
+
+                // Effective world->camera rotation for the full-pose fingertip
+                // path (main.cpp rotates the Cal3 offset by this). Prefer the
+                // world-board pose; if it isn't solved this frame but the object
+                // is live with a stored anchor (anchor.R = R_object->world),
+                // reconstruct R_world->cam = R_object->cam * R_object->world^T.
+                if ( poseOk_ ) {
+                    effectiveWorldR_    = worldR_;
+                    hasEffectiveWorldR_ = true;
+                } else if ( live && rt.anchor.has ) {
+                    effectiveWorldR_    = Ruse * rt.anchor.R.t();
+                    hasEffectiveWorldR_ = true;
+                }
+
                 // Roll used to orient the Cal3 offset: take the CAMERA roll from
                 // the world-board pose (image angle of world +X) - this is
                 // mounting-independent, so every object orients the offset the same

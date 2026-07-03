@@ -707,6 +707,9 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
         case SystemState::TENSION_ADJUST:
             systemStateStr = "TENSION ADJUST";
             break;
+        case SystemState::RIG_ALIGN:
+            systemStateStr = "RIG ALIGN";
+            break;
         default:
             systemStateStr = "IDLE";
             break;
@@ -1445,13 +1448,19 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
             if ( sane( o.gizmoZ ) ) cv::line( frame, ipt( o.gizmoO ), ipt( o.gizmoZ ), Colors::BluMd, 2, cv::LINE_4 );
         }
 
-        // Guidance-target dot (magenta). For the ACTIVE object also draw the
-        // guidance line from the camera principal point to the target, matching
-        // the FITTS "where guidance is pulling" cue.
+        // Guidance-target dot (magenta). Brightness encodes how many world
+        // markers back the current world pose - the target's confidence once the
+        // object marker leaves the frame: dark = 1 (or none), medium = 2,
+        // light = 3+. For the ACTIVE object also draw the guidance line from the
+        // camera principal point to the target, matching the FITTS "where
+        // guidance is pulling" cue.
         if ( o.hasTargetDot && sane( o.targetDot ) ) {
             if ( o.active )
                 cv::line( frame, principalPoint_, ipt( o.targetDot ), Colors::GreMd, 2, cv::LINE_4 );
-            cv::circle( frame, ipt( o.targetDot ), 5, Colors::MagMd, cv::FILLED, cv::LINE_4 );
+            const cv::Scalar dotColor = ( o.worldRefCount >= 3 )   ? Colors::MagLt
+                                        : ( o.worldRefCount == 2 ) ? Colors::MagMd
+                                                                   : Colors::MagDk;
+            cv::circle( frame, ipt( o.targetDot ), 5, dotColor, cv::FILLED, cv::LINE_4 );
         }
 
         // Name label at the marker origin (black shadow + magenta text). The

@@ -231,23 +231,33 @@ accuracy_trials:
 #   X axis - z = 0 "wall" markers span X/Y; y = 0 "floor" markers span X/Z.
 object_world:
 
-   # Physical side length of the WORLD board markers [mm]. Currently unused by the
-   # global-PnP world pose (which uses marker CENTRES), kept for reference / future
-   # corner-based options.
+   # Physical side length of the WORLD board markers [mm]. Used (with the marker
+   # centres below) to derive each marker's 4 corner positions in the world frame
+   # for the corner-based world PnP - which is what lets a SINGLE visible world
+   # marker localise the world (the old centre-based solve needed >= 4).
    world_marker_size_mm: 100.0
 
-   # Roll trim [deg] for orienting the Cal3 fingertip offset in OBJECTS mode. The
-   # offset is rotated by the camera roll read from the world board; if the world
-   # board and the Cal3 touchscreen references differ by a constant, the guided
-   # landing spot is rotated a fixed amount around the target - trim it out here.
+   # Roll trim [deg] for orienting the Cal3 fingertip offset in OBJECTS mode.
+   # LEGACY FALLBACK ONLY: used when no rig alignment has been captured (no
+   # rig_alignment.yaml) or no world pose is available. The preferred path is the
+   # one-time rig-alignment capture (press 'R' from IDLE with the touchscreen grid
+   # AND the world board both in view): it measures the full screen->world rotation
+   # into rig_alignment.yaml and OBJECTS then rotates the Cal3 offset by the live
+   # world->camera pose automatically - no per-participant/per-trial tuning and no
+   # need for this trim. Only re-run 'R' if the screen or world board physically
+   # moves. Leave this at 0.0 once rig alignment is captured.
    roll_offset_deg: 0.0
 
    # --- World board marker centres (id -> XYZ mm) in the rig/world frame ------
    # IMPORTANT: these ARE the world geometry used to solve the world->camera pose
-   # each frame (marker centre <-> config position). Their ACCURACY directly sets
-   # stability and accuracy: ~1 mm positions give a steady, sub-mm pose; several-mm
-   # errors reintroduce jitter and a constant target offset. Measure them as
-   # precisely as possible (ideally from the board's design/print layout).
+   # each frame (marker corners, derived from centre + world_marker_size_mm).
+   # Their ACCURACY directly sets stability and accuracy: ~1 mm positions give a
+   # steady, sub-mm pose; several-mm errors reintroduce jitter and a constant
+   # target offset. Measure them as precisely as possible (ideally from the
+   # board's design/print layout).
+   # MOUNTING CONVENTION (assumed by the corner-based pose): wall markers (z = 0)
+   # are upright - printed top edge along world +Y; floor markers (y = 0) lie
+   # with their printed top edge toward the wall, i.e. along world -Z.
    marker_positions:
       - { id: 1,  x: -365.0, y: 357.5, z:   0.0 }
       - { id: 2,  x: -225.5, y: 345.0, z:   0.0 }
@@ -385,7 +395,7 @@ object_world:
 #                      the cal3-calibrated offset is used instead (red circle).
 target:
    radius_mm: 5.0
-   offset_default_mm: 40.0
+   offset_default_mm: 32.0
 
 # ---- Gesture detection (flick up/down + confirm circle, RobotState::READY only) ----
 # velocity_thresh_mm_s : |vel_filtered_.y| must exceed this to arm a flick [mm/s]

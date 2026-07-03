@@ -86,15 +86,26 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { { 'r' }, InputState::FIT_RUN, InputState::FIT_RUN, "Active marker set to [MARKER_ID].", KeyAction::RANDOM_FITTS_TARGET },
 
     // ---- OBJECTS (Task 2 - object guidance) ------------------------------------
-    // Mirrors the Fitts 'F' block. 'O' from IDLE opens object selection; the
-    // calibration-incomplete gate (OBJ_WARN) is set up in KeyboardHandler::ProcessKey.
-    { { 'O' }, InputState::IDLE, InputState::OBJ_SEL, "Select object mode: [r] Random, [m] Manual...", KeyAction::NONE },
-    { { 'p' }, InputState::OBJ_WARN, InputState::OBJ_SEL, "Select object mode: [r] Random, [m] Manual...", KeyAction::NONE },
+    // Mirrors the Fitts 'F' block. 'O' from IDLE starts the scan/training phase
+    // (OBJ_SCAN): the operator sweeps the camera so each object is seen together
+    // with a world marker, mapping its target into the world frame; Enter then
+    // opens target selection. The calibration-incomplete gate (OBJ_WARN) is set
+    // up in KeyboardHandler::ProcessKey.
+    { { 'O' }, InputState::IDLE, InputState::OBJ_SCAN, "Scanning objects - show each object with a world marker, [Enter] to finish.", KeyAction::NONE },
+    { { 'p' }, InputState::OBJ_WARN, InputState::OBJ_SCAN, "Scanning objects - show each object with a world marker, [Enter] to finish.", KeyAction::NONE },
     { { 'r' }, InputState::OBJ_WARN, InputState::IDLE, "Returning to idle - complete calibrations, then press O.", KeyAction::NONE },
+    { { 13, 10 }, InputState::OBJ_SCAN, InputState::OBJ_SEL, "Select object mode: [r] Random, [m] Manual...", KeyAction::FINISH_OBJECT_SCAN },
     { { 'm' }, InputState::OBJ_SEL, InputState::OBJ_ACT, "Which object marker ID (00-99)...", KeyAction::NONE },
     { { 'm' }, InputState::OBJ_RUN, InputState::OBJ_ACT, "Which object marker ID (00-99)...", KeyAction::NONE },
     { { 'r' }, InputState::OBJ_SEL, InputState::OBJ_RUN, "Object marker set to [OBJECT_ID].", KeyAction::RANDOM_OBJECT_TARGET },
     { { 'r' }, InputState::OBJ_RUN, InputState::OBJ_RUN, "Object marker set to [OBJECT_ID].", KeyAction::RANDOM_OBJECT_TARGET },
+
+    // ---- RIG ALIGNMENT (one-time screen<->world-board capture) ------------------
+    // 'R' from IDLE runs the one-time rig-alignment capture: show the touchscreen
+    // calibration grid AND the world board to the camera together; it averages the
+    // screen->world rotation and writes rig_alignment.yaml, then returns to IDLE.
+    // Only needs re-running if the screen or world board physically moves.
+    { { 'R' }, InputState::IDLE, InputState::RIG_CAP, "Rig alignment: show the touchscreen grid AND the world board to the camera together...", KeyAction::NONE },
 
     // ---- TENSION / PRETENSION ---------------------------------------------------
     // 'T' opens the tensioning menu: [p] runs the full guided pretensioning
