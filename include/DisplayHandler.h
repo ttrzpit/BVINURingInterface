@@ -31,6 +31,7 @@
 #include "Colors.h"
 #include "Config.h"
 #include "ControllerHandler.h" // ControllerTelemetry
+#include "FittsBoardLayout.h" // FittsBoardLayout (marker-visibility panel)
 #include "GestureHandler.h"   // GestureEvent
 #include "Globals.h"
 #include "KeyboardHandler.h"  // KeyboardState
@@ -136,13 +137,6 @@ public:
     void SetGestureIndicator(bool active, GestureEvent event);
 
     /**
-     * @brief Set the virtual fingertip cursor position for the operator display.
-     *        Call each frame with visible=true and the projected pixel when in
-     *        FITTS mode with Cal3 complete; call with visible=false otherwise.
-     */
-    void SetVirtualFingertip(bool visible, cv::Point2i px = {});
-
-    /**
      * @brief Set the roll-corrected virtual target point in the operator display.
      *        The green dot shows where the marker must appear in the camera image
      *        for the fingertip to land on the fixed red circle after roll correction.
@@ -174,6 +168,12 @@ public:
 
     /** Supply ArUco detection thread stats for display in the controller panel. */
     void SetArucoStats(float detectionHz, float lagMs);
+
+    /** @brief Point the marker-visibility panel at the Fitts board layout (the
+     *         single source of truth for marker IDs/rows/cols), so the panel can
+     *         never drift from the rendered board. Call once at startup; the
+     *         layout must outlive this handler. */
+    void SetFittsLayout(const FittsBoardLayout* layout) { fittsLayout_ = layout; }
 
     /** @brief Provide the active target's estimated outline (4 corners projected
      *         from the board pose) for the operator view, used to draw the green
@@ -241,9 +241,6 @@ private:
                             const std::vector<DetectedMarker> &markers,
                             int activeTagId);
     void DrawObjectOverlays(cv::Mat &frame);
-    void DrawTelemetryBar(cv::Mat &frame,
-                          const std::vector<DetectedMarker> &markers,
-                          const TouchState &touch, const KeyboardState &kb);
 
     // ---- Shared cell infrastructure -----------------------------------------
     enum class CellStyle { HEADING, SUBHEADING, BODY };
@@ -286,11 +283,11 @@ private:
     cv::Point3f cal3Offset_    = {};
     float       cal3RollDeg_   = 0.0f;
 
-    bool        virtualFingertipVisible_ = false;
-    cv::Point2i virtualFingertipPx_      = {};
-
     bool        virtualTargetVisible_ = false;
     cv::Point2i virtualTargetPx_      = {};
+
+    // Fitts board layout for the marker-visibility panel (set via SetFittsLayout)
+    const FittsBoardLayout *fittsLayout_ = nullptr;
 
     // Resolved active-target position (direct detection or board-pose estimate)
     bool        targetPosValid_ = false;

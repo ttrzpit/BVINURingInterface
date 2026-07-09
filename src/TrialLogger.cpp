@@ -29,6 +29,8 @@ void TrialLogger::StartTrial(int targetId) {
     targetId_  = targetId;
     startWall_ = std::time(nullptr);
     rows_.clear();
+    // Preallocate ~45 s at 90 Hz so no reallocation happens mid-capture.
+    rows_.reserve(4096);
     std::cout << "TrialLogger: trial started (target " << targetId << ").\n";
 }
 

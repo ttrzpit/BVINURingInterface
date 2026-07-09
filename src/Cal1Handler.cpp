@@ -97,14 +97,19 @@ void Cal1Handler::ComputeBoundary() {
     }
     if (!samples_.empty()) meanRadius /= static_cast<float>(samples_.size());
 
-    // ---- 95th-percentile radius per bin (nearest-rank) -------------------------
+    // ---- Percentile radius per bin (nearest-rank) -------------------------------
+    // 0.85 = 85th percentile: high enough to reach the traced envelope, low
+    // enough to reject stray outlier samples. (An earlier comment said "95th"
+    // while the code used 0.85 - the constant below is the single source of
+    // truth; the behavior is unchanged.)
+    constexpr double kAromRadiusPercentile = 0.85;
     for (int i = 0; i < kAromBoundaryPoints; i++) {
         if (binRadii[i].empty()) {
             boundary_.radius[i] = meanRadius;  // fallback - sector never traced
             continue;
         }
         std::sort(binRadii[i].begin(), binRadii[i].end());
-        int idx = static_cast<int>(std::lround(0.85 * (binRadii[i].size() - 1)));
+        int idx = static_cast<int>(std::lround(kAromRadiusPercentile * (binRadii[i].size() - 1)));
         boundary_.radius[i] = binRadii[i][idx];
     }
 

@@ -20,6 +20,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -58,19 +59,22 @@ public:
      */
     bool GetLatestPacket(TeensyToPcPacket& out);
 
+    /**
+     * @brief Total count of valid packets received since Connect(). Monotonic.
+     *        Lets the main loop detect NEW packets (count changed since last
+     *        check) - used both to clock the controller off fresh encoder data
+     *        and to drive the RX-staleness watchdog (count unchanged for too
+     *        long => Teensy telemetry is stale, stop commanding force).
+     */
+    uint64_t GetRxCount() const { return rxCount_.load(); }
+
     /** @brief Measured TX rate in Hz (updated once per second by the TX thread). */
     float GetTxFrequency() const { return txFrequencyHz_.load(); }
 
     /** @brief The packet_index value stamped on the most recently sent packet. */
     uint8_t GetLastSentIndex() const { return lastSentIndex_.load(); }
 
-    bool IsConnected() const { return fd_ != -1; }
-
-    /**
-     * @brief Low-level send - frames and writes one packet directly.
-     *        Normally called by TxLoop; exposed for direct use if needed.
-     */
-    void Send(const PcToTeensyPacket& pkt);
+    bool IsConnected() const { return fd_.load() != -1; }
 
 private:
     void TxLoop();         // 200 Hz timer thread
@@ -78,10 +82,14 @@ private:
     bool OpenPort();
     void ClosePort();
 
+    /** @brief Frame and write one packet. Called only from TxLoop and from
+     *         Disconnect() (after the TX thread has been joined). */
+    void Send(const PcToTeensyPacket& pkt);
+
     static uint8_t ComputeChecksum(const uint8_t* data, size_t len);
 
     const SerialConfig& cfg_;
-    int                 fd_ = -1;
+    std::atomic<int>    fd_{ -1 };   // Read from main/TX/RX threads
 
     // ---- TX -----------------------------------------------------------------
     std::mutex            txMutex_;
@@ -91,10 +99,11 @@ private:
     std::thread           txThread_;
 
     // ---- RX -----------------------------------------------------------------
-    std::mutex          rxMutex_;
-    TeensyToPcPacket    latestRx_  = {};
-    bool                rxReady_   = false;
-    std::thread         receiveThread_;
+    std::mutex            rxMutex_;
+    TeensyToPcPacket      latestRx_  = {};
+    bool                  rxReady_   = false;
+    std::atomic<uint64_t> rxCount_{ 0 };   // Valid packets received (monotonic)
+    std::thread           receiveThread_;
 
     std::atomic<bool>   running_{ false };
 };

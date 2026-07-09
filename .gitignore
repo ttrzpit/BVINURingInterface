@@ -1,1 +1,8 @@
 MATLAB/VideoOutputs/
+
+# Build artifacts - regenerate with cmake/ninja; keeping them tracked made
+# every rebuild dirty the working tree.
+build/
+
+# MATLAB editor autosave files
+*.asv

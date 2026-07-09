@@ -3,7 +3,6 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
-#include <numeric>
 
 // =============================================================================
 // Cal3Handler.cpp - Camera-to-Fingertip Offset Calibration
@@ -121,8 +120,15 @@ bool Cal3Handler::Update( const TouchState& touch,
                     for ( const auto& o : offsets_ ) sum += o;
                     finalOffset_ = sum * ( 1.0f / maxSamples_ );
 
-                    float rollSum = std::accumulate( rollSamples_.begin(), rollSamples_.end(), 0.0f );
-                    rollReference_ = rollSum / static_cast<float>( rollSamples_.size() );
+                    // Circular mean of the per-sample rolls (each is itself a
+                    // circular mean over the visible markers). An arithmetic
+                    // mean would break if the samples straddled the +-pi wrap.
+                    float refSin = 0.0f, refCos = 0.0f;
+                    for ( float r : rollSamples_ ) {
+                        refSin += std::sin( r );
+                        refCos += std::cos( r );
+                    }
+                    rollReference_ = std::atan2( refSin, refCos );
 
                     phase_ = Phase::DONE;
                     status_ = "Complete!";

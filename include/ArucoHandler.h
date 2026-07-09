@@ -16,13 +16,14 @@
 //   auto markers = aruco.GetLatestDetection();  // non-blocking, reads last result
 //   aruco.Stop();                               // join thread on shutdown
 //
-// Display functions (showMarkerGrid, updateGridConfig) remain on the main
-// thread - they must not be called from the detection thread.
+// Display functions (SetGridVisible, SetFittsBoardVisible, ...) remain on the
+// main thread - they must not be called from the detection thread.
 // =============================================================================
 
 #include <array>
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -48,7 +49,6 @@ struct DetectedMarker {
     cv::Point2i                centerPx;        ///< Pixel-space centroid
     std::array<cv::Point2f, 4> cornersPx;       ///< Four corners, clockwise from top-left
     cv::Point3f                positionMm;       ///< 3D position relative to camera [mm] (only set for the active target)
-    float                      rotationDeg = 0.0f;  ///< Rotation about the Y-axis [degrees] (only set for the active target)
     float                      rollRad = 0.0f;      ///< In-plane roll from the marker's top edge [rad]
 };
 
@@ -87,10 +87,17 @@ public:
     void SubmitFrame(const cv::Mat& grayFrame, double timestamp);
 
     /**
-     * @brief Return the most recently completed detection result. Non-blocking.
-     *        Returns an empty vector if no detection has completed yet.
+     * @brief Copy the latest detection result into `out` if it is newer than
+     *        the sequence number the caller last saw. Non-blocking.
+     *
+     *        `lastSeq` is caller state: pass the value from the previous call
+     *        (0 initially). When a newer result exists, `out` and `lastSeq` are
+     *        updated and true is returned; otherwise `out` is left untouched
+     *        (the caller keeps working from its previous copy) and false is
+     *        returned. This avoids re-copying an unchanged marker vector on
+     *        every main-loop iteration.
      */
-    std::vector<DetectedMarker> GetLatestDetection();
+    bool GetLatestDetection(std::vector<DetectedMarker>& out, uint64_t& lastSeq);
 
     /** @brief Capture timestamp (CameraFrame::timestamp) of the frame that
      *         produced the latest detection result - used to pair the
@@ -106,19 +113,6 @@ public:
      *  Zero when the thread is idle or caught up. */
     float GetDetectionLagMs() const { return detectionLagMs_.load(); }
 
-    // ---- Phase 1 detection diagnostics --------------------------------------
-    /** Wall time of the last cv::aruco detectMarkers() call [ms] - the dominant
-     *  detection cost, scales with image size and decoded marker count. */
-    float GetDetectMarkersMs() const { return detectMarkersMs_.load(); }
-
-    /** Wall time of the last estimatePoseSingleMarkers() solve for the active
-     *  target [ms]. Zero on frames with no active target detected. */
-    float GetPoseSolveMs() const { return poseSolveMs_.load(); }
-
-    /** Number of markers decoded in the last detection (pre ID-range filter) -
-     *  the per-frame decode workload. */
-    int GetMarkerCount() const { return markerCount_.load(); }
-
     // ---- Touchscreen display (main thread only) -----------------------------
 
     /**
@@ -127,22 +121,6 @@ public:
      *        Idempotent - safe to call repeatedly with the same value.
      */
     void SetGridVisible(bool visible);
-
-    /**
-     * @brief Open the touchscreen window and show a blank white screen.
-     *        Used for the Fitts task start state - participant sees a clean
-     *        white display until the first target marker is selected via 'r'.
-     *        No-op if the window is already open (just redraws white).
-     */
-    void ShowBlankTouchscreen();
-
-    /**
-     * @brief Replace the touchscreen image with a single marker at its grid
-     *        position, hiding all others. Used for the Fitts pointing task.
-     *        The grid window must already be visible (call SetGridVisible first).
-     * @param id  Marker ID to display (1–45)
-     */
-    void ShowSingleMarker(int id);
 
     /**
      * @brief Show or hide the multi-scale Fitts board on the touchscreen
@@ -156,7 +134,8 @@ public:
      * @brief Switch detection for the multi-scale Fitts board.
      *        true  → DICT_4X4_1000, IDs 0–board max, per-marker physical size
      *                resolved from the board layout (coarse vs fine).
-     *        false → restore DICT_4X4_50 and the default ID range / marker size.
+     *        false → restore the default detector (DICT_4X4_1000, config ID range,
+     *                single marker size).
      *        Thread-safe - takes effect on the next detection cycle.
      */
     void SetFittsBoardDetection(bool fitts);
@@ -177,14 +156,17 @@ public:
      *         Thread-safe - takes effect on the next detection cycle. */
     void SetActiveTagId(int id) { activeTagId_.store(id); }
 
-    /** @brief Number of fine (pointing-target) markers on the Fitts board.
-     *         Target IDs span [GetFittsTargetIdMin(), that min + count - 1]. */
-    int GetFittsTargetCount() const { return fittsLayout_.FineCount(); }
+    /** @brief First / last fine (pointing-target) marker ID on the Fitts board. */
     int GetFittsTargetIdMin() const { return fittsLayout_.FineIdMin(); }
     int GetFittsTargetIdMax() const { return fittsLayout_.FineIdMax(); }
     /** @brief Largest marker ID on the board (includes coarse markers). Used
      *         to allow manual target entry of coarse IDs for testing. */
     int GetFittsBoardMaxId()  const { return fittsLayout_.MaxId(); }
+
+    /** @brief The board layout (single source of truth for marker geometry).
+     *         Used by DisplayHandler's marker-visibility panel so the panel can
+     *         never drift from the rendered board. Immutable after construction. */
+    const FittsBoardLayout& GetFittsLayout() const { return fittsLayout_; }
 
     /** @brief Fine marker IDs eligible as random targets (interior of the grid,
      *         border rows/cols excluded). */
@@ -198,7 +180,7 @@ public:
      *        triangle from the touch point to the target marker centre (black
      *        hypotenuse, green vertical leg, red horizontal leg), and two lines
      *        of endpoint-error readout text along the bottom of the screen.
-     *        Persists until the next ShowSingleMarker() call (next target).
+     *        Persists until the board image is reset (next target selected).
      * @param visible  Draw the overlay
      * @param touchPx  Touch position in touchscreen-local pixels
      * @param targetId Fitts board marker id of the active target (for its centre)
@@ -213,8 +195,10 @@ public:
      *        marking the calibrated touch target location (marker center +
      *        Cal3 camera-to-fingertip offset), or the default "under the tag"
      *        offset before Cal3 completes. Persists on top of the current
-     *        Fitts target image until cleared or a new target is shown
-     *        (ShowSingleMarker()/ShowBlankTouchscreen()).
+     *        Fitts board image until cleared or the board is redrawn.
+     *        NOTE: the actual circle draw in RedrawTouchscreenOverlay() is
+     *        currently commented out (deliberately hidden during trials); the
+     *        plumbing is kept so it can be re-enabled with one line.
      * @param visible  Draw the circle
      * @param centerPx Circle center in touchscreen-local pixels
      * @param radiusPx Circle radius in touchscreen-local pixels
@@ -235,8 +219,6 @@ public:
      *        on the board.
      */
     cv::Point2i GetGridMarkerCenterPx(int id) const;
-
-    void updateGridConfig(int cols, int rows, float markerSizeMm, float paddingMm);
 
     /**
      * @brief Show or hide the dense calibration grid on the touchscreen.
@@ -370,16 +352,16 @@ private:
     double                  pendingTimestamp_ = 0.0;
     bool                    frameReady_ = false;
 
-    // Output slot: detection thread writes here, main loop reads
+    // Output slot: detection thread writes here, main loop reads. resultSeq_
+    // increments on every completed detection so GetLatestDetection() can skip
+    // the vector copy when nothing new has arrived.
     std::mutex                  resultMutex_;
     std::vector<DetectedMarker> latestResult_;
+    uint64_t                    resultSeq_ = 0;
 
     // Timestamp of the frame behind latestResult_ - written by the detection
     // thread, read from the main thread, so a plain atomic (no mutex) suffices.
     std::atomic<double> resultTimestamp_{0.0};
     std::atomic<float>  detectionHz_{ 0.0f };     // detection thread throughput [Hz]
     std::atomic<float>  detectionLagMs_{ 0.0f };  // frame→result lag [ms]
-    std::atomic<float>  detectMarkersMs_{ 0.0f }; // detectMarkers() call time [ms]
-    std::atomic<float>  poseSolveMs_{ 0.0f };     // active-target pose solve time [ms]
-    std::atomic<int>    markerCount_{ 0 };        // markers decoded in the last frame
 };

@@ -115,19 +115,15 @@ static constexpr float CONSTANT_TWO_PI = 6.283185307f;      // 2π
 static constexpr float CONSTANT_FOUR_PI = 12.566370614f;    // 4π
 
 // ---- Calibration headings ----------------------------------------------------
-// 12 headings used by AROM boundary fitting (Cal1Handler) and stiffness
-// calibration (Cal2Handler): the 3 motor angles (35/145/270), the cardinal
-// directions (0/90/180/270) and the remaining 30deg-spaced intermediate
-// angles, per nuring_calibration_implementation_guide.md items 5-6.
+// Headings used by AROM boundary fitting (Cal1Handler) and stiffness
+// calibration (Cal2Handler). Currently the four cardinal directions; the count
+// and the array must stay in sync (both feed the periodic spline / K(theta)
+// interpolation and the trial-log calibration metadata).
 
-// static constexpr int   CONSTANT_CALIBRATION_ANGLE_COUNT = 12;
-// static constexpr float CONSTANT_CALIBRATION_ANGLES_DEG[CONSTANT_CALIBRATION_ANGLE_COUNT] =
-//     { 0.f, 35.f, 60.f, 90.f, 120.f, 145.f, 180.f, 210.f, 240.f, 270.f, 300.f, 330.f };
 static constexpr int   CONSTANT_CALIBRATION_ANGLES_COUNT = 4;
 static constexpr float CONSTANT_CALIBRATION_ANGLES_DEG[CONSTANT_CALIBRATION_ANGLES_COUNT] =
     { 0.0f, 90.0f, 180.0f, 270.0f };
-    // { 35.0f, 90.0f, 145.0f, 270.0f };
-// 205 335
+
 // ---- Amplifier current scale --------------------------------------------------
 // TeensyToPcPacket.current_raw_A/B/C are reported in 0.01 A units (amplifier
 // command "g r0x0c").

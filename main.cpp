@@ -10,16 +10,29 @@
 //   4. Show the ArUco marker grid on the touchscreen
 //   5. Enter the main loop
 //
-// Main loop (runs at ~camera frame rate, throttled by CameraHandler):
+// Main loop pacing: each iteration waits (bounded, 2 ms) for a new camera
+// frame via CameraHandler::WaitForFrame(). Between camera frames the loop
+// still ticks every ~2 ms so keys and fresh serial packets are serviced
+// promptly - but it no longer busy-spins at unbounded rate (which burned a
+// core, starved the detection thread, and corrupted the finite-difference
+// velocity estimate).
+//
+// Per iteration:
 //   a. Poll keyboard  - keeps OpenCV windows responsive (must be called each iter)
 //   b. Get camera frame - non-blocking copy from the camera thread's latest frame
-//   c. Detect ArUco markers in the grayscale channel
+//   c. Detect ArUco markers in the grayscale channel (background thread)
 //   d. Read touch state from the touchscreen
-//   e. Update the operator display (camera frame + overlays)
-//   f. Send/receive serial data  - stub; uncomment when Teensy is connected
+//   e. Controller update - clocked by NEW Teensy packets (~200 Hz), so dt and
+//      the velocity estimate track the encoder data rate, not the loop rate
+//   f. Update the operator display (camera frame + overlays)
+//   g. Refresh the pending TX packet (TX thread ships it at 200 Hz)
+//
+// Safety: an RX-staleness watchdog forces the RobotState ladder to IDLE (PWM
+// off) if no valid Teensy packet has arrived for kRxStaleSecs while connected,
+// so guidance force can never keep pulling on frozen encoder data.
 //
 // Shutdown:
-//   ESC key or SIGINT (Ctrl-C) → sets g_running = false → clean thread join
+//   ESC key or SIGINT (Ctrl-C) → sets g_running = 0 → clean thread join
 // =============================================================================
 
 #include <array>
@@ -28,6 +41,7 @@
 #include <algorithm>
 #include <cmath>
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <deque>
 #include <filesystem>
@@ -59,12 +73,14 @@
 #include "TrialLogger.h"
 #include "WorldObjectHandler.h"
 
-// Global shutdown flag - written by SIGINT handler, read by the main loop
-static volatile bool g_running = true;
+// Global shutdown flag - written by SIGINT handler, read by the main loop.
+// volatile sig_atomic_t is the only type the C++ standard guarantees safe to
+// write from a signal handler; the handler does nothing else (iostream calls
+// are not async-signal-safe), the shutdown message is printed by main.
+static volatile std::sig_atomic_t g_running = 1;
 
-void signalHandler( int signum ) {
-    std::cout << "\nMain: Signal " << signum << " received - shutting down cleanly.\n";
-    g_running = false;
+void signalHandler( int ) {
+    g_running = 0;
 }
 
 // Resolve <executable_dir>/../logging so trial logs always land in the project's
@@ -144,6 +160,9 @@ int main() {
                                          static_cast<int>( cfg.camera.cy ) ),
                             cfg.telemetry,
                             cfg.controllerPanel );
+    // Marker-visibility panel draws straight from the board layout - the
+    // single source of truth - so it can never drift from the rendered board.
+    display.SetFittsLayout( &aruco.GetFittsLayout() );
 
     SerialHandler serial( cfg.serial );
 
@@ -221,10 +240,28 @@ int main() {
     // sequence, so the same marker is never pulled twice. Cleared on every 'F'
     // (FITTS entry below); auto-restarts once every selectable target is used.
     std::unordered_set<int> usedRandomTargets;
-    PcToTeensyPacket        lastTxPkt = {};    // Pending TX values updated each frame - sent by TX thread at 200 Hz
+    PcToTeensyPacket        lastTxPkt = {};    // Pending TX values refreshed every iteration - sent by TX thread at 200 Hz
 
-    // Controller - dt is measured between loop iterations, independent of camera frame rate
-    double lastControllerSecs = cv::getTickCount() / cv::getTickFrequency();
+    // Latest detection result. Persistent across iterations: GetLatestDetection
+    // only overwrites it (and bumps detectionSeq) when the detection thread has
+    // produced a NEW result, so no vector copy happens on idle iterations.
+    std::vector<DetectedMarker> markers;
+    uint64_t                    detectionSeq = 0;
+
+    // Controller clocking + RX-staleness watchdog. The controller is updated
+    // only when a NEW Teensy packet has arrived (rxCount changed), with dt
+    // measured between processed packets - so the finite-difference velocity
+    // tracks the encoder data rate (~200 Hz), not the main-loop rate.
+    uint64_t lastRxCount   = 0;
+    double   lastRxSecs    = 0.0;      // wall time the last NEW packet was seen
+    bool     prevRxFresh   = false;    // for the staleness warning edge
+    // Longest tolerated silence from the Teensy while connected before the
+    // RobotState ladder is forced to IDLE (PWM off). 0.25 s = 50 missed packets
+    // at 200 Hz - far beyond any USB scheduling jitter.
+    constexpr double kRxStaleSecs = 0.25;
+    // dt clamp for the controller: a packet gap longer than this (reconnect,
+    // USB stall) must not integrate as one giant step.
+    constexpr float kMaxControllerDt = 0.05f;
 
     // Motor test state - set by testA/testB/testC commands, cleared after 1 s
     using Clock = std::chrono::steady_clock;
@@ -314,12 +351,12 @@ int main() {
             // Close whichever grid was open in the previous state
             if ( prevState == SystemState::CAL3 ) {
                 aruco.SetCalibrationGridVisible( false );
-                aruco.SetCalibrationDetection( false );    // Restore DICT_4X4_50
+                aruco.SetCalibrationDetection( false );    // Restore the default detector / ID range
             } else if ( prevState == SystemState::FITTS ) {
                 aruco.SetFittsBoardVisible( false );
-                aruco.SetFittsBoardDetection( false );    // Restore DICT_4X4_50
+                aruco.SetFittsBoardDetection( false );    // Restore the default detector / ID range
             } else if ( prevState == SystemState::OBJECTS ) {
-                aruco.SetObjectDetection( false );        // Restore DICT_4X4_50 (no touchscreen grid was shown)
+                aruco.SetObjectDetection( false );        // Restore the default detector (no touchscreen grid was shown)
             } else if ( prevState == SystemState::RIG_ALIGN ) {
                 aruco.SetCalibrationGridVisible( false );  // Hide the cal grid shown for the capture
             } else {
@@ -332,12 +369,12 @@ int main() {
             } else if ( kb.systemState == SystemState::CAL3 ) {
                 // Cal3: dense calibration grid for camera-to-fingertip offset measurement
                 aruco.SetCalibrationGridVisible( true );
-                aruco.SetCalibrationDetection( true );    // Switch to DICT_4X4_250
+                aruco.SetCalibrationDetection( true );    // Switch to the calibration-grid detector (DICT_4X4_1000)
             } else if ( kb.systemState == SystemState::FITTS ) {
                 // FITTS: persistent multi-scale board (coarse perimeter + fine
                 // grid). The board is always shown; the active target is marked
                 // by the target-offset circle once selected via 'r'.
-                aruco.SetFittsBoardDetection( true );    // DICT_4X4_250, per-ID sizing
+                aruco.SetFittsBoardDetection( true );    // DICT_4X4_1000, per-ID sizing
                 aruco.SetFittsBoardVisible( true );
                 fitts.Reset();
                 // Refresh the manual random-target debug pool for this session.
@@ -391,9 +428,14 @@ int main() {
             if ( prevState == SystemState::TENSION_ADJUST && kb.systemState != SystemState::TENSION_ADJUST ) {
                 // Capture the manually-adjusted tensions as the new preload
                 // baseline, same as step-by-step pretensioning step 4/4.
+                // NOTE: this happens on ANY exit from TENSION_ADJUST - including
+                // a grave-key cancel - because the mode has no separate "save"
+                // step. Announce it so the operator is never surprised by a
+                // silently changed preload.
                 controller.SetPreloadTensions();
                 controller.SetOutputEnabled( false );
                 controller.SetManualTensionMode( false );
+                keyboard.SetExternalStatus( "Tension adjust closed - current tensions saved as the new preload." );
             }
             if ( prevState == SystemState::FITTS ) {
                 prevFittsTarget = 0;
@@ -439,13 +481,17 @@ int main() {
             prevInputState = kb.inputState;
         }
 
+        // Loop pacing: sleep until the camera publishes a NEW frame, bounded by
+        // 2 ms so keys / serial packets are still serviced between frames. This
+        // replaces the former unthrottled spin - the wait returns immediately
+        // when a new frame is already available, so no frame latency is added.
+        camera.WaitForFrame( lastFrameTimestamp, 2 );
+
         // Current time, shared by CAL3, the controller, and pretensioning
         double nowSecs = cv::getTickCount() / cv::getTickFrequency();
 
         // b. Camera frame - check if the camera thread has produced a NEW frame
-        //    by comparing timestamps. Without this, the non-blocking getLatestFrame()
-        //    would return the same frame repeatedly and the loop would spin at
-        //    hundreds of Hz with no useful work done.
+        //    by comparing timestamps (the wait above may also have timed out).
         CameraFrame frame = camera.getLatestFrame();
         bool        isNewFrame = frame.ready && ( frame.timestamp != lastFrameTimestamp );
         if ( isNewFrame ) {
@@ -458,12 +504,13 @@ int main() {
         }
 
         // c. ArUco detection - only submit when there is genuinely a new frame.
-        //    GetLatestDetection() is always called so the main loop always has
-        //    the freshest result, even if a new frame hasn't arrived yet.
+        //    GetLatestDetection() refreshes `markers` only when the detection
+        //    thread has produced a new result (sequence number changed);
+        //    otherwise the previous copy stays valid, with no vector copy.
         if ( isNewFrame ) {
             aruco.SubmitFrame( frame.gray, frame.timestamp );
         }
-        std::vector<DetectedMarker> markers = aruco.GetLatestDetection();
+        aruco.GetLatestDetection( markers, detectionSeq );
 
         // d. Touch state - drains pending X11 events, returns current state
         TouchState touchState = touch.getLatestTouch();
@@ -783,17 +830,22 @@ int main() {
             worldObj.Update( markers );
         }
 
+        // FITTS: compute the shared per-frame board fits ONCE (homography +
+        // solvePnP pose). EstimateTargetFromBoard / fitts.Update /
+        // GetTargetFullPose below all reuse this cache - previously each of
+        // them re-ran its own solve, up to 2x solvePnP + 2x findHomography per
+        // frame on the main thread, which is what tripped the >25 ms stall
+        // probe and dropped frames from active trial logs.
+        if ( kb.systemState == SystemState::FITTS && isNewFrame ) {
+            fitts.PrepareFrame( markers );
+        }
+
         // Scan/training phase: live progress on the Output row (mirrors the CAL3
         // status pattern). Runs after the finish-scan handler above, so the
         // "Scan complete" message isn't overwritten on the finishing frame.
         if ( kb.systemState == SystemState::OBJECTS && worldObj.IsScanning() ) {
             keyboard.SetExternalStatus( worldObj.GetScanStatus() );
         }
-
-        // f. Controller - runs every loop iteration so dt tracks wall-clock
-        //    time, independent of camera frame rate.
-        float dt = static_cast<float>( nowSecs - lastControllerSecs );
-        lastControllerSecs = nowSecs;
 
         // Active target marker (set via kb.activeTagId during FITTS) drives
         // guidance: the marker's camera-relative position IS the position
@@ -833,7 +885,7 @@ int main() {
         } else if ( kb.systemState == SystemState::FITTS && kb.activeTagId > 0 ) {
             if ( isNewFrame ) {
                 fbTargetValid = fitts.EstimateTargetFromBoard(
-                    markers, kb.activeTagId, fbTargetPosMm, fbTargetRoll, &fbCorners );
+                    kb.activeTagId, fbTargetPosMm, fbTargetRoll, &fbCorners );
             }
             if ( fbTargetValid ) {
                 haveTarget = true;
@@ -977,11 +1029,36 @@ int main() {
             aruco.SetTargetOffsetCircle( false, {}, 0, targetCircleColor );
         }
 
+        // e. Controller - clocked by NEW Teensy packets. GetRxCount() changes
+        //    only when the RX thread has accepted a fresh valid packet, so the
+        //    controller's dt (and the finite-difference velocity inside it)
+        //    tracks the encoder data rate (~200 Hz). Previously Update() ran on
+        //    every loop iteration with the SAME packet, which made the velocity
+        //    a spike-and-decay artifact (gesture detection and the endgame-
+        //    integrator speed gate silently consumed that garbage).
         TeensyToPcPacket rxPkt = {};
         bool             hasRxPkt = serial.GetLatestPacket( rxPkt );
-        if ( hasRxPkt ) {
-            controller.Update( rxPkt, nowSecs, dt );
+        const uint64_t   rxCount = serial.GetRxCount();
+        if ( hasRxPkt && rxCount != lastRxCount ) {
+            // dt between PROCESSED packets, clamped so a long gap (reconnect,
+            // USB stall) cannot integrate as one giant step.
+            const float pktDt = ( lastRxCount == 0 )
+                                    ? 0.0f
+                                    : std::min( static_cast<float>( nowSecs - lastRxSecs ), kMaxControllerDt );
+            lastRxCount = rxCount;
+            lastRxSecs = nowSecs;
+            controller.Update( rxPkt, nowSecs, pktDt );
         }
+
+        // RX-staleness watchdog: while connected, require a fresh packet within
+        // kRxStaleSecs for the RobotState ladder to hold/apply any tension.
+        const bool rxFresh = hasRxPkt && ( nowSecs - lastRxSecs ) < kRxStaleSecs;
+        if ( serial.IsConnected() && !rxFresh && prevRxFresh ) {
+            std::cerr << "Main: WARNING - Teensy telemetry stale (no packet for "
+                      << kRxStaleSecs << " s). Output disabled until packets resume.\n";
+            keyboard.SetExternalStatus( "WARNING: Teensy telemetry stale - output disabled." );
+        }
+        prevRxFresh = rxFresh;
 
         // Set home position ('Z' key) - records current encoder angles as the
         // neutral home pose, identical to what PretensionHandler does at step 3.
@@ -1079,6 +1156,13 @@ int main() {
         RobotState robotState;
         if ( !serial.IsConnected() ) {
             robotState = RobotState::DISCONNECTED;
+        } else if ( !rxFresh ) {
+            // Watchdog: connected but no fresh telemetry - never hold or apply
+            // tension on frozen encoder data. Drops PWM to 2047 via the
+            // holdPreload gate below; recovers to READY/GUIDING automatically
+            // once packets resume. Override modes (PRETENSION/TENSION_ADJUST/
+            // CAL_*) manage output themselves and are deliberately unaffected.
+            robotState = RobotState::IDLE;
         } else if ( guidanceActive ) {
             robotState = RobotState::GUIDING;
         } else if ( pretension.IsComplete() ) {
@@ -1114,9 +1198,11 @@ int main() {
             gesture.Reset();
         }
 
-        // g. Serial - update the pending TX packet each new camera frame.
-        //    The TX thread sends it independently at 200 Hz; packet_index is
-        //    managed by the TX thread and does not need to be set here.
+        // g. Serial - refresh the pending TX packet EVERY iteration (not just on
+        //    new camera frames), so the 200 Hz TX thread always ships the
+        //    freshest controller output - the controller now updates on every
+        //    new Teensy packet, which is faster than the camera frame rate.
+        //    packet_index is managed by the TX thread and is not set here.
         if ( kb.pendingMotorTest.active ) {
             motorTestActive = true;
             motorTestMotor = kb.pendingMotorTest.motor;
@@ -1125,46 +1211,44 @@ int main() {
             keyboard.ClearMotorTest();
         }
 
-        if ( isNewFrame ) {
-            // Reflect the RobotState ladder to the Teensy: READY/GUIDING hold
-            // preload (or full) tension, everything else is plain IDLE.
-            lastTxPkt.state = ( robotState == RobotState::READY || robotState == RobotState::GUIDING )
-                                  ? static_cast<uint8_t>( PcState::READY )
-                                  : static_cast<uint8_t>( PcState::IDLE );
-            lastTxPkt.pwm_A = 2047;
-            lastTxPkt.pwm_B = 2047;
-            lastTxPkt.pwm_C = 2047;
+        // Reflect the RobotState ladder to the Teensy: READY/GUIDING hold
+        // preload (or full) tension, everything else is plain IDLE.
+        lastTxPkt.state = ( robotState == RobotState::READY || robotState == RobotState::GUIDING )
+                              ? static_cast<uint8_t>( PcState::READY )
+                              : static_cast<uint8_t>( PcState::IDLE );
+        lastTxPkt.pwm_A = 2047;
+        lastTxPkt.pwm_B = 2047;
+        lastTxPkt.pwm_C = 2047;
 
-            // Controller output - only forwarded once PretensionHandler has
-            // enabled it (TENSION step); otherwise PWM stays at 2047 (off).
-            if ( controller.IsOutputEnabled() ) {
-                lastTxPkt.pwm_A = controller.GetPwmA();
-                lastTxPkt.pwm_B = controller.GetPwmB();
-                lastTxPkt.pwm_C = controller.GetPwmC();
-            }
-
-            if ( motorTestActive ) {
-                double elapsed = std::chrono::duration<double>( Clock::now() - motorTestStart ).count();
-                if ( elapsed < 1.0 ) {
-                    if ( motorTestMotor == 'A' )
-                        lastTxPkt.pwm_A = motorTestPwm;
-                    else if ( motorTestMotor == 'B' )
-                        lastTxPkt.pwm_B = motorTestPwm;
-                    else if ( motorTestMotor == 'C' )
-                        lastTxPkt.pwm_C = motorTestPwm;
-                    else if ( motorTestMotor == 'D' ) {
-                        lastTxPkt.pwm_A = motorTestPwm;
-                        lastTxPkt.pwm_B = motorTestPwm;
-                        lastTxPkt.pwm_C = motorTestPwm;
-                    }
-                } else {
-                    motorTestActive = false;
-                    keyboard.SetExternalStatus( "Motor test done - back to idle." );
-                }
-            }
-
-            serial.SetPendingTx( lastTxPkt );
+        // Controller output - only forwarded once PretensionHandler has
+        // enabled it (TENSION step); otherwise PWM stays at 2047 (off).
+        if ( controller.IsOutputEnabled() ) {
+            lastTxPkt.pwm_A = controller.GetPwmA();
+            lastTxPkt.pwm_B = controller.GetPwmB();
+            lastTxPkt.pwm_C = controller.GetPwmC();
         }
+
+        if ( motorTestActive ) {
+            double elapsed = std::chrono::duration<double>( Clock::now() - motorTestStart ).count();
+            if ( elapsed < 1.0 ) {
+                if ( motorTestMotor == 'A' )
+                    lastTxPkt.pwm_A = motorTestPwm;
+                else if ( motorTestMotor == 'B' )
+                    lastTxPkt.pwm_B = motorTestPwm;
+                else if ( motorTestMotor == 'C' )
+                    lastTxPkt.pwm_C = motorTestPwm;
+                else if ( motorTestMotor == 'D' ) {
+                    lastTxPkt.pwm_A = motorTestPwm;
+                    lastTxPkt.pwm_B = motorTestPwm;
+                    lastTxPkt.pwm_C = motorTestPwm;
+                }
+            } else {
+                motorTestActive = false;
+                keyboard.SetExternalStatus( "Motor test done - back to idle." );
+            }
+        }
+
+        serial.SetPendingTx( lastTxPkt );
 
         // Assemble serial state for the display - always up to date even when
         // the panel only refreshes at 10 Hz.
@@ -1180,7 +1264,7 @@ int main() {
         //    updated when in FITTS mode.
         if ( isNewFrame ) {
             if ( kb.systemState == SystemState::FITTS ) {
-                fitts.Update( markers, touchState, cal3.IsComplete(),
+                fitts.Update( touchState, cal3.IsComplete(),
                               cal3.GetFinalOffset(), cal3.GetRollRef() );
                 display.SetTouchFingertip( fitts.HasTouchFingertip(), fitts.GetTouchFingertipPx() );
 
@@ -1244,9 +1328,9 @@ int main() {
                         s.qy = tquat[1];
                         s.qz = tquat[2];
                         s.qw = tquat[3];
-                        s.pwmA = tele.outputPwm.x;
-                        s.pwmB = tele.outputPwm.y;
-                        s.pwmC = tele.outputPwm.z;
+                        s.pwmA = tele.pwm.x;
+                        s.pwmB = tele.pwm.y;
+                        s.pwmC = tele.pwm.z;
                         trialLogger.AddSample( s );
                     }
                     // End the trial on touchscreen contact (rising edge).
@@ -1312,48 +1396,6 @@ int main() {
             } else {
                 display.SetObjectStatusLine( false, "" );
             }
-
-            // // --- Phase 1 detection diagnostics: once-per-second console summary
-            // // Quantifies the gap between camera delivery and pose-update rate
-            // // (duplicate frames = detector falling behind), plus per-stage
-            // // detector timing, so detection cost can be measured on the rig.
-            // // TEMPORARY - remove once Phase 1 tuning is complete.
-            // {
-            //     static double diagWindowStart = nowSecs;
-            //     static int    diagCamFrames = 0;
-            //     static int    diagPoseUpdates = 0;
-            //     static double diagPrevResultTs = -1.0;
-
-            //     diagCamFrames++;
-            //     const double curResultTs = aruco.GetLatestDetectionTimestamp();
-            //     if ( curResultTs != diagPrevResultTs ) {
-            //         diagPoseUpdates++;
-            //         diagPrevResultTs = curResultTs;
-            //     }
-
-            //     if ( kb.systemState == SystemState::FITTS ) {
-                    
-            //         const double win = nowSecs - diagWindowStart;
-            //         if ( win >= 1.0f ) {
-            //             ControllerTelemetry tele = controller.GetTelemetry();
-            //             const double        camHz = diagCamFrames / win;
-            //             const double        poseHz = diagPoseUpdates / win;
-            //             const double        dupPct = camHz > 1e-6 ? 100.0 * ( 1.0 - poseHz / camHz ) : 0.0;
-            //             char                line[256];
-            //             std::snprintf( line, sizeof( line ),
-            //                            "[DET] ID=%d tpos.z=%.2fmm cam=%.1fHz pose=%.1fHz (dup %.0f%%) detect=%.1fHz | "
-            //                            "detectMarkers=%.1fms poseSolve=%.2fms markers=%d lag=%.0fms",
-            //                            kb.activeTagId, tele.displacement.z, camHz, poseHz, dupPct, aruco.GetDetectionHz(),
-            //                            aruco.GetDetectMarkersMs(), aruco.GetPoseSolveMs(),
-            //                            aruco.GetMarkerCount(), aruco.GetDetectionLagMs() );
-            //             std::cout << line << std::endl;
-
-            //             diagWindowStart = nowSecs;
-            //             diagCamFrames = 0;
-            //             diagPoseUpdates = 0;
-            //         }
-            //     }
-            // }
 
             // Pair the displayed image with the frame the current marker
             // detection was computed from, so the overlay never drifts

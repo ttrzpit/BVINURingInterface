@@ -26,7 +26,7 @@
 //   #6  Integrator clamp derived from K_i budget, not arbitrary 2×F_max
 //   #7  Pulley radius corrected to 0.0025 m
 //   #8  Virtual mapping uses spool-corrected integral formula for dL
-//   #9  Fy suppression heuristic removed (see commented block in .cpp)
+//   #9  Fy suppression heuristic removed (K(theta)+gainTune replaces it)
 // =============================================================================
 
 #include <array>
@@ -61,13 +61,13 @@ struct ControllerTelemetry {
                                      ///< +/- cfg_.tension_deflection_max. May be negative (that
                                      ///< tendon's contribution would relax it), but Stage 2 floors
                                      ///< T_output at T_preload_i regardless.
-    cv::Point3f outputTension; ///< Equal to `tension` (T_output) - kept for display-table clarity [N]
     cv::Point3f current;       ///< Commanded currents [A]
-    cv::Point3f pwm;           ///< Commanded PWM values (as float for display)
+    cv::Point3f pwm;           ///< Commanded PWM values (as float for display) - the Stage 2
+                                ///< T_output converted through Stages 3/4; always in
+                                ///< [CONSTANT_PWM_MAX, CONSTANT_PWM_OFF]
     cv::Point3f preloadPwm;    ///< PWM values corresponding to preload tensions (as float for display)
-    cv::Point3f outputPwm;     ///< PWM values corresponding to outputTension (as float for display) - always in [CONSTANT_PWM_MAX, CONSTANT_PWM_OFF]
     cv::Point3f deflectionForcePwm; ///< PWM equivalent of |deflectionForce| via the same Tension->Current->PWM
-                                     ///< pipeline as preloadPwm/outputPwm - always in [CONSTANT_PWM_MAX,
+                                     ///< pipeline as preloadPwm/pwm - always in [CONSTANT_PWM_MAX,
                                      ///< CONSTANT_PWM_OFF], never negative. Direction is conveyed by
                                      ///< deflectionForce's sign, not by this value.
     cv::Point3f gainTune;       ///< Custom-tuned proportional gain per motor [N/mm], seeded
@@ -228,8 +228,7 @@ public:
     /** @brief Maximum commanded force magnitude [N] (cfg_.deflection_force_max). */
     float GetDeflectionForceMax() const { return cfg_.deflection_force_max; }
 
-    // ---- Measured force/current (from amplifier-reported current, Stage 0) ---
-    cv::Point3f GetMeasuredCurrent() const { return { measuredCurrent_A_, measuredCurrent_B_, measuredCurrent_C_ }; }
+    // ---- Measured force (from amplifier-reported current, Stage 0) -----------
     cv::Point2f GetMeasuredForce()   const { return { measuredForce_x_, measuredForce_y_ }; }
 
     // ---- Target state (computed each Update from SetTarget inputs) ---------------
@@ -274,9 +273,6 @@ public:
     /** @brief Δp = pos_target_3d - pos_fingertip - the displacement onto the target. */
     cv::Point3f ComputeDisplacement(const cv::Point3f& pos_target_3d,
                                     const cv::Point3f& pos_fingertip) const;
-
-    /** @brief Latest Δp from the most recent Update() [mm]. */
-    cv::Point3f GetDisplacement() const { return displacement_; }
 
     // ---- Stiffness profile K(theta) [N/mm] (Stage 2 calibration result) ------
     // 10 values aligned with CONSTANT_CALIBRATION_ANGLES_DEG. When valid and
@@ -340,8 +336,6 @@ public:
     cv::Point3f GetTendonLengthChanges() const { return { dL_A_, dL_B_, dL_C_ }; }
     cv::Point3f GetTensions()           const { return { tension_A_, tension_B_, tension_C_ }; }
     cv::Point3f GetCurrentCommanded()   const { return { current_A_, current_B_, current_C_ }; }
-    cv::Point2f GetForce()              const { return { force_x_, force_y_ }; }
-    float       GetRampValue()          const { return rampValue_; }
     bool        IsHomeSet()             const { return homeSet_; }
 
     /** @brief Assemble a telemetry snapshot for DisplayHandler. */

@@ -106,9 +106,11 @@ void Cal2Handler::Update( double nowSecs ) {
                               << std::fixed << std::setprecision( 3 );
                     for ( int i = 0; i < CONSTANT_CALIBRATION_ANGLES_COUNT; i++ ) {
                         const Cal2HeadingResult& res = results_[i];
+                        // Per-heading boundary radius (the old printout reused
+                        // the LAST heading's radius on every row).
                         std::cout << "Cal2:   theta=" << ( res.theta * RAD_TO_DEG ) << " deg"
                                   << "  K(theta)=" << res.stiffness_kP << " N/mm"
-                                  << "  Boundary Radius=" << boundaryRadius << " mm"
+                                  << "  Boundary Radius=" << aromBoundary_.RadiusAtAngle( res.theta ) << " mm"
                                   << ( res.valid ? "" : "  [INVALID]" ) << "\n";
                     }
                     std::cout << std::defaultfloat;

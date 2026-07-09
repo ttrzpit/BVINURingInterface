@@ -44,7 +44,7 @@ void SerialHandler::stop() {
 }
 
 void SerialHandler::Connect() {
-    if (fd_ >= 0) {
+    if (fd_.load() >= 0) {
         std::cout << "SerialHandler: Already connected.\n";
         return;
     }
@@ -59,7 +59,7 @@ void SerialHandler::Connect() {
 }
 
 void SerialHandler::Disconnect() {
-    if (fd_ < 0) return;
+    if (fd_.load() < 0) return;
     running_ = false;
 
     // Join TX thread first - once it exits, no concurrent write() calls remain
@@ -117,7 +117,7 @@ void SerialHandler::TxLoop() {
 
         std::this_thread::sleep_until(nextWake);
 
-        if (fd_ < 0) continue;
+        if (fd_.load() < 0) continue;
 
         // Snapshot the pending command and stamp the rolling packet index
         PcToTeensyPacket pkt;
@@ -143,7 +143,8 @@ void SerialHandler::TxLoop() {
 }
 
 void SerialHandler::Send(const PcToTeensyPacket& pkt) {
-    if (fd_ < 0) return;
+    const int fd = fd_.load();
+    if (fd < 0) return;
 
     constexpr size_t PAYLOAD = sizeof(PcToTeensyPacket);
     uint8_t buf[PAYLOAD + 2];   // start byte + payload + checksum
@@ -152,9 +153,9 @@ void SerialHandler::Send(const PcToTeensyPacket& pkt) {
     memcpy(&buf[1], &pkt, PAYLOAD);
     buf[PAYLOAD + 1] = ComputeChecksum(reinterpret_cast<const uint8_t*>(&pkt), PAYLOAD);
 
-    // write() is safe to call from the main thread while the receive thread
-    // does read() - Linux guarantees separate TX/RX for full-duplex serial fds.
-    [[maybe_unused]] ssize_t n = write(fd_, buf, sizeof(buf));
+    // write() is safe to call while the receive thread does read() - Linux
+    // guarantees separate TX/RX paths for full-duplex serial fds.
+    [[maybe_unused]] ssize_t n = write(fd, buf, sizeof(buf));
 }
 
 
@@ -171,8 +172,8 @@ bool SerialHandler::GetLatestPacket(TeensyToPcPacket& out) {
 // ---- Private - port setup ---------------------------------------------------
 
 bool SerialHandler::OpenPort() {
-    fd_ = open(cfg_.port.c_str(), O_RDWR | O_NOCTTY);
-    if (fd_ < 0) {
+    const int fd = open(cfg_.port.c_str(), O_RDWR | O_NOCTTY);
+    if (fd < 0) {
         std::cerr << "SerialHandler: Cannot open " << cfg_.port
                   << " - is the Teensy connected?\n";
         return false;
@@ -180,7 +181,7 @@ bool SerialHandler::OpenPort() {
 
     struct termios tty;
     memset(&tty, 0, sizeof(tty));
-    tcgetattr(fd_, &tty);
+    tcgetattr(fd, &tty);
 
     // Baud rate - B1000000 = 1 Mbaud, defined in <termios.h> on Linux.
     // For USB CDC (virtual COM) ports this is informational; real speed
@@ -204,26 +205,26 @@ bool SerialHandler::OpenPort() {
     tty.c_cc[VMIN]  = 1;
     tty.c_cc[VTIME] = 10;   // tenths of seconds
 
-    tcsetattr(fd_, TCSANOW, &tty);
-    tcflush(fd_, TCIOFLUSH);   // Discard any stale bytes
+    tcsetattr(fd, TCSANOW, &tty);
+    tcflush(fd, TCIOFLUSH);   // Discard any stale bytes
+
+    fd_.store(fd);   // Publish only after the port is fully configured
 
     std::cout << "SerialHandler: Opened " << cfg_.port << "\n";
     return true;
 }
 
 void SerialHandler::ClosePort() {
-    if (fd_ >= 0) {
-        close(fd_);
-        fd_ = -1;
-    }
+    const int fd = fd_.exchange(-1);
+    if (fd >= 0) close(fd);
 }
 
 
 // ---- Private - receive thread -----------------------------------------------
 
 void SerialHandler::ReceiveLoop() {
-
-    if (fd_ < 0) {
+    const int fd = fd_.load();
+    if (fd < 0) {
         // Port failed to open - sleep until stop() is called
         while (running_) std::this_thread::sleep_for(std::chrono::milliseconds(100));
         return;
@@ -238,7 +239,7 @@ void SerialHandler::ReceiveLoop() {
 
     while (running_) {
         uint8_t byte;
-        ssize_t n = read(fd_, &byte, 1);
+        ssize_t n = read(fd, &byte, 1);
 
         if (n <= 0) {
             // Timeout (VTIME elapsed) or error - check running_ and continue
@@ -265,9 +266,12 @@ void SerialHandler::ReceiveLoop() {
                 uint8_t expected = ComputeChecksum(buf, PAYLOAD);
                 if (byte == expected) {
                     // Valid packet - publish to main thread
-                    std::lock_guard<std::mutex> lock(rxMutex_);
-                    memcpy(&latestRx_, buf, PAYLOAD);
-                    rxReady_ = true;
+                    {
+                        std::lock_guard<std::mutex> lock(rxMutex_);
+                        memcpy(&latestRx_, buf, PAYLOAD);
+                        rxReady_ = true;
+                    }
+                    rxCount_.fetch_add(1);   // New-packet signal for main's watchdog
                 } else {
                     // Checksum mismatch - log and wait for next start byte
                     // (silent discard is fine; index counter will reveal the miss)

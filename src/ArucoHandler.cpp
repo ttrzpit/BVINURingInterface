@@ -19,8 +19,6 @@
 //   CORNER_REFINE_SUBPIX     - sub-pixel corner refinement for accurate 3D pose
 // =============================================================================
 
-static constexpr float RAD2DEG = 57.2958f;
-
 // ---- Construction -----------------------------------------------------------
 
 ArucoHandler::ArucoHandler(const ArucoMarkerConfig& markerCfg,
@@ -80,9 +78,12 @@ void ArucoHandler::SubmitFrame(const cv::Mat& grayFrame, double timestamp) {
     frameCv_.notify_one();
 }
 
-std::vector<DetectedMarker> ArucoHandler::GetLatestDetection() {
+bool ArucoHandler::GetLatestDetection(std::vector<DetectedMarker>& out, uint64_t& lastSeq) {
     std::lock_guard<std::mutex> lock(resultMutex_);
-    return latestResult_;  // ref-counted Mat copies inside, cheap
+    if (resultSeq_ == lastSeq) return false;  // nothing new - caller keeps its copy
+    out = latestResult_;
+    lastSeq = resultSeq_;
+    return true;
 }
 
 void ArucoHandler::DetectLoop() {
@@ -124,6 +125,7 @@ void ArucoHandler::DetectLoop() {
         {
             std::lock_guard<std::mutex> lock(resultMutex_);
             latestResult_ = std::move(result);
+            resultSeq_++;
         }
         resultTimestamp_ = submitTimestamp;
 
@@ -164,18 +166,9 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
         useObjDetector_.load() ? objDetector_
                                : (useCalDetector_.load() ? calDetector_ : detector_);
 
-    // Phase 1 diagnostic: time the detectMarkers() call in isolation - it is the
-    // dominant per-frame cost and scales with the number of markers decoded.
-    const auto detT0 = std::chrono::steady_clock::now();
     det.detectMarkers(grayFrame, corners, detectedIds);
-    const auto detT1 = std::chrono::steady_clock::now();
-    detectMarkersMs_.store(std::chrono::duration<float, std::milli>(detT1 - detT0).count());
-    markerCount_.store(static_cast<int>(detectedIds.size()));
 
-    // Reset per-frame pose-solve time; set below only if the active target is solved.
-    float poseSolveMs = 0.0f;
-
-    if (detectedIds.empty()) { poseSolveMs_.store(0.0f); return results; }
+    if (detectedIds.empty()) return results;
 
     const int idMin = activeValidIdMin_.load();
     const int idMax = activeValidIdMax_.load();
@@ -231,7 +224,7 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
         // Store corners
         for (int k = 0; k < 4; k++) marker.cornersPx[k] = c[k];
 
-        // 3D pose (positionMm / rotationDeg) is only ever consumed for the
+        // 3D pose (positionMm) is only ever consumed for the
         // active guidance target, so only solve it for that one marker. On the
         // dense Fitts board this avoids ~120 wasted solvePnP calls per frame
         // (which slowed detection throughput and made the overlay refresh choppy).
@@ -251,11 +244,8 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
 
             std::vector<std::vector<cv::Point2f>> singleCorner = {corners[i]};
             std::vector<cv::Vec3d> rvecs, tvecs;
-            const auto poseT0 = std::chrono::steady_clock::now();
             cv::aruco::estimatePoseSingleMarkers(
                 singleCorner, markerSizeMm, camMatrix_, distCoeffs_, rvecs, tvecs);
-            const auto poseT1 = std::chrono::steady_clock::now();
-            poseSolveMs += std::chrono::duration<float, std::milli>(poseT1 - poseT0).count();
 
             if (!tvecs.empty()) {
                 // 3D position in millimetres, camera-relative. Y is negated so
@@ -265,7 +255,6 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
                     static_cast<float>(tvecs[0][0]),
                     static_cast<float>(-tvecs[0][1]),
                     static_cast<float>(tvecs[0][2]));
-                marker.rotationDeg = static_cast<float>(rvecs[0][1]) * RAD2DEG;
             }
         }
 
@@ -281,47 +270,12 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
         results.push_back(marker);
     }
 
-    poseSolveMs_.store(poseSolveMs);
     return results;
 }
 
 // =============================================================================
 // Touchscreen display
 // =============================================================================
-
-void ArucoHandler::ShowBlankTouchscreen() {
-    if (!gridVisible_) {
-        // Open and position the window using the same fullscreen sequence.
-        // The 50 ms wait after moveWindow gives the X11 window manager time
-        // to register the new position *before* fullscreen is requested -
-        // otherwise the WM can record the pre-move (wrong-display) geometry
-        // as the "restore" position, so un-fullscreening later (SetGridVisible(false))
-        // snaps the window back to the wrong display and steals input focus.
-        cv::namedWindow(TOUCHSCREEN_WIN, cv::WINDOW_NORMAL);
-        cv::waitKey(1);
-        cv::moveWindow(TOUCHSCREEN_WIN, touchCfg_.xOffset, touchCfg_.yOffset);
-        cv::waitKey(50);
-        cv::setWindowProperty(TOUCHSCREEN_WIN, cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
-        cv::waitKey(50);
-        gridVisible_ = true;
-    }
-    // Solid white - participant sees a clean screen before the first target is chosen
-    cv::Mat blank(touchCfg_.height, touchCfg_.width, CV_8UC1, cv::Scalar(255));
-    cv::imshow(TOUCHSCREEN_WIN, blank);
-    cv::waitKey(1);
-
-    // Reset the Fitts overlay base image and state - no overlay until a touch
-    // is recorded against the next target.
-    cv::cvtColor(blank, singleMarkerImage_, cv::COLOR_GRAY2BGR);
-    fittsOverlayVisible_ = false;
-    fittsTouchPx_        = {};
-    fittsOverlayTargetId_ = 0;
-    fittsLine1_.clear();
-    fittsLine2_.clear();
-    targetCircleVisible_ = false;
-
-    std::cout << "ArucoHandler: Touchscreen blank (FITTS ready - press 'r' for first target)\n";
-}
 
 void ArucoHandler::SetGridVisible(bool visible) {
     if (visible == gridVisible_) return;  // No change - avoid recreating the window
@@ -330,8 +284,10 @@ void ArucoHandler::SetGridVisible(bool visible) {
     if (visible) {
         // Fullscreen sequence on Linux - order matters.
         // Create and show first, then move, then request fullscreen. The
-        // 50 ms waits around moveWindow/setWindowProperty give the X11 WM
-        // time to register each step before the next - see ShowBlankTouchscreen().
+        // 50 ms waits after moveWindow/setWindowProperty give the X11 WM time
+        // to register each step before the next - otherwise the WM can record
+        // the pre-move (wrong-display) geometry as the "restore" position, so
+        // un-fullscreening later snaps the window to the wrong display.
         cv::namedWindow(TOUCHSCREEN_WIN, cv::WINDOW_NORMAL);
         cv::imshow(TOUCHSCREEN_WIN, markerGridImage_);
         cv::waitKey(1);
@@ -351,40 +307,6 @@ void ArucoHandler::SetGridVisible(bool visible) {
         cv::waitKey(50);
         std::cout << "ArucoHandler: Grid hidden.\n";
     }
-}
-
-void ArucoHandler::ShowSingleMarker(int id) {
-    if (id < 1) return;
-
-    // White background - same dimensions as the full grid image
-    cv::Mat img(touchCfg_.height, touchCfg_.width, CV_8UC1, cv::Scalar(255));
-
-    // Marker size in pixels - same calculation used by renderGridImage()
-    const int sz = static_cast<int>(std::round(displayCfg_.markerSizeMm * touchCfg_.pixelsPerMm));
-
-    // Grid position for this marker ID (1-based, left-to-right top-to-bottom)
-    const int col = (id - 1) % displayCfg_.cols;
-    const int row = (id - 1) / displayCfg_.cols;
-    cv::Point2i origin = gridCellOrigin(col, row);
-
-    cv::Mat markerImg;
-    cv::aruco::generateImageMarker(dictionary_, id, sz, markerImg, 1);
-    markerImg.copyTo(img(cv::Rect(origin.x, origin.y, sz, sz)));
-
-    cv::imshow(TOUCHSCREEN_WIN, img);
-    cv::waitKey(1);
-
-    // New target - reset the Fitts overlay base image and clear any previous
-    // touch sample until the next contact is recorded.
-    cv::cvtColor(img, singleMarkerImage_, cv::COLOR_GRAY2BGR);
-    fittsOverlayVisible_ = false;
-    fittsTouchPx_        = {};
-    fittsOverlayTargetId_ = 0;
-    fittsLine1_.clear();
-    fittsLine2_.clear();
-    targetCircleVisible_ = false;
-
-    std::cout << "ArucoHandler: Fitts target → marker " << id << "\n";
 }
 
 void ArucoHandler::SetFittsOverlay(bool visible, cv::Point2i touchPx, int targetId,
@@ -480,15 +402,6 @@ cv::Point2i ArucoHandler::GetGridMarkerCenterPx(int id) const {
     return cv::Point2i(m->xPx + m->sizePx / 2, m->yPx + m->sizePx / 2);
 }
 
-void ArucoHandler::updateGridConfig(int cols, int rows, float markerSizeMm, float paddingMm) {
-    displayCfg_.cols = cols;
-    displayCfg_.rows = rows;
-    displayCfg_.markerSizeMm = markerSizeMm;
-    displayCfg_.paddingMm = paddingMm;
-    renderGridImage();
-    // Re-show only if currently visible (caller is responsible for visibility)
-}
-
 void ArucoHandler::SetCalibrationGridVisible(bool visible) {
     if (visible == calGridVisible_) return;
     calGridVisible_ = visible;
@@ -519,12 +432,12 @@ void ArucoHandler::SetCalibrationDetection(bool calibration) {
         activeValidIdMin_.store(0);
         activeValidIdMax_.store(999);
         useCalDetector_.store(true);
-        std::cout << "ArucoHandler: Detection → DICT_4X4_1000 (IDs 0–999)\n";
+        std::cout << "ArucoHandler: Detection → calibration grid (DICT_4X4_1000, IDs 0–999)\n";
     } else {
         useCalDetector_.store(false);
         activeValidIdMin_.store(detectCfg_.validIdMin);
         activeValidIdMax_.store(detectCfg_.validIdMax);
-        std::cout << "ArucoHandler: Detection → DICT_4X4_50 (IDs "
+        std::cout << "ArucoHandler: Detection → default (DICT_4X4_1000, IDs "
                   << detectCfg_.validIdMin << "–" << detectCfg_.validIdMax << ")\n";
     }
 }
@@ -577,7 +490,7 @@ void ArucoHandler::SetFittsBoardDetection(bool fitts) {
         useCalDetector_.store(false);
         activeValidIdMin_.store(detectCfg_.validIdMin);
         activeValidIdMax_.store(detectCfg_.validIdMax);
-        std::cout << "ArucoHandler: Detection → DICT_4X4_50 (IDs "
+        std::cout << "ArucoHandler: Detection → default (DICT_4X4_1000, IDs "
                   << detectCfg_.validIdMin << "–" << detectCfg_.validIdMax << ")\n";
     }
 }
@@ -604,7 +517,7 @@ void ArucoHandler::SetObjectDetection(bool objects) {
         useFittsBoardSizes_.store(false);
         activeValidIdMin_.store(detectCfg_.validIdMin);
         activeValidIdMax_.store(detectCfg_.validIdMax);
-        std::cout << "ArucoHandler: Detection → DICT_4X4_50 (IDs "
+        std::cout << "ArucoHandler: Detection → default (DICT_4X4_1000, IDs "
                   << detectCfg_.validIdMin << "–" << detectCfg_.validIdMax << ")\n";
     }
 }

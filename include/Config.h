@@ -23,6 +23,11 @@
 // !!!   MODIFY VALUES IN CONFIG.YAML   !!!
 // !!!   MODIFY VALUES IN CONFIG.YAML   !!!
 // ========================================
+//
+// The in-struct defaults below are FALLBACKS used only when config.yaml (or an
+// individual key) is missing. They are kept in sync with config.yaml so a
+// missing file cannot silently change board geometry or controller limits.
+// Last synced: 2026-07-03.
 
 
 #include <array>
@@ -72,7 +77,7 @@ struct CameraConfig {
 struct ArucoMarkerConfig {
     float markerSizeMm = 20.0f;  // Physical side length of ring markers [mm]
     int validIdMin = 0;          // Ignore detected IDs below this
-    int validIdMax = 45;         // Ignore detected IDs above this
+    int validIdMax = 200;        // Ignore detected IDs above this
 };
 
 // ---- ArUco Detector Algorithm Parameters ------------------------------------
@@ -83,23 +88,23 @@ struct ArucoDetectorConfig {
     // Adaptive thresholding - converts the grayscale frame to binary before
     // searching for marker borders. Larger window sizes catch markers that are
     // farther from the camera; smaller windows are faster.
-    double adaptiveThreshConstant = 7.0;  // Added to the mean in the threshold formula
-    int adaptiveThreshWinSizeMin = 3;     // Smallest window size [px]
-    int adaptiveThreshWinSizeMax = 53;    // Largest window size [px]
-    int adaptiveThreshWinSizeStep = 4;    // Step between window sizes [px]
+    double adaptiveThreshConstant = 5.0;  // Added to the mean in the threshold formula
+    int adaptiveThreshWinSizeMin = 13;    // Smallest window size [px]
+    int adaptiveThreshWinSizeMax = 23;    // Largest window size [px]
+    int adaptiveThreshWinSizeStep = 10;   // Step between window sizes [px]
 
     // Marker geometry filters - reject detections that are too small, too large,
     // or have imprecise polygon fits.
-    double minMarkerPerimeterRate = 0.01;       // Minimum perimeter as fraction of frame perimeter
+    double minMarkerPerimeterRate = 0.05;       // Minimum perimeter as fraction of frame perimeter
     double maxMarkerPerimeterRate = 4.0;        // Maximum perimeter as fraction of frame perimeter
     double polygonalApproxAccuracyRate = 0.03;  // Corner approximation tolerance
-    double minCornerDistanceRate = 0.02;        // Minimum distance between corners (fraction of perimeter)
-    int minDistanceToBorder = 1;                // Minimum distance from marker to frame edge [px]
+    double minCornerDistanceRate = 0.05;        // Minimum distance between corners (fraction of perimeter)
+    int minDistanceToBorder = 3;                // Minimum distance from marker to frame edge [px]
 
     // Corner refinement - sub-pixel refinement improves 3D pose accuracy.
     // method: 0 = none, 1 = subpix (default), 2 = contour, 3 = AprilTag
     int cornerRefinementMethod = 1;
-    int cornerRefinementMaxIterations = 50;
+    int cornerRefinementMaxIterations = 30;
     double cornerRefinementMinAccuracy = 0.01;
 
     // Detect markers printed on reflective or glossy surfaces that invert the
@@ -121,7 +126,7 @@ struct ArucoDetectorConfig {
 
     // ArUco3 detection - improved algorithm that is faster and more robust for
     // small or distant markers. Requires OpenCV 4.6+.
-    bool useAruco3Detection = true;
+    bool useAruco3Detection = false;
 };
 
 // ---- ArUco Display (touchscreen grid - Fitts / study task) ------------------
@@ -129,10 +134,10 @@ struct ArucoDetectorConfig {
 // Spacing is auto-calculated to fill the usable area.
 
 struct ArucoDisplayConfig {
-    int cols = 4;                // Grid columns
-    int rows = 2;                // Grid rows
+    int cols = 9;                // Grid columns
+    int rows = 5;                // Grid rows
     float markerSizeMm = 20.0f;  // Marker side length [mm] - converted to px at render time
-    float paddingMm = 22.0f;     // Outer padding on all 4 sides [mm] - converted to px at render time
+    float paddingMm = 60.0f;     // Outer padding on all 4 sides [mm] - converted to px at render time
 };
 
 // ---- ArUco Calibration Grid (touchscreen grid - Cal2 / Cal3 solvePnP) -------
@@ -140,9 +145,9 @@ struct ArucoDisplayConfig {
 // between them inside the exclusion zone boundary. Uses DICT_4X4_250.
 
 struct ArucoCalibrationGridConfig {
-    float markerSizeMm     = 15.0f;  // Physical side length of each marker [mm]
-    float markerPadMm      = 15.0f;  // Gap between adjacent markers [mm]
-    float markerExclusionMm = 20.0f; // Minimum margin from screen edge to nearest marker [mm]
+    float markerSizeMm     = 8.0f;   // Physical side length of each marker [mm]
+    float markerPadMm      = 8.0f;   // Gap between adjacent markers [mm]
+    float markerExclusionMm = 80.0f; // Minimum margin from screen edge to nearest marker [mm]
 };
 
 // ---- Fitts Board (multi-scale touchscreen board - FITTS pointing task) ------
@@ -163,21 +168,21 @@ struct FittsBoardConfig {
     float fineFirstXMm     = 31.5f;   // Centre X of the first (top-left) fine marker [mm]
     float fineFirstYMm     = 36.23f;  // Centre Y of the first (top-left) fine marker [mm]
     int   fineRows         = 15;      // Number of fine-grid rows
-    int   fineCols         = 27;      // Number of fine-grid columns
+    int   fineCols         = 30;      // Number of fine-grid columns
     int   fineIdStart      = 1;       // First fine marker ID (0 reserved for "no target")
 
     // Coarse perimeter (subset A) - four explicit marker CENTRES in screen mm.
     // IDs follow the fine band: fineIdStart + fineRows*fineCols + (0..3).
     float coarseMarkerSizeMm = 56.0f;
     std::array<float, 4> coarseCenterXMm = {39.5f, 487.5f, 39.5f, 487.5f};
-    std::array<float, 4> coarseCenterYMm = {44.23f, 44.23f, 252.23f, 252.23f};
+    std::array<float, 4> coarseCenterYMm = {44.5f, 44.5f, 252.23f, 252.23f};
 
     // ---- Target selection (random Fitts target) -----------------------------
     // Exclude this many fine rows/cols around the grid border from random target
     // selection, so a chosen target always has neighbouring markers on all sides
     // for a stable board pose. Distance-stratified picking divides the reachable
     // distance range into this many bands, cycled for an even spread.
-    int selectBorderRows = 1;
+    int selectBorderRows = 2;
     int selectBorderCols = 1;
     int numDistanceBands = 5;
 
@@ -305,29 +310,29 @@ struct TouchscreenConfig {
 struct DisplayConfig {
     int width = 1600;
     int height = 1070;
-    int xPos = 0;  // Window X position on the desktop
-    int yPos = 0;  // Window Y position on the desktop
+    int xPos = 1830;  // Window X position on the desktop
+    int yPos = 0;     // Window Y position on the desktop
 };
 
 // ---- Telemetry Panel (below the operator display) ---------------------------
 
 struct TelemetryConfig {
     int width = 1600;
-    int height = 270;
-    int cols = 50;    // Number of grid columns (cell width = width / cols)
-    int rows = 6;     // Number of grid rows    (cell height = height / rows)
-    int xPos = 0;     // Window X position on the desktop
-    int yPos = 1100;  // Window Y position - set to approx. display height + title bar
+    int height = 256;
+    int cols = 47;    // Number of grid columns (cell width = width / cols)
+    int rows = 8;     // Number of grid rows    (cell height = height / rows)
+    int xPos = 1830;  // Window X position on the desktop
+    int yPos = 1200;  // Window Y position - set to approx. display height + title bar
 };
 
 // ---- Controller Panel (separate tall narrow panel for controller telemetry) -
 
 struct ControllerPanelConfig {
-    int width = 256;
-    int height = 1344;
-    int cols = 16;    // Number of grid columns (cell width = width / cols)
-    int rows = 42;    // Number of grid rows    (cell height = height / rows)
-    int xPos = 1570;  // Window X position on the desktop
+    int width = 450;
+    int height = 1350;
+    int cols = 15;    // Number of grid columns (cell width = width / cols)
+    int rows = 45;    // Number of grid rows    (cell height = height / rows)
+    int xPos = 1372;  // Window X position on the desktop
     int yPos = 0;     // Window Y position on the desktop
 };
 
@@ -335,14 +340,14 @@ struct ControllerPanelConfig {
 
 struct Cal3Config {
     double holdSecs     = 0.05;  // Required touch hold duration before recording [s]
-    double cooldownSecs = 2.0;   // Minimum gap between successive samples [s]
+    double cooldownSecs = 0.5;   // Minimum gap between successive samples [s]
     int    maxSamples   = 10;    // Total touches required to complete calibration
 };
 
 // ---- Calibration Stage 1: Finger Active Range of Motion (AROM) --------------
 
 struct Cal1Config {
-    double recordSecs = 10.0;  // Duration of the circle-tracing recording [s]
+    double recordSecs = 5.0;   // Duration of the circle-tracing recording [s]
 };
 
 // ---- Calibration Stage 2: Finger Deflection Stiffness -----------------------
@@ -350,7 +355,7 @@ struct Cal1Config {
 struct Cal2Config {
     float  forceRampRate   = 0.5f;  // Open-loop force ramp-up rate [N/s]
     double holdSecs        = 2.0;   // Hold duration at peak force per heading [s]
-    double releaseWaitSecs = 2.0;   // Wait after releasing before the next heading [s]
+    double releaseWaitSecs = 3.0;   // Wait after releasing before the next heading [s]
 };
 
 // ---- Gesture Detection (flick up/down, RobotState::READY only) -------------
@@ -361,14 +366,14 @@ struct GestureConfig {
     float  minDisplacementMm = 3.0f;   // Net |dy| required within maxWindowSecs to confirm [mm]
     double maxWindowSecs     = 0.25;   // Max time after arming to confirm displacement [s]
     double cooldownSecs      = 0.4;    // Min gap between raw flicks; also on-screen arrow duration [s]
-    double doubleFlickWindowSecs = 1.5; // Max time between two same-direction raw flicks for them to register as a single FLICK_UP/FLICK_DOWN [s]
+    double doubleFlickWindowSecs = 0.5; // Max time between two same-direction raw flicks for them to register as a single FLICK_UP/FLICK_DOWN [s]
 
     // ---- Confirm gesture (circle) + flick false-positive rejection ---------
-    float  restSpeedThreshMmS  = 15.0f;  // |vel_filtered_| below this counts as "at rest" [mm/s]
+    float  restSpeedThreshMmS  = 8.0f;   // |vel_filtered_| below this counts as "at rest" [mm/s]
     double flickMaxMotionSecs  = 0.3;    // Max continuous time spent moving (since last at rest) for a velocity spike to still count as a flick [s] - sustained motion (a circle) exceeds this and blocks flick arming
-    float  circleConfirmRad    = 5.236f; // Cumulative rotation to confirm a circle [rad] (~300 deg)
+    float  circleConfirmRad    = 4.19f;  // Cumulative rotation to confirm a circle [rad] (~300 deg)
     double circleMaxWindowSecs = 1.5;    // Rolling time window for rotation accumulation [s]
-    float  circleMinRadiusMm   = 5.0f;   // Min path radius from centroid - rejects jitter [mm]
+    float  circleMinRadiusMm   = 3.0f;   // Min path radius from centroid - rejects jitter [mm]
     float  circleMaxRadiusMm   = 50.0f;  // Max path radius from centroid - rejects large sweeps [mm]
     double circleCooldownSecs  = 0.6;    // Min gap between confirms; also on-screen indicator duration [s]
 };
@@ -377,7 +382,7 @@ struct GestureConfig {
 
 struct TargetConfig {
     float radiusMm        = 5.0f;   // Drawn target circle radius [mm]
-    float offsetDefaultMm = 40.0f;  // Gray circle Y offset below the tag before Cal3 completes [mm]
+    float offsetDefaultMm = 32.0f;  // Gray circle Y offset below the tag before Cal3 completes [mm]
 };
 
 // ---- Serial (Teensy) --------------------------------------------------------
@@ -390,29 +395,29 @@ struct SerialConfig {
 // ---- Controller (PID gains and solver parameters) ---------------------------
 
 struct ControllerConfig {
-    float gain_kP             = 1.0f;    // Proportional gain [N/mm]
+    float gain_kP             = 0.0f;    // Proportional gain [N/mm]
     float gain_kD             = 0.0f;    // Derivative gain [N·s/mm]
-    float gain_kI             = 0.0f;    // Integral gain [N/(mm·s)] - seeds the per-direction iGainTune
+    float gain_kI             = 0.02f;   // Integral gain [N/(mm·s)] - seeds the per-direction iGainTune
     // ---- Gated ("endgame") integrator -------------------------------------
     // The integrator only winds up when the finger is within
     // integral_enable_radius_mm of the target AND slower than
     // integral_enable_speed_mm_s (the final settling phase, where a constant
     // bias such as gravity/friction shows up). Outside that window the
     // integral decays by integral_leak each frame to bleed stale windup.
-    float integral_enable_radius_mm  = 30.0f;  // Wind up only within this error radius [mm]
-    int   integral_z_based           = 0;      // 0 = in-plane (X/Y) radius; 1 = full 3D fingertip-to-target distance (includes Z depth)
-    float integral_enable_speed_mm_s = 40.0f;  // Wind up only below this finger speed [mm/s]
-    float integral_leak              = 0.97f;  // Per-frame decay of the integral while not winding up
-    float deflection_force_max = 5.0f;   // Maximum allowable guidance deflection force magnitude [N]
+    float integral_enable_radius_mm  = 100.0f; // Wind up only within this error radius [mm]
+    int   integral_z_based           = 1;      // 0 = in-plane (X/Y) radius; 1 = full 3D fingertip-to-target distance (includes Z depth)
+    float integral_enable_speed_mm_s = 60.0f;  // Wind up only below this finger speed [mm/s]
+    float integral_leak              = 0.92f;  // Per-frame decay of the integral while not winding up
+    float deflection_force_max = 20.0f;  // Maximum allowable guidance deflection force magnitude [N]
     float tension_preload_min   = 0.1f;  // T_preload_min: minimum preload tension per motor [N]
     float tension_preload_max   = 2.0f;  // T_preload_max: maximum preload tension per motor [N]
-    float tension_deflection_max = 1.0f; // T_deflection_max: max per-motor tension contribution from the guidance/deflection force [N]
-    float tension_output_max    = 3.0f;  // T_output_max: max total commanded tension per motor (T_preload + T_deflection) [N]
+    float tension_deflection_max = 6.0f; // T_deflection_max: max per-motor tension contribution from the guidance/deflection force [N]
+    float tension_output_max    = 6.0f;  // T_output_max: max total commanded tension per motor (T_preload + T_deflection) [N]
     float position_tolerance  = 1.0f;    // Deadband radius - no force inside [mm]
     float lowpass_alpha       = 0.15f;   // Velocity low-pass coefficient (0=heavy, 1=none)
-    int   ramp_type           = 1;      // 0=no ramp, 1=startup (time) ramp, 2=distance ramp
-    float ramp_duration_secs  = 1.0f;   // Startup-ramp (ramp_type 1) duration after new target [s]
-    float initial_ramp_percentage = 0.2f; // Distance-ramp (ramp_type 2): fraction of the starting
+    int   ramp_type           = 2;      // 0=no ramp, 1=startup (time) ramp, 2=distance ramp
+    float ramp_duration_secs  = 5.0f;   // Startup-ramp (ramp_type 1) duration after new target [s]
+    float initial_ramp_percentage = 0.5f; // Distance-ramp (ramp_type 2): fraction of the starting
                                           // fingertip-to-target depth that must be closed before
                                           // guidance reaches full power (e.g. 0.2 = first 20%)
     float max_current_amps    = 1.89f;   // Amplifier max current [A]

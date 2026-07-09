@@ -21,6 +21,9 @@ void FittsTaskHandler::Reset() {
     sampleValid_ = false;
     errorLine1_.clear();
     errorLine2_.clear();
+    frameHValid_ = false;
+    framePoseValid_ = false;
+    frameRollValid_ = false;
 }
 
 void FittsTaskHandler::OnNewTarget( int targetId ) {
@@ -32,61 +35,46 @@ void FittsTaskHandler::OnNewTarget( int targetId ) {
 }
 
 // =============================================================================
-// Private - unified multi-scale solvePnP over the Fitts board
+// PrepareFrame - the ONE place per camera frame where the board fits happen
 //
-// Every marker (coarse or fine) lives on the same screen plane, so a single
-// solvePnP over whatever is currently visible recovers the camera pose. Far
-// away only the coarse markers contribute; up close only the fine ones; in the
-// overlap band both do, naturally weighted by corner count - so the near/far
-// handoff is automatic, with no explicit blending. Each marker's object points
-// are built from its own rendered extent (FittsBoardLayout), so the two marker
-// sizes stay metrically consistent.
+// Every marker (coarse or fine) lives on the same screen plane. Two fits are
+// computed over the same board(mm) <-> image(px) corner correspondences:
+//
+//   1. A homography (findHomography, RANSAC). The board is planar, so the
+//      board-plane -> image mapping is exactly a homography: a single, unique
+//      2D->2D map with none of solvePnP's planar two-fold pose ambiguity.
+//      Used for the guidance target estimate (EstimateTargetFromBoard).
+//
+//   2. A solvePnP ITERATIVE camera pose. Used only for the virtual fingertip
+//      cursor and the logged board->camera quaternion - never for guidance
+//      depth (see the depth discussion in EstimateTargetFromBoard).
+//
+// Far away only the coarse markers contribute; up close only the fine ones;
+// in the overlap band both do, naturally weighted by corner count - so the
+// near/far handoff is automatic, with no explicit blending. Each marker's
+// object points are built from its own rendered extent (FittsBoardLayout), so
+// the two marker sizes stay metrically consistent.
+//
+// Also caches the circular-mean image roll of the visible board markers (all
+// coplanar and axis-aligned, so each measures the same camera roll).
 // =============================================================================
 
-bool FittsTaskHandler::ComputeArucoPose( const std::vector<DetectedMarker>& markers,
-                                         cv::Vec3d& rvecOut, cv::Vec3d& tvecOut ) const {
-    std::vector<cv::Point3f> objPts;
-    std::vector<cv::Point2f> imgPts;
-
-    for ( const auto& m : markers ) {
-        const FittsMarker* fm = layout_.Find( m.id );
-        if ( !fm ) continue;
-        const float ox = fm->xPx * touchCfg_.mmPerPixel;
-        const float oy = fm->yPx * touchCfg_.mmPerPixel;
-        const float sz = fm->sizePx * touchCfg_.mmPerPixel;
-        objPts.push_back( { ox, oy, 0.f } );
-        objPts.push_back( { ox + sz, oy, 0.f } );
-        objPts.push_back( { ox + sz, oy + sz, 0.f } );
-        objPts.push_back( { ox, oy + sz, 0.f } );
-        for ( int k = 0; k < 4; k++ )
-            imgPts.push_back( { m.cornersPx[k].x, m.cornersPx[k].y } );
-    }
-
-    if ( static_cast<int>( objPts.size() ) < 4 ) return false;
-
-    return cv::solvePnP( objPts, imgPts, camCfg_.cameraMatrix, camCfg_.distCoeffs,
-                         rvecOut, tvecOut, false, cv::SOLVEPNP_ITERATIVE );
-}
-
-bool FittsTaskHandler::EstimateTargetFromBoard( const std::vector<DetectedMarker>& markers,
-                                                int                                targetId,
-                                                cv::Point3f& posOut, float& rollOut,
-                                                std::array<cv::Point2f, 4>* cornersPxOut ) const {
-    const FittsMarker* fm = layout_.Find( targetId );
-    if ( !fm ) return false;
+void FittsTaskHandler::PrepareFrame( const std::vector<DetectedMarker>& markers ) {
+    frameHValid_    = false;
+    framePoseValid_ = false;
+    frameRollValid_ = false;
 
     const float mmpp = touchCfg_.mmPerPixel;
 
-    // Build board(mm) <-> image(px) correspondences from every visible board
-    // marker, then fit a homography. The whole board is planar, so the mapping
-    // from board-plane coordinates to the image is exactly a homography. Unlike
-    // solvePnP on a planar target - which has a two-fold pose ambiguity that
-    // flips between two tilted solutions every frame when the perspective is
-    // weak (i.e. far away), throwing the projection all over the screen - a
-    // homography is a single, unique 2D->2D map, so the estimate is stable.
-    std::vector<cv::Point2f> srcMm, dstPx;
+    std::vector<cv::Point2f> srcMm, dstPx;      // homography correspondences
+    std::vector<cv::Point3f> objPts;            // solvePnP correspondences (z = 0)
     srcMm.reserve( markers.size() * 4 );
     dstPx.reserve( markers.size() * 4 );
+    objPts.reserve( markers.size() * 4 );
+
+    float sumSin = 0.f, sumCos = 0.f;
+    int   nRoll = 0;
+
     for ( const auto& m : markers ) {
         const FittsMarker* v = layout_.Find( m.id );
         if ( !v ) continue;
@@ -96,12 +84,45 @@ bool FittsTaskHandler::EstimateTargetFromBoard( const std::vector<DetectedMarker
         srcMm.push_back( { x1, y0 } );
         srcMm.push_back( { x1, y1 } );
         srcMm.push_back( { x0, y1 } );
+        objPts.push_back( { x0, y0, 0.f } );
+        objPts.push_back( { x1, y0, 0.f } );
+        objPts.push_back( { x1, y1, 0.f } );
+        objPts.push_back( { x0, y1, 0.f } );
         for ( int k = 0; k < 4; k++ ) dstPx.push_back( m.cornersPx[k] );
+
+        sumSin += std::sin( m.rollRad );
+        sumCos += std::cos( m.rollRad );
+        nRoll++;
     }
-    if ( srcMm.size() < 4 ) return false;
+
+    if ( nRoll > 0 ) {
+        frameRoll_ = std::atan2( sumSin, sumCos );
+        frameRollValid_ = true;
+    }
+
+    if ( srcMm.size() < 4 ) return;
 
     cv::Mat H = cv::findHomography( srcMm, dstPx, cv::RANSAC, 3.0 );
-    if ( H.empty() ) return false;
+    if ( !H.empty() ) {
+        frameH_ = H;
+        frameHValid_ = true;
+    }
+
+    framePoseValid_ = cv::solvePnP( objPts, dstPx, camCfg_.cameraMatrix, camCfg_.distCoeffs,
+                                    frameRvec_, frameTvec_, false, cv::SOLVEPNP_ITERATIVE );
+}
+
+bool FittsTaskHandler::EstimateTargetFromBoard( int targetId,
+                                                cv::Point3f& posOut, float& rollOut,
+                                                std::array<cv::Point2f, 4>* cornersPxOut ) const {
+    const FittsMarker* fm = layout_.Find( targetId );
+    if ( !fm ) return false;
+
+    // Homography fit is shared per-frame state - see PrepareFrame().
+    if ( !frameHValid_ ) return false;
+    const cv::Mat& H = frameH_;
+
+    const float mmpp = touchCfg_.mmPerPixel;
 
     // Map the target marker's corners + centre (board mm) into the image (px).
     const float              tx0 = fm->xPx * mmpp, ty0 = fm->yPx * mmpp;
@@ -182,32 +203,24 @@ bool FittsTaskHandler::EstimateTargetFromBoard( const std::vector<DetectedMarker
     // projected target scale, never tilt, so it changes continuously as markers
     // enter/leave the FOV and guidance stays stable. Trade-off: it over-reads
     // slightly under oblique viewing, but this board is viewed near face-on and
-    // stability beats a small static bias. (ComputeArucoPose is still used for the
-    // logged board orientation in GetTargetFullPose, just not for depth here.)
+    // stability beats a small static bias. (The cached solvePnP pose is still
+    // used for the logged board orientation in GetTargetFullPose and the
+    // fingertip cursor in Update, just not for depth here.)
     const double depth = apparentDepth;
 
     // Camera-relative target position = the ambiguity-free homography image ray
-    // (centre px) scaled to the solvePnP depth (Y-up, to match
-    // DetectedMarker::positionMm). Correcting the depth also corrects X/Y, which
-    // scale with it.
+    // (centre px) scaled to the apparent-size depth (Y-up, to match
+    // DetectedMarker::positionMm).
     const double X = ( centerPx.x - camCfg_.cx ) / camCfg_.fx * depth;
     const double Y = ( centerPx.y - camCfg_.cy ) / camCfg_.fy * depth;
     posOut = cv::Point3f( static_cast<float>( X ),
                           static_cast<float>( -Y ),
                           static_cast<float>( depth ) );
 
-    // Camera roll = circular mean of every visible board marker's image roll
-    // (all coplanar and axis-aligned, so each measures the same camera roll).
-    float sumSin = 0.f, sumCos = 0.f;
-    int   nr = 0;
-    for ( const auto& m : markers ) {
-        if ( layout_.Find( m.id ) ) {
-            sumSin += std::sin( m.rollRad );
-            sumCos += std::cos( m.rollRad );
-            nr++;
-        }
-    }
-    rollOut = ( nr > 0 ) ? std::atan2( sumSin, sumCos ) : 0.f;
+    // Camera roll = circular mean of every visible board marker's image roll,
+    // cached by PrepareFrame() (all coplanar and axis-aligned, so each
+    // measures the same camera roll).
+    rollOut = frameRollValid_ ? frameRoll_ : 0.f;
     return true;
 }
 
@@ -228,21 +241,18 @@ bool FittsTaskHandler::GetTargetFullPose( const std::vector<DetectedMarker>& mar
         }
 
     // --- Target position (camera frame, Y-up) -------------------------------
-    // EstimateTargetFromBoard now returns the tilt-aware solvePnP depth (with the
-    // ambiguity-free homography image ray), so posMmOut - and the displacement
-    // below - are already on the accurate depth shared with guidance and the
-    // operator display. Nothing depth-related to correct here.
+    // From the per-frame homography cache (PrepareFrame) - the same estimate
+    // guidance uses, so the logged trajectory and the guidance signal agree.
     float rollRad = 0.0f;
-    if ( !EstimateTargetFromBoard( markers, targetId, posMmOut, rollRad ) ) return false;
+    if ( !EstimateTargetFromBoard( targetId, posMmOut, rollRad ) ) return false;
 
     // --- Board orientation for the logged quaternion -------------------------
-    // Same solvePnP pose; report identity if it doesn't solve (too few markers /
-    // far-range ambiguity). The position above is unaffected by this.
-    cv::Vec3d  rvec, tvec;
+    // The cached solvePnP pose; report identity if it didn't solve this frame
+    // (too few markers / far-range ambiguity). The position is unaffected.
     cv::Mat    R;
-    const bool havePose = ComputeArucoPose( markers, rvec, tvec ) && tvec[2] > 1e-6;
+    const bool havePose = framePoseValid_ && frameTvec_[2] > 1e-6;
     if ( havePose )
-        cv::Rodrigues( rvec, R );
+        cv::Rodrigues( frameRvec_, R );
 
     // --- Fingertip-compensated displacement Δp = target - fingertip ----------
     // Uses the FULL 3D Cal3 offset (incl. its Z standoff), so dz -> 0 when the
@@ -308,18 +318,6 @@ bool FittsTaskHandler::GetTargetFullPose( const std::vector<DetectedMarker>& mar
     return true;
 }
 
-cv::Point2f FittsTaskHandler::TargetCenterPx( const cv::Vec3d& rvec, const cv::Vec3d& tvec ) const {
-    const FittsMarker* fm = layout_.Find( targetId_ );
-    if ( !fm ) return {};
-    const float cx = ( fm->xPx + fm->sizePx * 0.5f ) * touchCfg_.mmPerPixel;
-    const float cy = ( fm->yPx + fm->sizePx * 0.5f ) * touchCfg_.mmPerPixel;
-
-    std::vector<cv::Point3f> pts3d = { cv::Point3f( cx, cy, 0.f ) };
-    std::vector<cv::Point2f> pts2d;
-    cv::projectPoints( pts3d, rvec, tvec, camCfg_.cameraMatrix, camCfg_.distCoeffs, pts2d );
-    return pts2d[0];
-}
-
 cv::Point2i FittsTaskHandler::VirtualFingertipPx( const cv::Vec3d& rvec, const cv::Vec3d& tvec,
                                                   cv::Point3f d, float rollRefRad ) const {
     // Roll-corrected XY offset (negated: rvec[2]'s rotation sense is opposite
@@ -343,17 +341,16 @@ cv::Point2i FittsTaskHandler::VirtualFingertipPx( const cv::Vec3d& rvec, const c
 // Update - called once per main loop iteration while in FITTS state
 // =============================================================================
 
-void FittsTaskHandler::Update( const std::vector<DetectedMarker>& markers,
-                               const TouchState&                  touch,
+void FittsTaskHandler::Update( const TouchState&                  touch,
                                bool                               cal3Complete,
                                cv::Point3f                        cal3Offset,
                                float                              cal3RollRef ) {
-    cv::Vec3d rvec, tvec;
-    bool      havePose = ComputeArucoPose( markers, rvec, tvec ) && tvec[2] > 1e-6;
+    // Board pose comes from the per-frame cache - see PrepareFrame().
+    const bool havePose = framePoseValid_ && frameTvec_[2] > 1e-6;
 
     // Live virtual fingertip cursor - updates every frame
     if ( havePose && cal3Complete ) {
-        ftPx_ = VirtualFingertipPx( rvec, tvec, cal3Offset, cal3RollRef );
+        ftPx_ = VirtualFingertipPx( frameRvec_, frameTvec_, cal3Offset, cal3RollRef );
         ftValid_ = true;
     } else {
         ftValid_ = false;

@@ -6,15 +6,19 @@
 // Runs capture on a dedicated background thread so the main loop never blocks
 // waiting for a new frame. Each iteration the camera thread:
 //   1. grab()   - blocks until the camera delivers a new frame at its native rate
+//                 (the capture timestamp is taken here, before any processing)
 //   2. retrieve() - decodes the MJPEG frame
-//   3. GPU: undistort (remap) + convert to grayscale
-//   4. CPU CLAHE: local contrast enhancement for better ArUco detection
-//   5. Publishes the result into a mutex-protected latestFrame slot
+//   3. GPU: undistort (remap) + convert to grayscale + CLAHE contrast enhancement
+//   4. Publishes the result into a mutex-protected latestFrame slot and
+//      notifies WaitForFrame() waiters
 //
-// The main loop calls getLatestFrame() which copies the slot non-blockingly.
+// The main loop calls WaitForFrame() to sleep until a new frame is published
+// (bounded by a timeout so it still services keys/serial), then
+// getLatestFrame() to copy the slot non-blockingly.
 // =============================================================================
 
 #include <atomic>
+#include <condition_variable>
 #include <mutex>
 #include <thread>
 
@@ -64,6 +68,17 @@ public:
      */
     CameraFrame getLatestFrame();
 
+    /**
+     * @brief Block until a frame newer than lastTimestamp is published, or the
+     *        timeout elapses. Returns true if a new frame is available. This is
+     *        the main loop's pacing primitive - it replaces the former busy-spin
+     *        (the loop previously re-polled getLatestFrame() at unbounded rate,
+     *        burning a core and starving the detection thread).
+     * @param lastTimestamp  Timestamp of the frame the caller has already seen
+     * @param timeoutMs      Upper bound on the wait [ms]
+     */
+    bool WaitForFrame(double lastTimestamp, int timeoutMs);
+
 private:
     void captureLoop();       // Runs on captureThread_
     void openCamera();        // Open VideoCapture and apply all hardware settings
@@ -74,13 +89,15 @@ private:
     cv::VideoCapture camera_;
 
     // GPU pipeline resources (allocated once, reused every frame)
-    cv::cuda::GpuMat gpuRaw_, gpuUndistorted_, gpuGray_;
+    cv::cuda::GpuMat gpuRaw_, gpuUndistorted_, gpuGray_, gpuGrayEq_;
     cv::cuda::GpuMat gpuRemap1_, gpuRemap2_;
     cv::Mat          cpuRemap1_, cpuRemap2_;   // Source for the GPU remap tables
 
-    // Thread-shared frame slot - protected by frameMutex_
-    std::mutex  frameMutex_;
-    CameraFrame latestFrame_;
+    // Thread-shared frame slot - protected by frameMutex_. frameCv_ is
+    // notified on every publish so WaitForFrame() wakes immediately.
+    std::mutex              frameMutex_;
+    std::condition_variable frameCv_;
+    CameraFrame             latestFrame_;
 
     // Thread lifecycle
     std::thread       captureThread_;

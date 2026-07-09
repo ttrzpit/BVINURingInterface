@@ -41,15 +41,29 @@ public:
     void OnNewTarget(int targetId);
 
     /**
-     * @brief Process one loop iteration while in FITTS state.
-     * @param markers      Latest detections from ArucoHandler
+     * @brief Compute the shared per-frame board fits ONCE for this camera frame:
+     *        the board-plane homography (used by EstimateTargetFromBoard) and
+     *        the board solvePnP pose + circular-mean roll (used by Update and
+     *        GetTargetFullPose).
+     *
+     *        Call exactly once per NEW camera frame, before any of
+     *        EstimateTargetFromBoard() / Update() / GetTargetFullPose(). Those
+     *        methods only read the cache - they no longer re-run solvePnP /
+     *        findHomography themselves. (Previously the logging path re-solved
+     *        both up to twice more per frame on the main thread, which is what
+     *        caused the >25 ms main-loop stalls and dropped trial-log frames.)
+     */
+    void PrepareFrame(const std::vector<DetectedMarker>& markers);
+
+    /**
+     * @brief Process one loop iteration while in FITTS state. Uses the pose
+     *        cached by PrepareFrame() - call that first on each new frame.
      * @param touch        Latest touch state from TouchHandler
      * @param cal3Complete Whether Cal3 has finished (virtual fingertip available)
      * @param cal3Offset   Calibrated camera-to-fingertip offset [mm]
      * @param cal3RollRef  Calibration roll reference [rad]
      */
-    void Update(const std::vector<DetectedMarker>& markers,
-                const TouchState&                  touch,
+    void Update(const TouchState&                  touch,
                 bool                               cal3Complete,
                 cv::Point3f                        cal3Offset,
                 float                              cal3RollRef);
@@ -60,22 +74,20 @@ public:
 
     /**
      * @brief Estimate the active target's camera-relative position + roll from
-     *        the board pose (solvePnP over whatever markers are visible), for
-     *        guidance when the target's own marker is not directly detected -
-     *        far away (coarse markers carry it) or lost up close (neighbouring
-     *        fine markers carry it). The target's location on the board is known
-     *        from the layout, so its position is recoverable from any pose.
-     * @param markers   Latest detections
+     *        the board-plane homography cached by PrepareFrame(), for guidance
+     *        when the target's own marker is not directly detected - far away
+     *        (coarse markers carry it) or lost up close (neighbouring fine
+     *        markers carry it). The target's location on the board is known
+     *        from the layout, so its position is recoverable from any fit.
      * @param targetId  The active target marker ID
      * @param posOut    Camera-relative target position [mm], Y-up (matches
      *                  DetectedMarker::positionMm)
      * @param rollOut   Camera roll [rad] (circular mean of visible board markers)
      * @param cornersPxOut  Optional: the target marker's four corners projected
      *                  into the camera image (for drawing the estimated outline)
-     * @return false if the target is unknown or the board pose could not be solved
+     * @return false if the target is unknown or no homography was fit this frame
      */
-    bool EstimateTargetFromBoard(const std::vector<DetectedMarker>& markers,
-                                 int targetId,
+    bool EstimateTargetFromBoard(int targetId,
                                  cv::Point3f& posOut, float& rollOut,
                                  std::array<cv::Point2f, 4>* cornersPxOut = nullptr) const;
 
@@ -108,6 +120,8 @@ public:
                            bool cal3Complete, cv::Point3f cal3Offset, float cal3RollRef,
                            cv::Point3f& posMmOut, cv::Vec4f& quatXyzwOut,
                            cv::Point3f& dispMmOut, bool& detectedOut) const;
+    // (markers is still taken here only to set detectedOut - the position and
+    //  orientation come from the PrepareFrame() cache.)
 
     // ---- Touch sample (for ArucoHandler touchscreen overlay) ------------------
     bool               HasTouchSample() const { return sampleValid_; }
@@ -120,13 +134,6 @@ public:
     cv::Point2i GetTouchFingertipPx() const { return touchFtPx_; }
 
 private:
-    /** @brief Multi-tag solvePnP from the Fitts grid markers - current camera pose. */
-    bool ComputeArucoPose(const std::vector<DetectedMarker>& markers,
-                          cv::Vec3d& rvecOut, cv::Vec3d& tvecOut) const;
-
-    /** @brief World-space centre of the current target marker, projected to image px. */
-    cv::Point2f TargetCenterPx(const cv::Vec3d& rvec, const cv::Vec3d& tvec) const;
-
     /** @brief Virtual fingertip pixel position: principal point + roll-corrected offset / depth. */
     cv::Point2i VirtualFingertipPx(const cv::Vec3d& rvec, const cv::Vec3d& tvec,
                                    cv::Point3f d, float rollRefRad) const;
@@ -134,6 +141,20 @@ private:
     const TouchscreenConfig&  touchCfg_;
     const CameraConfig&       camCfg_;
     FittsBoardLayout          layout_;
+
+    // ---- Per-frame board-fit cache (set by PrepareFrame, read by the rest) ---
+    // frameH_: board(mm) -> image(px) homography over the RANSAC inliers of all
+    // visible board markers. framePose*: solvePnP ITERATIVE camera pose over the
+    // same correspondences (used for the fingertip cursor + logged quaternion,
+    // never for guidance depth - see EstimateTargetFromBoard). frameRoll_:
+    // circular-mean image roll of the visible board markers.
+    cv::Mat   frameH_;
+    bool      frameHValid_    = false;
+    cv::Vec3d frameRvec_      = {};
+    cv::Vec3d frameTvec_      = {};
+    bool      framePoseValid_ = false;
+    float     frameRoll_      = 0.0f;
+    bool      frameRollValid_ = false;
 
     int  targetId_   = 0;
     bool wasTouched_ = false;

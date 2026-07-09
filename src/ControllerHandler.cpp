@@ -373,16 +373,9 @@ void ControllerHandler::Update( const TeensyToPcPacket& rx,
         force_x_ = kPEffective_ * error.x - cfg_.gain_kD * vel_filtered_.x + kIEffective_ * integral_.x;
         force_y_ = kPEffective_ * error.y - cfg_.gain_kD * vel_filtered_.y + kIEffective_ * integral_.y;
 
-        // Bug #2 fix / item #9: the old code suppressed Fy entirely whenever
-        // |Fx| > 1.5*|Fy| (a +-34 degree dead band around the X axis):
-        //
-        //   if (std::abs(force_x_) > 1.5f * std::abs(force_y_)) {
-        //       force_y_ = 0.0f;
-        //   }
-        //
-        // Removed - the principled replacement is the K(theta) direction-
-        // dependent gain from stiffness calibration, combined with gainTune
-        // into kPEffective_ before this point.
+        // Bug #2 fix / item #9: the old code's Fy-suppression heuristic was
+        // removed here - K(theta) + gainTune (kPEffective_ above) is the
+        // principled direction-dependent replacement.
 
         // Ramp the force up after a new target is presented.
         force_x_ *= rampValue_;
@@ -482,12 +475,8 @@ ControllerTelemetry ControllerHandler::GetTelemetry() const {
     // T_deflection per motor (signed) - computed in Stage 2 (ComputeTensionOutputs).
     t.deflectionForce = { tension_deflection_A_, tension_deflection_B_, tension_deflection_C_ };
 
-    // T_output per motor - identical to `tension`/`pwm` (Stage 2 result).
-    t.outputTension = t.tension;
-    t.outputPwm = t.pwm;
-
     // PWM equivalent of |deflectionForce| via the same Tension->Current->PWM
-    // pipeline as preloadPwm/outputPwm. A PWM register value can never be
+    // pipeline as preloadPwm/pwm. A PWM register value can never be
     // negative, so this reports magnitude only - direction is conveyed by
     // deflectionForce's sign instead.
     t.deflectionForcePwm = { static_cast<float>( CurrentToPwm( TensionToCurrent( std::abs( t.deflectionForce.x ), r_eff_A_ ) ) ),

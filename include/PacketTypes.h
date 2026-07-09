@@ -22,15 +22,11 @@
 // Packet framing
 static constexpr uint8_t PACKET_START_BYTE = 0xAA;
 
-// State bytes sent from PC to Teensy
+// State bytes sent from PC to Teensy. Only IDLE and READY are used by the
+// current protocol (see main.cpp's RobotState ladder).
 namespace PcState {
-    static constexpr uint8_t IDLE        = 'I';
-    static constexpr uint8_t CALIBRATING = 'C';
-    static constexpr uint8_t CAL1        = '3';
-    static constexpr uint8_t CAL2        = '3';
-    static constexpr uint8_t CAL3        = '3';
-    static constexpr uint8_t FITTS       = 'F';
-    static constexpr uint8_t READY       = 'R';  ///< RobotState::READY/GUIDING - preload tension held
+    static constexpr uint8_t IDLE  = 'I';
+    static constexpr uint8_t READY = 'R';  ///< RobotState::READY/GUIDING - preload tension held
 }
 
 // ---- Robot state ladder -----------------------------------------------------

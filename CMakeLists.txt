@@ -27,8 +27,10 @@ include_directories(
 
 # ---- Source files ------------------------------------------------------------
 
-# Automatically picks up all .cpp files in src/ - add new handlers there
-file(GLOB SRC_FILES "src/*.cpp")
+# Automatically picks up all .cpp files in src/ - add new handlers there.
+# CONFIGURE_DEPENDS makes the build system re-glob on every build, so a newly
+# added .cpp is picked up by a plain `ninja` with no manual `cmake .` step.
+file(GLOB SRC_FILES CONFIGURE_DEPENDS "src/*.cpp")
 
 add_executable(BVINURingInterface main.cpp ${SRC_FILES})
 
