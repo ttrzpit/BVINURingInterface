@@ -46,6 +46,12 @@ bool Config::load(const std::string& filepath) {
         cam["rotate_180"] >> rot;
         camera.rotate180 = (rot != 0);
 
+        if (!cam["detect_on_clahe"].empty()) {
+            int doc = 1;
+            cam["detect_on_clahe"] >> doc;
+            camera.detectOnClahe = (doc != 0);
+        }
+
         cam["fx"] >> camera.fx;
         cam["fy"] >> camera.fy;
         cam["cx"] >> camera.cx;
@@ -103,6 +109,8 @@ bool Config::load(const std::string& filepath) {
         adet["corner_refinement_method"]        >> arucoDetector.cornerRefinementMethod;
         adet["corner_refinement_max_iterations"] >> arucoDetector.cornerRefinementMaxIterations;
         adet["corner_refinement_min_accuracy"]  >> arucoDetector.cornerRefinementMinAccuracy;
+        if (!adet["object_corner_refinement_method"].empty())
+            adet["object_corner_refinement_method"] >> arucoDetector.objectCornerRefinementMethod;
 
         int inv = 0;
         adet["detect_inverted_marker"] >> inv;
@@ -177,6 +185,15 @@ bool Config::load(const std::string& filepath) {
     if (!ow.empty()) {
         if (!ow["world_marker_size_mm"].empty())
             ow["world_marker_size_mm"] >> objectWorld.worldMarkerSizeMm;
+        if (!ow["show_known_layout"].empty()) {
+            int skl = 0;
+            ow["show_known_layout"] >> skl;
+            objectWorld.showKnownLayout = (skl != 0);
+        }
+        if (!ow["train_frames"].empty())
+            ow["train_frames"] >> objectWorld.trainFrames;
+        if (!ow["presence_scan_frames"].empty())
+            ow["presence_scan_frames"] >> objectWorld.presenceScanFrames;
         if (!ow["roll_offset_deg"].empty())
             ow["roll_offset_deg"] >> objectWorld.rollOffsetDeg;
 
@@ -188,6 +205,23 @@ bool Config::load(const std::string& filepath) {
                 cv::Point3f(static_cast<float>((double)e["x"]),
                             static_cast<float>((double)e["y"]),
                             static_cast<float>((double)e["z"]));
+        }
+
+        // Ring markers (live fingertip tracking on the moving hand).
+        cv::FileNode rm = ow["ring_markers"];
+        if (!rm.empty()) {
+            if (!rm["base_marker"].empty())
+                rm["base_marker"] >> objectWorld.ring.baseMarker;
+            if (!rm["second_marker"].empty())
+                rm["second_marker"] >> objectWorld.ring.secondMarker;
+            if (!rm["relationship_angle"].empty())
+                rm["relationship_angle"] >> objectWorld.ring.relationshipAngleDeg;
+            if (!rm["marker_size_mm"].empty())
+                rm["marker_size_mm"] >> objectWorld.ring.markerSizeMm;
+            if (!rm["fingertip_offset"].empty())
+                objectWorld.ring.fingertipOffsetMm = readPoint3f(rm["fingertip_offset"]);
+            if (!rm["arrow_yaw_trim_deg"].empty())
+                rm["arrow_yaw_trim_deg"] >> objectWorld.ring.arrowYawTrimDeg;
         }
 
         // Object marker IDs for the random ('r') selection.

@@ -278,8 +278,25 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
 
         case KeyAction::FINISH_OBJECT_SCAN:
             // Enter in OBJ_SCAN - main calls WorldObjectHandler::FinishScan()
-            // and reports how many objects were mapped.
+            // and reports how many objects were trained.
             state_.pendingFinishObjectScan = true;
+            break;
+
+        case KeyAction::TRAIN_OBJECTS:
+            // 't' in OBJECTS - main calls WorldObjectHandler::StartTraining()
+            // (burst-average the visible objects into locked world anchors).
+            state_.pendingTrainObjects = true;
+            break;
+
+        case KeyAction::UNTRAIN_OBJECTS:
+            // 'u' in OBJECTS - main calls WorldObjectHandler::UntrainAll().
+            state_.pendingUntrainObjects = true;
+            break;
+
+        case KeyAction::PROBE_CORNER_JITTER:
+            // 'D' in OBJECTS - main calls StartCornerJitterProbe(); results
+            // print to the terminal after ~300 detection frames.
+            state_.pendingCornerJitterProbe = true;
             break;
 
         case KeyAction::PRETENSION_ADVANCE:

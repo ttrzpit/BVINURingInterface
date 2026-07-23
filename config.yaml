@@ -30,9 +30,10 @@ aruco_detector:
    min_distance_to_border:         3         # 3      Minimum distance, in pixels, that every corner of a detected marker must be from the image border. Markers partially cut off by the frame edge (corners closer than this) are rejected, since their pose/ID cannot be reliably estimated.
 
    # Corner refinement improves 3D pose accuracy at a small speed cost.
-   corner_refinement_method:         1       # 1      Corner refinement. NOTE: no longer applied to ALL detected markers (refining 450+ markers/frame on the dense Fitts board caused the mid-range detector lag). Now applied ONLY to the active guidance target, in RunDetection(). 1 = subpixel (cv::cornerSubPix) refines the target; 0 = no target refinement (fastest); 2/3 (contour/AprilTag) aren't reproducible per-marker so the target is left unrefined. All other markers use the raw detectMarkers() corners, which the board homography averages over by least squares anyway.
+   corner_refinement_method:         2       # 1      Corner refinement. NOTE: no longer applied to ALL detected markers (refining 450+ markers/frame on the dense Fitts board caused the mid-range detector lag). Now applied ONLY to the active guidance target, in RunDetection(). 1 = subpixel (cv::cornerSubPix) refines the target; 0 = no target refinement (fastest); 2/3 (contour/AprilTag) aren't reproducible per-marker so the target is left unrefined. All other markers use the raw detectMarkers() corners, which the board homography averages over by least squares anyway.
    corner_refinement_max_iterations: 30      # 30     Maximum number of iterations the corner refinement algorithm (set by corner_refinement_method) runs per marker. More iterations can improve accuracy slightly but increase per-marker processing time; refinement stops early if corner_refinement_min_accuracy is reached first.
    corner_refinement_min_accuracy:   0.01    # 0.01   Convergence threshold (in pixels) for corner refinement: refinement stops once corner positions change by less than this between iterations, or corner_refinement_max_iterations is reached, whichever comes first. Smaller values demand tighter convergence (slower, more precise).
+   object_corner_refinement_method:  2       # 2      Detector-level corner refinement for OBJECTS mode ONLY (the DICT_6X6_100 detector). Unlike the dense Fitts board, the OBJECTS scene holds <=~20 markers, so refining every marker inside detectMarkers() is cheap. 2 = contour (fits lines to the FULL marker edges - hundreds of gradient samples each - and intersects them; far more stable corners than an 11x11 subpixel patch, recommended); 3 = AprilTag (most accurate in benchmarks, slower - watch the detection Hz readout); 1 = subpixel; 0 = none. Compare settings with the 'D' corner-jitter probe.
 
    # Detect markers on glossy/reflective surfaces that invert the black/white pattern.
    detect_inverted_marker: 0                 # 0      When enabled (1), also searches for markers printed with inverted polarity (white pattern on black background), in addition to the normal black-on-white markers. Useful for markers viewed on a backlit screen or a reflective/glossy surface where contrast can invert. Roughly doubles detection cost when on.
@@ -74,6 +75,12 @@ camera:
    height: 1200   # 1200
    framerate: 90
    rotate_180: 0          # 1 = flip camera image 180 degrees (upside-down mount)
+   detect_on_clahe: 1     # 1 = run ArUco detection on the CLAHE-equalized gray (current
+                          #     behaviour); 0 = detect on the plain gray. CLAHE is
+                          #     content-adaptive: frame-to-frame noise changes each tile's
+                          #     contrast mapping, which MOVES marker edges slightly and adds
+                          #     corner jitter. On a well-lit board try 0 and compare with the
+                          #     'D' corner-jitter probe.
 
    # Intrinsic parameters from camera calibration (high-resolution mode)
    fx: 600.98172          # Horizontal focal length [px]
@@ -85,20 +92,20 @@ camera:
    distortion: [ 0.01561, -0.03298, 0.00020, 0.00136, 0.00561 ]
 
    # Hardware settings (tuned for indoor ArUco detection)
-   brightness: 0
-   contrast: 0
-   saturation: 32
-   hue: 0
-   auto_white_balance: 0
-   gamma: 120
-   gain: 18
-   sharpness: 0
-   backlight: 0
-   auto_exposure: 1       # 1 = manual, 3 = aperture priority
-   exposure_level: 32
-   auto_focus: 0
-   focus_level: 0
-   zoom: 0
+   brightness:          0     # 0   
+   contrast:            0     # 0   
+   saturation:          32    # 32 
+   hue:                 0     # 0
+   auto_white_balance:  0     # 0 
+   gamma:               120   # 120   
+   gain:                18    # 18
+   sharpness:           0     # 0
+   backlight:           0     # 0
+   auto_exposure:       1     # 1 = manual, 3 = aperture priority
+   exposure_level:      48    # 48
+   auto_focus:          0     # 0
+   focus_level:         0     # 0
+   zoom:                0     # 0
 
 
 # ---- Operator Display (main monitor) ----------------------------------------
@@ -218,24 +225,48 @@ accuracy_trials:
 
 
 # === Object-Guidance World (OBJECTS mode, 'O') =================================
-# A physical ArUco "world board" (marker_positions, ids 1-36) establishes a rig
-# world frame, and a set of physical objects (target_objects, ids 50-90), each
-# tagged by an ArUco marker, are guided to. ALL markers here use DICT_6X6_100 -
-# a different dictionary from the Fitts/Cal DICT_4X4_* grids, so OBJECTS mode
-# swaps the detector. Ported from the ~/Code/ArUcoTest prototype.
+# A physical ArUco "world board" (marker_positions, ids 1-45) establishes a rig
+# world frame, a set of physical objects (target_objects, ids 60-72), each
+# tagged by an ArUco marker, are guided to, and two ring markers (ring_markers,
+# ids 73/74) on the hand track the fingertip live. ALL markers here use
+# DICT_6X6_100 - a different dictionary from the Fitts/Cal DICT_4X4_* grids, so
+# OBJECTS mode swaps the detector. Ported from the ~/Code/ArUcoTest prototype.
 #
 # Frame (marker's own frame, mm): origin = marker centre, +X right, +Y up,
 #   +Z out of the marker face (toward the camera). Object body extends toward -Z.
 #
-# World board frame (marker_positions): two perpendicular planes meeting on the
-#   X axis - z = 0 "wall" markers span X/Y; y = 0 "floor" markers span X/Z.
+# World board frame (marker_positions): a single GROUND PLANE at y = 0 spanning
+#   X/Z (world +Y = up). The old second "wall" plane (z = 0, spanning X/Y) has
+#   been removed; wall entries (y != 0) are still parsed if ever re-added.
 object_world:
 
    # Physical side length of the WORLD board markers [mm]. Used (with the marker
    # centres below) to derive each marker's 4 corner positions in the world frame
    # for the corner-based world PnP - which is what lets a SINGLE visible world
    # marker localise the world (the old centre-based solve needed >= 4).
-   world_marker_size_mm: 100.0
+   world_marker_size_mm: 64.0
+
+   # Draw the known-layout reprojection: once a world pose is solved, EVERY
+   # configured world marker's expected outline is reprojected into the operator
+   # view (dark blue). Squares that miss the printed markers reveal a wrong
+   # marker size / position / mounting convention at a glance. Diagnostic -
+   # leave 0 for normal runs.
+   show_known_layout: 0
+
+   # Number of detection frames averaged by a 't' training burst. Objects are
+   # mapped into the world frame ONLY by training ('t'): each burst frame with
+   # a valid world pose contributes one marker->world sample per visible object;
+   # translation is averaged and rotation SVD-orthonormalized into a locked
+   # anchor, so a trained object holds a low-noise pose off the world board
+   # alone. ~20 frames is about 0.25 s - hold the camera steady during a burst.
+   train_frames: 60
+
+   # Detection frames of the 'r' presence re-scan. Pressing 'r' first re-checks
+   # which TRAINED object markers are actually still visible for this many
+   # frames (an object counts as present when its marker is seen on at least a
+   # few of them); only present objects stay in the random pool, so a
+   # physically removed object is never selected again. ~30 frames is ~0.4 s.
+   presence_scan_frames: 30
 
    # Roll trim [deg] for orienting the Cal3 fingertip offset in OBJECTS mode.
    # LEGACY FALLBACK ONLY: used when no rig alignment has been captured (no
@@ -255,46 +286,84 @@ object_world:
    # steady, sub-mm pose; several-mm errors reintroduce jitter and a constant
    # target offset. Measure them as precisely as possible (ideally from the
    # board's design/print layout).
-   # MOUNTING CONVENTION (assumed by the corner-based pose): wall markers (z = 0)
-   # are upright - printed top edge along world +Y; floor markers (y = 0) lie
-   # with their printed top edge toward the wall, i.e. along world -Z.
+   # MOUNTING CONVENTION (assumed by the corner-based pose): ground-plane
+   # markers (y = 0) lie face-up with their printed top edge toward the z = 0
+   # row (ids 1-9), i.e. along world -Z. (Legacy wall markers, y != 0, would be
+   # upright with the printed top edge along world +Y.)
    marker_positions:
-      - { id: 1,  x: -365.0, y: 357.5, z:   0.0 }
-      - { id: 2,  x: -225.5, y: 345.0, z:   0.0 }
-      - { id: 3,  x:  -66.0, y: 352.5, z:   0.0 }
-      - { id: 4,  x:   73.5, y: 355.0, z:   0.0 }
-      - { id: 5,  x:  218.0, y: 347.5, z:   0.0 }
-      - { id: 6,  x:  372.5, y: 350.0, z:   0.0 }
-      - { id: 7,  x: -370.0, y: 215.0, z:   0.0 }
-      - { id: 8,  x: -215.5, y: 217.5, z:   0.0 }
-      - { id: 9,  x:  -73.5, y: 225.0, z:   0.0 }
-      - { id: 10, x:   68.5, y: 227.5, z:   0.0 }
-      - { id: 11, x:  228.0, y: 220.0, z:   0.0 }
-      - { id: 12, x:  370.0, y: 222.5, z:   0.0 }
-      - { id: 13, x: -360.0, y:  87.5, z:   0.0 }
-      - { id: 14, x: -220.5, y:  90.0, z:   0.0 }
-      - { id: 15, x:  -76.0, y:  97.5, z:   0.0 }
-      - { id: 16, x:   78.5, y:  85.0, z:   0.0 }
-      - { id: 17, x:  215.5, y:  92.5, z:   0.0 }
-      - { id: 18, x:  370.0, y:  95.0, z:   0.0 }
-      - { id: 19, x: -367.5, y:   0.0, z:  90.0 }
-      - { id: 20, x: -225.5, y:   0.0, z:  87.5 }
-      - { id: 21, x:  -68.5, y:   0.0, z:  95.0 }
-      - { id: 22, x:   76.0, y:   0.0, z:  92.5 }
-      - { id: 23, x:  228.0, y:   0.0, z:  85.0 }
-      - { id: 24, x:  365.0, y:   0.0, z:  82.5 }
-      - { id: 25, x: -362.5, y:   0.0, z: 217.5 }
-      - { id: 26, x: -218.0, y:   0.0, z: 215.0 }
-      - { id: 27, x:  -78.5, y:   0.0, z: 225.0 }
-      - { id: 28, x:   81.0, y:   0.0, z: 220.0 }
-      - { id: 29, x:  220.5, y:   0.0, z: 212.5 }
-      - { id: 30, x:  365.0, y:   0.0, z: 225.0 }
-      - { id: 31, x: -372.5, y:   0.0, z: 345.0 }
-      - { id: 32, x: -213.0, y:   0.0, z: 342.5 }
-      - { id: 33, x:  -71.0, y:   0.0, z: 350.0 }
-      - { id: 34, x:   71.0, y:   0.0, z: 347.5 }
-      - { id: 35, x:  225.5, y:   0.0, z: 355.0 }
-      - { id: 36, x:  367.5, y:   0.0, z: 352.5 }
+      - { id: 1, x: -350, y: 0, z: 0 }
+      - { id: 2, x: -262.5, y: 0, z: 0 }
+      - { id: 3, x: -175, y: 0, z: 0 }
+      - { id: 4, x: -87.5, y: 0, z: 0 }
+      - { id: 5, x: 0, y: 0, z: 0 }
+      - { id: 6, x: 87.5, y: 0, z: 0 }
+      - { id: 7, x: 175, y: 0, z: 0 }
+      - { id: 8, x: 262.5, y: 0, z: 0 }
+      - { id: 9, x: 350, y: 0, z: 0 }
+      - { id: 10, x: -350, y: 0, z: 87.5 }
+      - { id: 11, x: -262.5, y: 0, z: 87.5 }
+      - { id: 12, x: -175, y: 0, z: 87.5 }
+      - { id: 13, x: -87.5, y: 0, z: 87.5 }
+      - { id: 14, x: 0, y: 0, z: 87.5 }
+      - { id: 15, x: 87.5, y: 0, z: 87.5 }
+      - { id: 16, x: 175, y: 0, z: 87.5 }
+      - { id: 17, x: 262.5, y: 0, z: 87.5 }
+      - { id: 18, x: 350, y: 0, z: 87.5 }
+      - { id: 19, x: -350, y: 0, z: 175 }
+      - { id: 20, x: -262.5, y: 0, z: 175 }
+      - { id: 21, x: -175, y: 0, z: 175 }
+      - { id: 22, x: -87.5, y: 0, z: 175 }
+      - { id: 23, x: 0, y: 0, z: 175 }
+      - { id: 24, x: 87.5, y: 0, z: 175 }
+      - { id: 25, x: 175, y: 0, z: 175 }
+      - { id: 26, x: 262.5, y: 0, z: 175 }
+      - { id: 27, x: 350, y: 0, z: 175 }
+      - { id: 28, x: -350, y: 0, z: 262.5 }
+      - { id: 29, x: -262.5, y: 0, z: 262.5 }
+      - { id: 30, x: -175, y: 0, z: 262.5 }
+      - { id: 31, x: -87.5, y: 0, z: 262.5 }
+      - { id: 32, x: 0, y: 0, z: 262.5 }
+      - { id: 33, x: 87.5, y: 0, z: 262.5 }
+      - { id: 34, x: 175, y: 0, z: 262.5 }
+      - { id: 35, x: 262.5, y: 0, z: 262.5 }
+      - { id: 36, x: 350, y: 0, z: 262.5 }
+      - { id: 37, x: -350, y: 0, z: 350 }
+      - { id: 38, x: -262.5, y: 0, z: 350 }
+      - { id: 39, x: -175, y: 0, z: 350 }
+      - { id: 40, x: -87.5, y: 0, z: 350 }
+      - { id: 41, x: 0, y: 0, z: 350 }
+      - { id: 42, x: 87.5, y: 0, z: 350 }
+      - { id: 43, x: 175, y: 0, z: 350 }
+      - { id: 44, x: 262.5, y: 0, z: 350 }
+      - { id: 45, x: 350, y: 0, z: 350 }
+
+   # --- Ring markers (live fingertip tracking on the moving hand) -------------
+   # Two markers on a rigid ring mount track the fingertip in the camera frame:
+   # fingertip = base marker pose * fingertip_offset. When the base marker is
+   # occluded, its pose is reconstructed from the second marker via the fixed
+   # 73<-74 rigid transform. That transform is LEARNED LIVE whenever both
+   # markers are visible in the same frame (absorbing mount build tolerance);
+   # until then it is derived from relationship_angle assuming the two marker
+   # planes meet at the base marker's printed top edge (fold about that edge).
+   # The measured fingertip replaces the Cal3 rigid camera->fingertip offset in
+   # OBJECTS guidance whenever it is available (robust to finger deflection).
+   ring_markers:
+      base_marker:        73   # Fingertip reference marker (fingertip_offset is in ITS frame)
+      second_marker:      74   # Companion marker, folded about 73's printed top edge
+      relationship_angle: 45   # Fold angle between the two marker planes [deg]
+      marker_size_mm:     40   # Printed side length of BOTH ring markers [mm]
+      fingertip_offset:   { x: 0, y: -40, z: -20 }   # Fingertip in 73's frame [mm]
+      # Yaw trim [deg] about the ARROW axis for the arrow-frame guidance error.
+      # The OBJECTS error vector is expressed in the arrow frame (X = right
+      # across the finger, Y = up out of 73's face, Z = along the arrow /
+      # distance to go). The frame is already right-handed and sign-correct in
+      # code (see the Sx handedness fix in WorldObjectHandler), so 0 is normal.
+      # This ROTATES the X/Y error axes about the arrow only for a residual
+      # rotational mount misalignment (e.g. 90 if the marker is mounted turned
+      # a quarter-turn). It CANNOT flip a single axis - that is a reflection,
+      # handled by the code fix, not by this trim. Tune with output off,
+      # watching the Guiding Pos row.
+      arrow_yaw_trim_deg: 0
 
    # --- Object marker IDs to randomise among for the 'r' selection -----------
    object_marker_pool: [ 60, 61, 62, 70, 71, 72 ]
@@ -326,7 +395,7 @@ object_world:
         cylinder_height_mm: 134
         base_origin_mm:     { x:   0, y: 61, z:  0 }
         base_normal_mm:     { x:   0, y:  0, z:  1 }
-        target_point_mm:    { x:   0, y:  0, z: 133 }
+        target_point_mm:    { x:   0, y:  0, z:  134 }
 
       # Coin
       - id:                 62
@@ -481,11 +550,11 @@ serial:
 controller_gains:
    gain_kP: 0.0
    gain_kD: 0.0
-   gain_kI: 0.02
+   gain_kI: 0.05
    integral_enable_radius_mm: 100.0
-   integral_z_based: 1          # 0 = in-plane (X/Y) radius, 1 = 3D distance incl. Z depth
-   integral_enable_speed_mm_s: 60.0
-   integral_leak: 0.92
+   integral_z_based: 0          # 0 = in-plane (X/Y) radius, 1 = 3D distance incl. Z depth
+   integral_enable_speed_mm_s: 100.0
+   integral_leak: 0.95
    deflection_force_max: 20.0
    tension_preload_min: 0.1
    tension_preload_max: 2.0

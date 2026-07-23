@@ -142,10 +142,10 @@ public:
 
     /**
      * @brief Switch detection for OBJECTS mode (world board + tagged objects).
-     *        true  → DICT_6X6_100, IDs covering the world board (1-36) and object
-     *                markers (50-90); per-marker pose is solved on the main thread
-     *                by WorldObjectHandler from the returned corners, so no
-     *                per-ID sizing is needed here.
+     *        true  → DICT_6X6_100, IDs covering the world board (1-45), object
+     *                markers (60-72) and ring markers (73/74); per-marker pose is
+     *                solved on the main thread by WorldObjectHandler from the
+     *                returned corners, so no per-ID sizing is needed here.
      *        false → restore DICT_4X4_1000 and the default ID range / marker size.
      *        Thread-safe - takes effect on the next detection cycle.
      */
@@ -335,8 +335,8 @@ private:
     // accommodate more markers than the Fitts grid (DICT_4X4_50).
     cv::aruco::Dictionary calGridDictionary_;
 
-    // OBJECTS mode uses DICT_6X6_100 (world board 1-36 + object markers 50-90),
-    // separate from the Fitts/Cal DICT_4X4_* dictionaries.
+    // OBJECTS mode uses DICT_6X6_100 (world board 1-45 + object markers 60-72
+    // + ring markers 73/74), separate from the Fitts/Cal DICT_4X4_* dictionaries.
     cv::aruco::Dictionary objDictionary_;
 
     static constexpr const char* TOUCHSCREEN_WIN = "ArUco Display";

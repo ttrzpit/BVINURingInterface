@@ -175,6 +175,12 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
 
     const int activeId = activeTagId_.load();
 
+    // OBJECTS mode refines every marker inside detectMarkers() itself - the
+    // objDetector_ is built with detector-level corner refinement (see
+    // initDetector / config object_corner_refinement_method) - so the manual
+    // per-target subpixel pass below is skipped for it.
+    const bool objMode = useObjDetector_.load();
+
     for (int i = 0; i < static_cast<int>(detectedIds.size()); i++) {
         int id = detectedIds[i];
 
@@ -183,15 +189,17 @@ std::vector<DetectedMarker> ArucoHandler::RunDetection(const cv::Mat& grayFrame)
 
         const bool isActiveTarget = (id == activeId);
 
-        // Subpixel-refine ONLY the active target's corners. Global refinement is
-        // disabled (see initDetector) to keep detectMarkers() fast on the dense
-        // board; the target is the one marker whose 3D pose (and thus precise
-        // corners) is consumed. Guard against the cornerSubPix window reaching
-        // outside the image - markers are only kept ~min_distance_to_border px
-        // from the edge, which is less than the refine window radius. Refining
-        // before centerPx/cornersPx/rollRad are read below feeds them all the
-        // refined corners.
-        if (isActiveTarget && refineActiveTargetCorners_ && !grayFrame.empty()) {
+        // Subpixel-refine ONLY the active target's corners (non-OBJECTS modes).
+        // Global refinement is disabled on those detectors (see initDetector)
+        // to keep detectMarkers() fast on the dense board; the target is the
+        // one marker whose 3D pose (and thus precise corners) is consumed.
+        // Guard against the cornerSubPix window reaching outside the image -
+        // markers are only kept ~min_distance_to_border px from the edge, which
+        // is less than the refine window radius. Refining before
+        // centerPx/cornersPx/rollRad are read below feeds them all the refined
+        // corners.
+        if (isActiveTarget && refineActiveTargetCorners_ && !objMode
+            && !grayFrame.empty()) {
             constexpr int win    = 5;        // cornerSubPix half-window (OpenCV aruco default)
             constexpr int margin = win + 1;
             bool          safe   = true;
@@ -497,9 +505,10 @@ void ArucoHandler::SetFittsBoardDetection(bool fitts) {
 
 void ArucoHandler::SetObjectDetection(bool objects) {
     if (objects) {
-        // OBJECTS mode: DICT_6X6_100 covers the world board (1-36) and object
-        // markers (50-90). WorldObjectHandler solves every pose on the main
-        // thread from the returned corners, so no per-ID board sizing here.
+        // OBJECTS mode: DICT_6X6_100 covers the world board (1-45), object
+        // markers (60-72) and ring markers (73/74). WorldObjectHandler solves
+        // every pose on the main thread from the returned corners, so no
+        // per-ID board sizing here.
         // DICT_6X6_100 holds IDs 0-99; keep the whole range so no valid marker
         // is filtered out.
         constexpr int kObjIdMin = 0;
@@ -696,7 +705,22 @@ void ArucoHandler::initDetector() {
 
     detector_    = cv::aruco::ArucoDetector(dictionary_,        detectorParams_);
     calDetector_ = cv::aruco::ArucoDetector(calGridDictionary_, detectorParams_);
-    objDetector_ = cv::aruco::ArucoDetector(objDictionary_,     detectorParams_);
+
+    // The OBJECTS detector gets its own parameters with detector-level corner
+    // refinement ENABLED (config object_corner_refinement_method, default
+    // contour). The no-global-refinement rule above exists for the 450-marker
+    // Fitts board; the OBJECTS scene holds <=~20 markers, and its world pose,
+    // training samples, and ring fingertip all consume corner precision
+    // directly. Contour/AprilTag fit the FULL marker edges (hundreds of
+    // gradient samples each), far more stable than a local subpixel patch.
+    cv::aruco::DetectorParameters objParams = detectorParams_;
+    switch (detectorCfg_.objectCornerRefinementMethod) {
+        case 1:  objParams.cornerRefinementMethod = cv::aruco::CORNER_REFINE_SUBPIX;   break;
+        case 2:  objParams.cornerRefinementMethod = cv::aruco::CORNER_REFINE_CONTOUR;  break;
+        case 3:  objParams.cornerRefinementMethod = cv::aruco::CORNER_REFINE_APRILTAG; break;
+        default: objParams.cornerRefinementMethod = cv::aruco::CORNER_REFINE_NONE;     break;
+    }
+    objDetector_ = cv::aruco::ArucoDetector(objDictionary_, objParams);
 
     // Seed the active ID range from config - matches the Fitts/default mode
     activeValidIdMin_.store(detectCfg_.validIdMin);

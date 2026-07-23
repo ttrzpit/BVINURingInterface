@@ -91,9 +91,15 @@ struct ControllerTelemetry {
     bool        isTargetActive; ///< Mirrors the isTargetActive argument passed to the last Update() call
 
     cv::Point3f displacement;           ///< Δp = pos_target_3d − pos_fingertip [mm] - the move that
-                                         ///< lands the fingertip on the target (camera frame, Y-up, Z=depth).
-                                         ///< Δp.xy equals the PID position error; Δp.z is the fingertip-to-target
-                                         ///< depth (target depth minus the Cal3 standoff), not camera-to-target.
+                                         ///< lands the fingertip on the target. Camera frame Y-up on the
+                                         ///< FITTS path (Δp.z = fingertip-to-target depth); in the OBJECTS
+                                         ///< arrow-frame path (SetErrorFrameRotation) it is R·Δp: x/y =
+                                         ///< lateral deviation from the finger's pointing line, z = distance
+                                         ///< to go along it. Δp.xy equals the PID position error either way.
+    cv::Point3f pos_fingertip;          ///< Fingertip position used to form Δp [mm], camera frame Y-up.
+                                         ///< R_roll·d (Cal3 offset) on the scalar-roll path; the live
+                                         ///< ring-marker fingertip when the OBJECTS override is active.
+                                         ///< Zero while no target is active.
     cv::Point2f measuredForce;          ///< Measured force from amplifier current [N]
     std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT> stiffnessProfile; ///< K(theta) [N/mm]
     bool        stiffnessValid;         ///< True once Cal2Handler has produced K(theta)
@@ -171,6 +177,24 @@ public:
     void SetFingertipOffsetOverride(bool active, cv::Point3f fingertipOffsetCam) {
         fingertipOverrideActive_ = active;
         fingertipOverride_       = fingertipOffsetCam;
+    }
+
+    /**
+     * @brief Rotate the guidance error Δp into a device-relevant frame before
+     *        the PID/ramp/telemetry consume it (OBJECTS arrow-frame path).
+     *        Update() computes Δp = target − fingertip in the camera Y-up
+     *        frame as usual, then replaces it with R·Δp - with the ring
+     *        arrow-frame rotation, Δp.z becomes the distance to go along the
+     *        finger's pointing direction and Δp.x/Δp.y the lateral deviation
+     *        from the pointing line (aim at the target -> x,y -> 0), which is
+     *        what the tendons actually correct. Call every frame:
+     *        active=false leaves Δp in the camera frame (FITTS path).
+     * @param active True to apply the rotation to Δp.
+     * @param R      Rotation from the camera Y-up frame to the error frame.
+     */
+    void SetErrorFrameRotation(bool active, const cv::Matx33f& R) {
+        errorFrameActive_ = active;
+        errorFrameR_      = R;
     }
 
     // ---- Output gating --------------------------------------------------------
@@ -478,12 +502,19 @@ private:
     // ---- Fingertip-to-target displacement Δp (set each Update) -------------------
     cv::Point3f displacement_ = {};
 
+    // ---- Fingertip position used to form Δp (set each Update, for telemetry) -----
+    cv::Point3f pos_fingertip_ = {};
+
     // ---- Fingertip offset override (OBJECTS full-pose path, set by SetFingertipOffsetOverride) --
     // When active, pos_fingertip is taken directly from fingertipOverride_ (camera
     // frame, Y-up) instead of R_roll * cal3Offset - the offset already rotated by
     // the live world->camera pose. Cleared to false for FITTS / un-aligned OBJECTS.
     bool        fingertipOverrideActive_ = false;
     cv::Point3f fingertipOverride_       = {};
+
+    // ---- Error-frame rotation (OBJECTS arrow-frame path, SetErrorFrameRotation) --
+    bool        errorFrameActive_ = false;
+    cv::Matx33f errorFrameR_      = cv::Matx33f::eye();
 
     // ---- Measured current/force (Stage 0, from amplifier-reported current) ---
     float measuredCurrent_A_ = 0.0f, measuredCurrent_B_ = 0.0f, measuredCurrent_C_ = 0.0f;

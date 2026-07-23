@@ -35,10 +35,12 @@
 //   ESC key or SIGINT (Ctrl-C) → sets g_running = 0 → clean thread join
 // =============================================================================
 
+#include <unistd.h>
+
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <climits>
-#include <algorithm>
 #include <cmath>
 #include <csignal>
 #include <cstdint>
@@ -49,7 +51,6 @@
 #include <iostream>
 #include <random>
 #include <string>
-#include <unistd.h>
 #include <unordered_set>
 #include <vector>
 
@@ -141,13 +142,13 @@ int main() {
                         cfg.camera.cameraMatrix,
                         cfg.camera.distCoeffs );
 
-    TouchHandler       touch( cfg.touchscreen );
-    Cal3Handler        cal3( cfg.touchscreen, cfg.camera, cfg.arucoCalGrid, cfg.cal3 );
-    FittsTaskHandler   fitts( cfg.fittsBoard, cfg.touchscreen, cfg.camera );
-    WorldObjectHandler worldObj( cfg.objectWorld, cfg.camera );   // OBJECTS mode ('O')
+    TouchHandler        touch( cfg.touchscreen );
+    Cal3Handler         cal3( cfg.touchscreen, cfg.camera, cfg.arucoCalGrid, cfg.cal3 );
+    FittsTaskHandler    fitts( cfg.fittsBoard, cfg.touchscreen, cfg.camera );
+    WorldObjectHandler  worldObj( cfg.objectWorld, cfg.camera );    // OBJECTS mode ('O')
     RigAlignmentHandler rigAlign( cfg.arucoCalGrid, cfg.touchscreen,
-                                  cfg.objectWorld, cfg.camera );   // one-time screen<->world capture ('R')
-    TrialLogger        trialLogger( loggingDir );
+                                  cfg.objectWorld, cfg.camera );    // one-time screen<->world capture ('R')
+    TrialLogger         trialLogger( loggingDir );
 
     ControllerHandler controller( cfg.controllerGains );
     PretensionHandler pretension( controller );
@@ -211,9 +212,14 @@ int main() {
     int          prevActiveTagId = 0;                ///< Detects kb.activeTagId changes -> ramps guidance force on new targets
     int          prevActiveObjectId = 0;             ///< Detects kb.activeObjectId changes -> ramp reset in OBJECTS mode
     double       lastObjDiagSecs = 0.0;              ///< Throttles the OBJECTS once/sec console diagnostic
+    bool         prevObjTraining = false;            ///< Detects training-burst completion -> one-shot result report
     // OBJECTS random pool ('r' cycles these object marker IDs, no repeats until
     // exhausted, then refills). Refreshed on every OBJECTS entry.
     std::vector<int> objectPoolRemaining;
+    // True while an 'r' presence re-scan is in flight: the random pick is
+    // deferred until WorldObjectHandler publishes which trained object markers
+    // are still physically present (HasPresenceResult()).
+    bool objectPickPending = false;
 
     // Last-known camera-side target-circle position (persists when activeMarker
     // leaves the camera frame so the circle doesn't flicker off momentarily).
@@ -228,7 +234,7 @@ int main() {
     bool                       prevFittsTouchSample = false;
 
     bool cal3CompletionHandled = false;
-    bool rigCompletionHandled  = false;    ///< Set once the 'R' rig-alignment capture has saved + returned to IDLE
+    bool rigCompletionHandled = false;     ///< Set once the 'R' rig-alignment capture has saved + returned to IDLE
     bool cal2ProfileApplied = false;       ///< Set once Cal2's K(theta) has been applied to the controller
     bool cal1CompletionHandled = false;    ///< Set once Cal1 (AROM) completion has returned the system to IDLE
 
@@ -252,9 +258,9 @@ int main() {
     // only when a NEW Teensy packet has arrived (rxCount changed), with dt
     // measured between processed packets - so the finite-difference velocity
     // tracks the encoder data rate (~200 Hz), not the main-loop rate.
-    uint64_t lastRxCount   = 0;
-    double   lastRxSecs    = 0.0;      // wall time the last NEW packet was seen
-    bool     prevRxFresh   = false;    // for the staleness warning edge
+    uint64_t lastRxCount = 0;
+    double   lastRxSecs = 0.0;       // wall time the last NEW packet was seen
+    bool     prevRxFresh = false;    // for the staleness warning edge
     // Longest tolerated silence from the Teensy while connected before the
     // RobotState ladder is forced to IDLE (PWM off). 0.25 s = 50 missed packets
     // at 200 Hz - far beyond any USB scheduling jitter.
@@ -356,9 +362,9 @@ int main() {
                 aruco.SetFittsBoardVisible( false );
                 aruco.SetFittsBoardDetection( false );    // Restore the default detector / ID range
             } else if ( prevState == SystemState::OBJECTS ) {
-                aruco.SetObjectDetection( false );        // Restore the default detector (no touchscreen grid was shown)
+                aruco.SetObjectDetection( false );    // Restore the default detector (no touchscreen grid was shown)
             } else if ( prevState == SystemState::RIG_ALIGN ) {
-                aruco.SetCalibrationGridVisible( false );  // Hide the cal grid shown for the capture
+                aruco.SetCalibrationGridVisible( false );    // Hide the cal grid shown for the capture
             } else {
                 aruco.SetGridVisible( false );
             }
@@ -384,14 +390,17 @@ int main() {
                 // reuse every marker exactly once before any repeats.
                 usedRandomTargets.clear();
             } else if ( kb.systemState == SystemState::OBJECTS ) {
-                // OBJECTS: world board (1-36) + physical tagged objects (50-90),
-                // DICT_6X6_100. No touchscreen grid - the objects are physical.
+                // OBJECTS: world board (1-45) + physical tagged objects (60-72)
+                // + ring markers (73/74), DICT_6X6_100. No touchscreen grid -
+                // the objects are physical.
                 // WorldObjectHandler does all PnP on the main thread from the
                 // detected corners; guidance flows through the same SetTarget path
                 // as FITTS. Refresh the random object pool for this session.
                 aruco.SetObjectDetection( true );
                 worldObj.Reset();
+                prevObjTraining = false;    // Reset() cleared any mid-burst training
                 objectPoolRemaining = cfg.objectWorld.objectMarkerPool;
+                objectPickPending = false;    // Reset() also dropped any presence scan
             } else if ( kb.systemState == SystemState::RIG_ALIGN ) {
                 // RIG ALIGNMENT: show the touchscreen calibration grid so the
                 // camera can see it alongside the physical world board. The
@@ -444,6 +453,7 @@ int main() {
             }
             if ( prevState == SystemState::OBJECTS ) {
                 prevActiveObjectId = 0;
+                objectPickPending = false;
             }
             prevState = kb.systemState;
         }
@@ -544,7 +554,7 @@ int main() {
             if ( rigAlign.IsComplete() && !rigCompletionHandled ) {
                 rigCompletionHandled = true;
                 cfg.objectWorld.rigScreenToWorldR = rigAlign.GetScreenToWorldR();
-                cfg.objectWorld.rigValid          = true;
+                cfg.objectWorld.rigValid = true;
                 rigAlign.Save( "rig_alignment.yaml" );
                 aruco.SetCalibrationGridVisible( false );
                 keyboard.SetInputState( InputState::IDLE );
@@ -743,51 +753,92 @@ int main() {
             keyboard.ClearRandomTarget();
         }
 
-        // 'r' in OBJECTS - pick a random object marker from the config pool
-        // (object_marker_pool), no repeat until the pool is exhausted, then
-        // refill. Mirrors the Fitts debug-pool picker. Only objects mapped
-        // during the scan phase are eligible: an unscanned object has no
-        // world-frame anchor, so its target would vanish the moment its marker
-        // leaves the frame (which the reaching hand guarantees).
+        // 'r' in OBJECTS - random object target with a PRESENCE RE-SCAN. The
+        // pick is deferred: 'r' arms a short scan burst (config
+        // presence_scan_frames, ~0.4 s) that re-checks which TRAINED object
+        // markers are actually still visible; the deferred pick below then
+        // draws only from pool ∩ trained ∩ present, so a physically removed
+        // object can never be selected again. No-repeat-until-exhausted
+        // cycling (objectPoolRemaining) is kept, mirroring the Fitts picker.
         if ( kb.pendingRandomObjectTarget ) {
-            if ( !cfg.objectWorld.objectMarkerPool.empty() ) {
-                auto scannedOf = [&]( const std::vector<int>& ids ) {
-                    std::vector<int> out;
-                    for ( int id : ids )
-                        if ( worldObj.IsObjectScanned( id ) ) out.push_back( id );
-                    return out;
-                };
-                std::vector<int> candidates = scannedOf( objectPoolRemaining );
-                if ( candidates.empty() ) {
-                    objectPoolRemaining = cfg.objectWorld.objectMarkerPool;   // refill after exhaustion
-                    candidates = scannedOf( objectPoolRemaining );
-                }
-                if ( candidates.empty() ) {
-                    keyboard.SetExternalStatus( "No scanned objects in the pool - re-enter 'O' and scan with a world marker in view." );
-                } else {
-                    const int nextId = candidates[std::uniform_int_distribution<int>(
-                        0, ( int )candidates.size() - 1 )( targetRng )];
-                    objectPoolRemaining.erase(
-                        std::find( objectPoolRemaining.begin(), objectPoolRemaining.end(), nextId ) );
-                    keyboard.SetActiveObjectId( nextId );
-                    keyboard.SetExternalStatus( "Object marker set to " + std::to_string( nextId ) + "." );
-                }
-            } else {
+            if ( cfg.objectWorld.objectMarkerPool.empty() ) {
                 keyboard.SetExternalStatus( "No object_marker_pool configured in config.yaml." );
+            } else if ( worldObj.ScannedCount() == 0 ) {
+                keyboard.SetExternalStatus( "No trained objects - press [t] with an object and a world marker in view." );
+            } else {
+                worldObj.StartPresenceScan();    // restarts any scan in flight
+                objectPickPending = true;
+                keyboard.SetExternalStatus( "Re-scanning objects..." );
             }
             keyboard.ClearRandomObjectTarget();
         }
 
-        // Enter in OBJ_SCAN - end the object scan/training phase. Objects mapped
-        // so far keep their world-frame anchors (and keep refreshing whenever
-        // their marker is re-seen); target selection ('r'/'m') is now open.
+        // Deferred 'r' pick - runs once the presence re-scan armed above has
+        // completed (result published by worldObj.Update() on a later frame).
+        if ( objectPickPending && worldObj.HasPresenceResult() ) {
+            objectPickPending = false;
+            worldObj.ClearPresenceResult();
+            const std::vector<int>& present = worldObj.GetPresentIds();    // trained ∩ seen
+            auto                    presentOf = [&]( const std::vector<int>& ids ) {
+                std::vector<int> out;
+                for ( int id : ids )
+                    if ( std::find( present.begin(), present.end(), id ) != present.end() )
+                        out.push_back( id );
+                return out;
+            };
+            std::vector<int> candidates = presentOf( objectPoolRemaining );
+            if ( candidates.empty() ) {
+                objectPoolRemaining = cfg.objectWorld.objectMarkerPool;    // refill after exhaustion
+                candidates = presentOf( objectPoolRemaining );
+            }
+            if ( candidates.empty() ) {
+                keyboard.SetExternalStatus( "No trained objects currently present - re-place an object or re-train with [t]." );
+            } else {
+                const int nextId = candidates[std::uniform_int_distribution<int>(
+                    0, ( int )candidates.size() - 1 )( targetRng )];
+                objectPoolRemaining.erase(
+                    std::find( objectPoolRemaining.begin(), objectPoolRemaining.end(), nextId ) );
+                keyboard.SetActiveObjectId( nextId );
+                keyboard.SetExternalStatus( "Object marker set to " + std::to_string( nextId ) + " (" +
+                                            std::to_string( ( int )present.size() ) + " present)." );
+            }
+        }
+
+        // Enter in OBJ_SCAN - end the object scan/training phase. Trained
+        // objects keep their locked world-frame anchors; target selection
+        // ('r'/'m') is now open. 't'/'u' remain available for re-training.
         if ( kb.pendingFinishObjectScan ) {
             const int nScanned = worldObj.FinishScan();
             keyboard.SetExternalStatus(
                 nScanned > 0
-                    ? "Scan complete - " + std::to_string( nScanned ) + " object(s) mapped. [r] Random, [m] Manual..."
-                    : "Scan ended with NO objects mapped - targets only resolve while their marker is visible." );
+                    ? "Scan complete - " + std::to_string( nScanned ) + " object(s) trained. [r] Random, [m] Manual..."
+                    : "Scan ended with NO objects trained - guidance unavailable until [t] trains an object." );
             keyboard.ClearFinishObjectScan();
+        }
+
+        // 't' in OBJECTS - start a training burst: every visible object's pose
+        // is burst-averaged into a locked world anchor (the ONLY way objects are
+        // mapped). The countdown shows in the scan status / OBJ status line; the
+        // result is reported when the burst completes below.
+        if ( kb.pendingTrainObjects ) {
+            worldObj.StartTraining();
+            keyboard.ClearTrainObjects();
+        }
+
+        // 'u' in OBJECTS - forget every trained anchor. Objects revert to live
+        // preview and produce no guidance target until re-trained.
+        if ( kb.pendingUntrainObjects ) {
+            worldObj.UntrainAll();
+            keyboard.SetExternalStatus( "Cleared all trained objects." );
+            keyboard.ClearUntrainObjects();
+        }
+
+        // 'D' in OBJECTS - corner-jitter probe: accumulate the probe world
+        // markers' raw corners for ~300 detection frames, then print one
+        // copy/paste row of per-marker corner std [px] to the terminal.
+        if ( kb.pendingCornerJitterProbe ) {
+            worldObj.StartCornerJitterProbe();
+            keyboard.ClearCornerJitterProbe();
         }
 
         // In FITTS state, arm the new target whenever it changes. The board is
@@ -821,6 +872,11 @@ int main() {
             worldObj.OnNewTarget( kb.activeObjectId );
             prevActiveObjectId = kb.activeObjectId;
             haveLastTargetCircle = false;
+            // A manual ('m') selection landing while an 'r' presence re-scan is
+            // still in flight wins - drop the deferred random pick. (The random
+            // pick itself also passes through here, but it clears the flag
+            // before setting the ID, so this only affects manual overrides.)
+            objectPickPending = false;
         }
 
         // OBJECTS: solve the world board pose + resolve the active object's target
@@ -829,6 +885,17 @@ int main() {
         if ( kb.systemState == SystemState::OBJECTS && isNewFrame ) {
             worldObj.Update( markers );
         }
+
+        // Report a completed training burst once (Update() above advances the
+        // countdown; the transition training->idle marks completion). During the
+        // scan phase the live scan status below shows the running trained count
+        // anyway; this one-shot matters in OBJ_SEL / OBJ_RUN re-training.
+        if ( prevObjTraining && !worldObj.IsTraining() ) {
+            keyboard.SetExternalStatus(
+                "Trained " + std::to_string( worldObj.LastTrainedCount() ) +
+                " object(s) (" + std::to_string( worldObj.ScannedCount() ) + " total)." );
+        }
+        prevObjTraining = worldObj.IsTraining();
 
         // FITTS: compute the shared per-frame board fits ONCE (homography +
         // solvePnP pose). EstimateTargetFromBoard / fitts.Update /
@@ -845,6 +912,14 @@ int main() {
         // "Scan complete" message isn't overwritten on the finishing frame.
         if ( kb.systemState == SystemState::OBJECTS && worldObj.IsScanning() ) {
             keyboard.SetExternalStatus( worldObj.GetScanStatus() );
+        }
+
+        // 'r' presence re-scan: live countdown on the Output row while the
+        // burst runs. The deferred pick above reports the result once the scan
+        // completes and a target is (or cannot be) selected.
+        if ( kb.systemState == SystemState::OBJECTS && worldObj.IsPresenceScanning() ) {
+            keyboard.SetExternalStatus( "Re-scanning objects... " +
+                                        std::to_string( worldObj.PresenceFramesLeft() ) );
         }
 
         // Active target marker (set via kb.activeTagId during FITTS) drives
@@ -892,14 +967,20 @@ int main() {
                 targetPosMm = fbTargetPosMm;
                 targetRoll = fbTargetRoll;
             }
-        } else if ( kb.systemState == SystemState::OBJECTS && worldObj.HasTarget() ) {
+        } else if ( kb.systemState == SystemState::OBJECTS && worldObj.HasTarget() && worldObj.HasRingFingertip() ) {
             // OBJECTS guidance target: the active object's target_point resolved
             // to camera frame Y-up by WorldObjectHandler (from the object marker
             // when visible, else its world anchor). Flows through the same
-            // SetTarget path as FITTS.
-            haveTarget  = true;
+            // SetTarget path as FITTS. HARD-GATED on the ring fingertip: the
+            // camera is overhead (not on the ring), so the only valid error is
+            // target - ring_fingertip, both measured in the camera frame. With
+            // no ring fingertip (both markers out past the coast window) there
+            // is NO valid fingertip model - guidance cuts rather than falling
+            // back to a camera-co-located offset (which would point the force
+            // at a fictitious fingertip near the camera origin).
+            haveTarget = true;
             targetPosMm = worldObj.GetTargetPosMm();
-            targetRoll  = worldObj.GetTargetRoll();
+            targetRoll = worldObj.GetTargetRoll();
         }
 
         // Once the participant has touched the screen for the current target,
@@ -920,31 +1001,55 @@ int main() {
             cfg.target.offsetDefaultMm,
             !guidanceSuppressedByTouch );
 
-        // OBJECTS full-pose fingertip: once the rig alignment is captured and a
-        // world->camera rotation is available this frame, rotate the Cal3 offset
-        // (screen frame) into the current camera view via R_screen->world and the
-        // live world pose, and hand it to the controller directly - the automatic
-        // replacement for the scalar roll_offset_deg trim (and robust to camera
-        // pitch/yaw). Falls back to the scalar-roll path when unavailable.
+        // OBJECTS fingertip override: the ring-marker fingertip, measured
+        // directly in the camera frame (base marker pose * fingertip_offset,
+        // second marker as fallback, short coast on dropout). With the camera
+        // mounted ABOVE the scene this is the ONLY valid fingertip source, so
+        // the former rig-alignment+Cal3 fallback (which modelled the fingertip
+        // as a fixed offset from a ring-mounted camera) was removed - guidance
+        // is gated on HasRingFingertip() above instead.
         bool        objFullPose = false;
         cv::Point3f objFingertipCamYup{};
-        if ( kb.systemState == SystemState::OBJECTS && cfg.objectWorld.rigValid &&
-             cal3.IsComplete() && worldObj.HasEffectiveWorldR() ) {
-            const cv::Matx33d Rwc = worldObj.GetEffectiveWorldR();   // world -> camera (Y-down)
-            const cv::Point3f d   = cal3.GetFinalOffset();          // screen frame (X right, Y down, Z toward cam)
-            const cv::Vec3d   dWorld = cfg.objectWorld.rigScreenToWorldR * cv::Vec3d( d.x, d.y, d.z );
-            const cv::Vec3d   dCam   = Rwc * dWorld;                 // world -> camera (Y-down)
-            objFingertipCamYup = cv::Point3f( static_cast<float>( dCam[0] ),
-                                              static_cast<float>( -dCam[1] ),   // Y-down -> Y-up
-                                              static_cast<float>( dCam[2] ) );
+        if ( kb.systemState == SystemState::OBJECTS && worldObj.HasRingFingertip() ) {
+            objFingertipCamYup = worldObj.GetRingFingertipCamYup();
             objFullPose = true;
         }
         controller.SetFingertipOffsetOverride( objFullPose, objFingertipCamYup );
+        // Arrow-frame error: rotate Δp into ring marker 73's arrow frame
+        // (X = across the finger, Y = out of the marker face, Z = along the
+        // pointing direction), so aiming the arrow at the target drives the
+        // planar error to zero and Δp.z reads the remaining reach distance.
+        // Shares the ring-fingertip gate; held through the coast window.
+        controller.SetErrorFrameRotation( objFullPose, worldObj.GetCamYupToArrowR() );
+
+        // OBJECTS guidance-source tag for the controller panel's Target
+        // Telemetry block: fingertip source (RING / RING2 / COAST / --),
+        // target source (LIVE / ANCH / --), world markers backing the pose.
+        if ( kb.systemState == SystemState::OBJECTS ) {
+            const std::string ftTag = !worldObj.HasRingFingertip() ? "--"
+                                      : worldObj.RingCoasting()    ? "COAST"
+                                      : worldObj.RingFromSecond()  ? "RING2"
+                                                                   : "RING";
+            const std::string tgTag = !worldObj.HasTarget()     ? "--"
+                                      : worldObj.TargetIsLive() ? "LIVE"
+                                                                : "ANCH";
+            display.SetObjectGuidanceStatus(
+                true, ftTag + " " + tgTag + " W:" + std::to_string( worldObj.GetWorldMarkerCount() ) );
+        } else {
+            display.SetObjectGuidanceStatus( false, "" );
+        }
 
         // Feed the resolved target position to the operator telemetry panel so
         // the "Target Telemetry" readout tracks the target via the board-pose
-        // estimate when the marker itself isn't directly detected.
-        display.SetActiveTargetPosition( haveTarget, targetPosMm );
+        // estimate when the marker itself isn't directly detected. In OBJECTS
+        // the panel gets the UNGATED target: even while guidance is cut for
+        // lack of a ring fingertip (haveTarget false), the resolved object
+        // target stays visible so the operator can see WHICH half of the error
+        // vector is missing (the source tag shows the fingertip state).
+        if ( kb.systemState == SystemState::OBJECTS && worldObj.HasTarget() )
+            display.SetActiveTargetPosition( true, worldObj.GetTargetPosMm() );
+        else
+            display.SetActiveTargetPosition( haveTarget, targetPosMm );
 
         // When guidance is running on the board-pose estimate (target marker not
         // directly detected), hand the projected outline to the operator view so
@@ -1365,33 +1470,69 @@ int main() {
             display.SetArucoStats( aruco.GetDetectionHz(), aruco.GetDetectionLagMs() );
 
             // OBJECTS overlays (green live / yellow anchored wireframes, gizmo,
-            // target dot) + faint blue world-marker outlines. Hidden elsewhere.
+            // target dot) + faint blue world-marker outlines + cyan ring
+            // fingertip arrow + dark-blue known-layout reprojection (diagnostic,
+            // config show_known_layout). Hidden elsewhere.
             display.SetObjectOverlays( kb.systemState == SystemState::OBJECTS, worldObj.GetOverlays() );
             display.SetWorldMarkerOutlines( kb.systemState == SystemState::OBJECTS, worldObj.GetWorldOutlines() );
+            display.SetRingOverlay( kb.systemState == SystemState::OBJECTS, worldObj.GetRingOverlay() );
+            display.SetKnownLayoutOutlines( kb.systemState == SystemState::OBJECTS, worldObj.GetKnownLayoutOutlines() );
 
             // OBJECTS status line + once/sec console diagnostic: shows why guidance
             // is (or isn't) locked - world marker count, world-pose availability,
             // and the active object's LIVE/ANCHORED/lost state. Essential for
             // diagnosing "guidance stops when the marker is occluded" on the rig.
-            if ( kb.systemState == SystemState::OBJECTS ) {
+            bool SHOW_DIAGNOSTICS = false; 
+            if ( kb.systemState == SystemState::OBJECTS && SHOW_DIAGNOSTICS ) {
                 std::string objState;
-                if ( worldObj.IsScanning() )                              objState = "SCANNING (" + std::to_string( worldObj.ScannedCount() ) + " mapped)";
-                else if ( kb.activeObjectId <= 0 )                        objState = "no object selected";
-                else if ( worldObj.HasTarget() && worldObj.TargetIsLive() ) objState = "LIVE";
-                else if ( worldObj.HasTarget() )                          objState = "ANCHORED (held)";
-                else if ( !worldObj.HasActiveAnchor() )                   objState = "object not scanned - show it with a world marker";
-                else if ( !worldObj.HasWorldPose() )                      objState = "world board not visible (need >=1 marker)";
-                else                                                      objState = "lost";
+                if ( worldObj.IsScanning() )
+                    objState = "SCANNING (" + std::to_string( worldObj.ScannedCount() ) + " trained)";
+                else if ( kb.activeObjectId <= 0 )
+                    objState = "no object selected";
+                else if ( worldObj.HasTarget() && worldObj.TargetIsLive() )
+                    objState = "LIVE";
+                else if ( worldObj.HasTarget() )
+                    objState = "ANCHORED (held)";
+                else if ( !worldObj.HasActiveAnchor() )
+                    objState = "object not trained - press [t] with it and a world marker in view";
+                else if ( !worldObj.HasWorldPose() )
+                    objState = "world board not visible (need >=1 marker)";
+                else
+                    objState = "lost";
+
+                // Ring fingertip source: base marker / second-marker fallback
+                // (via the learned transform, or "(seed)" while still on the
+                // config-derived one) / coasting on the last measurement / none.
+                // "--" also means guidance is CUT (overhead camera: no ring
+                // fingertip -> no valid error vector).
+                const std::string ringState =
+                    !worldObj.HasRingFingertip()
+                        ? "--"
+                        : ( worldObj.RingCoasting()      ? "coast"
+                            : !worldObj.RingFromSecond() ? "base"
+                            : worldObj.RingRelLearned()  ? "2nd"
+                                                         : "2nd(seed)" );
 
                 const std::string status =
                     "OBJ  world mk: " + std::to_string( worldObj.GetWorldMarkerCount() ) +
                     "  pose: " + std::string( worldObj.HasWorldPose() ? "OK" : "--" ) +
-                    "  |  target: " + objState;
+                    "  ring: " + ringState +
+                    "  trained: " + std::to_string( worldObj.ScannedCount() ) + "/" +
+                    std::to_string( static_cast<int>( cfg.objectWorld.targetObjects.size() ) ) +
+                    "  |  target: " + objState +
+                    ( worldObj.IsTraining()
+                          ? "  [TRAINING " + std::to_string( worldObj.TrainingFramesLeft() ) + "]"
+                          : "" );
                 display.SetObjectStatusLine( true, status );
 
                 if ( nowSecs - lastObjDiagSecs >= 1.0 ) {
                     lastObjDiagSecs = nowSecs;
-                    std::cout << "[OBJ] " << status << "  (id " << kb.activeObjectId << ")\n";
+                    // poseFails counts frames (since OBJECTS entry) where world
+                    // markers were seen but no pose was accepted - a nonzero,
+                    // growing value exposes intermittent solve failures that the
+                    // instantaneous "pose: OK" field is too coarse to show.
+                    std::cout << "[OBJ] " << status << "  (id " << kb.activeObjectId
+                              << ", poseFails " << worldObj.GetPoseFailCount() << ")\n";
                 }
             } else {
                 display.SetObjectStatusLine( false, "" );

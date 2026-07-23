@@ -1,6 +1,11 @@
 #include "WorldObjectHandler.h"
 
+#include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <sstream>
 
 // =============================================================================
 // WorldObjectHandler.cpp - clean global-PnP object localisation (no filtering)
@@ -15,8 +20,22 @@
 
 // solvePnPRansac reprojection-error inlier threshold [px] for the world pose - a
 // misdetected / mis-decoded world marker's centre lands outside this and is
-// rejected.
+// rejected. (RANSAC is only the fallback path for a non-coplanar marker set;
+// the ground-plane board uses the deterministic SolvePlanarWorldPose.)
 static constexpr float kRansacReprojPx = 4.0f;
+
+// Deterministic outlier gate [px] for SolvePlanarWorldPose: a marker whose MEAN
+// corner reprojection error against the first full-set solve exceeds this is
+// dropped (once) and the pose re-solved. Catches a biased marker_positions
+// entry / bent board region the same way every frame - unlike RANSAC's random
+// inlier subsets, which made the pose JUMP when a biased marker sat near the
+// threshold.
+static constexpr double kWorldMarkerReprojGatePx = 3.0;
+
+// Frames a TRAINED object coasts on its last rendered pose when the world pose
+// drops out (~0.25 s at the detection rate), instead of snapping to its own
+// live marker pose. After this it hides until the world pose returns.
+static constexpr int kCoastFrames = 20;
 
 // ---- File-local helpers -----------------------------------------------------
 
@@ -47,6 +66,34 @@ static bool projectMarkerPt(const cv::Matx33d& R, const cv::Vec3d& t,
     if (!std::isfinite(ix) || !std::isfinite(iy)) return false;
     out = cv::Point2f(static_cast<float>(ix), static_cast<float>(iy));
     return true;
+}
+
+// Nearest proper rotation to an averaged rotation matrix (Kabsch/SVD):
+// R = U V^T from SVD(M); flip the last column if it came out a reflection. The
+// mean of rotation matrices is not itself a rotation, so a training burst's
+// averaged anchor rotation is projected back onto SO(3) with this.
+static cv::Matx33d Orthonormalize(const cv::Matx33d& M) {
+    cv::Mat w, U, Vt;
+    cv::SVDecomp(cv::Mat(M), w, U, Vt);
+    cv::Mat R = U * Vt;
+    if (cv::determinant(R) < 0) {
+        U.col(2) *= -1.0;
+        R = U * Vt;
+    }
+    cv::Matx33d r;
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            r(i, j) = R.at<double>(i, j);
+    return r;
+}
+
+// Reject the mirrored planar-PnP solution. The world board is a single ground
+// plane (y = 0), and PnP on coplanar points has a second, reflected solution
+// that places the camera below that plane; the real camera is always above it
+// (world +Y). Camera position in the world frame = -R^T t.
+static bool CameraAboveFloor(const cv::Matx33d& Rwc, const cv::Vec3d& twc) {
+    const cv::Vec3d camWorld = -(Rwc.t() * twc);
+    return camWorld[1] > 0.0;
 }
 
 // Solve a square marker's pose (marker -> camera) from its 4 detected corners.
@@ -82,10 +129,11 @@ WorldObjectHandler::WorldObjectHandler(const ObjectWorldConfig& objCfg,
     }
 
     // World-board corner geometry from the configured CENTRES + marker size.
-    // Plane from the centre itself (y = 0 -> floor spanning X/Z, else wall at
-    // z = 0 spanning X/Y); orientation from the mounting convention: wall
-    // markers are upright (marker +Y = world +Y), floor markers lie with their
-    // top edge toward the wall (marker +Y = world -Z, face up: +Z = world +Y).
+    // Plane from the centre itself (y = 0 -> ground plane spanning X/Z - the
+    // whole current board; else legacy wall at z = 0 spanning X/Y); orientation
+    // from the mounting convention: ground markers lie face-up with the printed
+    // top edge toward the z = 0 row (marker +Y = world -Z, face up: +Z = world
+    // +Y), wall markers are upright (marker +Y = world +Y).
     // Corner order matches ArUco detection order (TL, TR, BR, BL).
     const float h = objCfg_.worldMarkerSizeMm * 0.5f;
     const cv::Vec3d cornersMarker[4] = {
@@ -107,6 +155,48 @@ WorldObjectHandler::WorldObjectHandler(const ObjectWorldConfig& objCfg,
         }
         worldGeom_[id] = g;
     }
+
+    // Ring base<-second seed transform from the configured fold angle: the two
+    // marker planes meet at the base marker's printed top edge (the y = +h
+    // line), with the second marker folded toward +Z by relationshipAngleDeg.
+    // X_base = R * X_second + t, so the second marker's centre sits at
+    // (0, h(1+cos a), h sin a) in the base frame. Replaced by the live-learned
+    // transform the first time both markers are seen together (Update()).
+    const RingMarkerConfig& ring = objCfg_.ring;
+    if (ring.baseMarker >= 0 && ring.markerSizeMm > 0.0f) {
+        const double a = ring.relationshipAngleDeg * CV_PI / 180.0;
+        const double h = ring.markerSizeMm * 0.5;
+        ringRelR_ = cv::Matx33d(1, 0, 0,
+                                0, std::cos(a), -std::sin(a),
+                                0, std::sin(a),  std::cos(a));
+        ringRelT_ = cv::Vec3d(0.0, h * (1.0 + std::cos(a)), h * std::sin(a));
+
+        // Arrow-frame constant factor (see GetCamYupToArrowR): M maps arrow
+        // axes into marker axes (X_a = X_m, Y_a = Z_m, Z_a = -Y_m), so M^T
+        // takes a marker-frame vector into arrow coordinates.
+        //   HANDEDNESS FIX (Sx): the per-frame camera Y-up -> Y-down flip
+        //   (diag(1,-1,1)) is a REFLECTION, while M^T, Rring^T and Rz are all
+        //   proper rotations - so without correction the camYup->arrow map has
+        //   det -1 (left-handed) and exactly one lateral axis reads BACKWARDS
+        //   for every mount. This is mount-independent (the reflection is
+        //   always present). Sx = diag(-1,1,1) mirrors the arrow X axis to
+        //   restore a right-handed frame with physical +X = right / +Y = up,
+        //   matching the FITTS-validated controller sign convention (Y was
+        //   already correct on the rig at trim 0, X was inverted -> flip X).
+        //   Rz then applies the config yaw trim for any residual ROTATIONAL
+        //   mount misalignment, on top of the corrected right-handed frame.
+        const double g = ring.arrowYawTrimDeg * CV_PI / 180.0;
+        const cv::Matx33d Rz(std::cos(g), -std::sin(g), 0.0,
+                             std::sin(g),  std::cos(g), 0.0,
+                             0.0,          0.0,         1.0);
+        const cv::Matx33d Mt(1,  0, 0,
+                             0,  0, 1,
+                             0, -1, 0);
+        const cv::Matx33d Sx(-1, 0, 0,
+                              0, 1, 0,
+                              0, 0, 1);
+        arrowTrimM_ = Rz * Sx * Mt;
+    }
 }
 
 void WorldObjectHandler::Reset() {
@@ -120,7 +210,69 @@ void WorldObjectHandler::Reset() {
     targetRoll_  = 0.0f;
     overlays_.clear();
     worldOutlines_.clear();
-    for (auto& [id, rt] : objects_) rt.anchor = ObjectAnchor{};
+    knownLayoutOutlines_.clear();
+    hasRingFingertip_ = false;
+    ringOverlay_      = RingOverlay{};
+    ringFromSecond_   = false;
+    ringCoasting_     = false;
+    lastRingFingertip_ = {};
+    hasLastRing_       = false;
+    ringCoastLeft_     = 0;
+    training_         = false;
+    trainFramesLeft_  = 0;
+    lastTrainedCount_ = 0;
+    trainAcc_.clear();
+    presenceScanning_    = false;
+    presenceFramesLeft_  = 0;
+    presenceResultReady_ = false;
+    presenceSeen_.clear();
+    presentIds_.clear();
+    probeActive_      = false;
+    probeFramesLeft_  = 0;
+    probeStats_.clear();
+    worldReprojErr_.clear();
+    worldIds_.clear();
+    poseFailCount_ = 0;
+    // ringRelR_/ringRelT_ (the learned base<-second transform) are deliberately
+    // KEPT: the ring mount is rigid, so the transform survives OBJECTS re-entry.
+    for (auto& [id, rt] : objects_) {
+        rt.anchor    = ObjectAnchor{};
+        rt.hasLast   = false;
+        rt.coastLeft = 0;
+    }
+}
+
+void WorldObjectHandler::StartCornerJitterProbe() {
+    probeActive_     = true;
+    probeFramesLeft_ = kJitterProbeFrames;
+    probeStats_.clear();
+    std::cout << "[JITTER] probe started - hold the camera rigidly still ("
+              << kJitterProbeFrames << " detection frames)...\n";
+}
+
+void WorldObjectHandler::StartTraining() {
+    training_        = true;
+    trainFramesLeft_ = std::max(1, objCfg_.trainFrames);
+    trainAcc_.clear();
+}
+
+void WorldObjectHandler::StartPresenceScan() {
+    presenceScanning_    = true;
+    presenceFramesLeft_  = std::max(1, objCfg_.presenceScanFrames);
+    presenceResultReady_ = false;
+    presenceSeen_.clear();
+    presentIds_.clear();
+}
+
+void WorldObjectHandler::UntrainAll() {
+    training_        = false;
+    trainFramesLeft_ = 0;
+    trainAcc_.clear();
+    for (auto& [id, rt] : objects_) {
+        rt.anchor    = ObjectAnchor{};
+        rt.hasLast   = false;
+        rt.coastLeft = 0;
+    }
 }
 
 int WorldObjectHandler::FinishScan() {
@@ -141,6 +293,8 @@ int WorldObjectHandler::ScannedCount() const {
 }
 
 std::string WorldObjectHandler::GetScanStatus() const {
+    if (training_)
+        return "TRAINING - hold the camera steady... " + std::to_string(trainFramesLeft_);
     std::string names;
     int         n = 0;
     for (const auto& [id, rt] : objects_) {
@@ -148,10 +302,10 @@ std::string WorldObjectHandler::GetScanStatus() const {
         if (n++) names += ", ";
         names += rt.def->name;
     }
-    std::string s = "SCANNING - mapped " + std::to_string(n) + "/" +
+    std::string s = "SCANNING - trained " + std::to_string(n) + "/" +
                     std::to_string(static_cast<int>(objects_.size()));
     if (n) s += " (" + names + ")";
-    s += " - [Enter] to finish";
+    s += " - [t] train visible, [Enter] finish";
     return s;
 }
 
@@ -165,6 +319,112 @@ void WorldObjectHandler::OnNewTarget(int objectMarkerId) {
 bool WorldObjectHandler::HasActiveAnchor() const {
     const auto it = objects_.find(activeId_);
     return it != objects_.end() && it->second.anchor.has;
+}
+
+// =============================================================================
+// Deterministic planar world solve (ground-plane board)
+// =============================================================================
+
+bool WorldObjectHandler::SolvePlanarWorldPose(const std::vector<cv::Point3f>& worldPts,
+                                              const std::vector<cv::Point2f>& imgPts) {
+    const double fx = camCfg_.fx, fy = camCfg_.fy, cx = camCfg_.cx, cy = camCfg_.cy;
+    const cv::Mat& K = camCfg_.cameraMatrix;
+    const cv::Mat& D = camCfg_.distCoeffs;
+
+    // Mean reprojection error [px] of a pose over a point set (infinity if any
+    // point fails to project - degenerate pose).
+    auto MeanErr = [&](const cv::Matx33d& R, const cv::Vec3d& t,
+                       const std::vector<cv::Point3f>& wp,
+                       const std::vector<cv::Point2f>& ip) {
+        double e = 0.0;
+        for (size_t i = 0; i < wp.size(); ++i) {
+            cv::Point2f p;
+            if (!projectMarkerPt(R, t, wp[i], fx, fy, cx, cy, p))
+                return std::numeric_limits<double>::infinity();
+            e += cv::norm(p - ip[i]);
+        }
+        return e / static_cast<double>(wp.size());
+    };
+
+    // IPPE returns BOTH planar solutions explicitly; keep the best one that
+    // puts the camera above the floor. The mirrored solution is discarded by
+    // the gate rather than by whichever one an iterative solver happens to
+    // converge to. Returns the mean error (infinity = no acceptable solution).
+    auto SolveIppe = [&](const std::vector<cv::Point3f>& wp,
+                         const std::vector<cv::Point2f>& ip,
+                         cv::Matx33d& bestR, cv::Vec3d& bestT) {
+        std::vector<cv::Mat> rvecs, tvecs;
+        cv::solvePnPGeneric(wp, ip, K, D, rvecs, tvecs, false, cv::SOLVEPNP_IPPE);
+        double best = std::numeric_limits<double>::infinity();
+        for (size_t i = 0; i < rvecs.size(); ++i) {
+            const cv::Vec3d rv(rvecs[i].at<double>(0), rvecs[i].at<double>(1), rvecs[i].at<double>(2));
+            const cv::Vec3d tv(tvecs[i].at<double>(0), tvecs[i].at<double>(1), tvecs[i].at<double>(2));
+            if (!finite3(rv) || !finite3(tv)) continue;
+            cv::Mat Rm; cv::Rodrigues(rv, Rm);
+            const cv::Matx33d R = toMatx33(Rm);
+            if (!CameraAboveFloor(R, tv)) continue;
+            const double e = MeanErr(R, tv, wp, ip);
+            if (e < best) { best = e; bestR = R; bestT = tv; }
+        }
+        return best;
+    };
+
+    try {
+        cv::Matx33d R; cv::Vec3d t;
+        if (!std::isfinite(SolveIppe(worldPts, imgPts, R, t)))
+            return true;   // handled: genuinely no valid pose this frame
+
+        // One deterministic outlier pass: drop whole markers (groups of 4
+        // corners) whose mean corner error exceeds the gate, then re-solve on
+        // the kept set. Same input -> same kept set -> same pose, every frame.
+        std::vector<cv::Point3f> keptW;
+        std::vector<cv::Point2f> keptI;
+        const size_t nMk    = worldPts.size() / 4;
+        size_t       keptMk = 0;
+        for (size_t m = 0; m < nMk; ++m) {
+            double em = 0.0;
+            bool   ok = true;
+            for (int k = 0; k < 4 && ok; ++k) {
+                cv::Point2f p;
+                ok = projectMarkerPt(R, t, worldPts[4 * m + k], fx, fy, cx, cy, p);
+                if (ok) em += cv::norm(p - imgPts[4 * m + k]);
+            }
+            if (ok && em / 4.0 <= kWorldMarkerReprojGatePx) {
+                for (int k = 0; k < 4; ++k) {
+                    keptW.push_back(worldPts[4 * m + k]);
+                    keptI.push_back(imgPts[4 * m + k]);
+                }
+                ++keptMk;
+            }
+        }
+        if (keptMk >= 2) {
+            if (keptMk < nMk) {   // something was dropped - re-solve without it
+                cv::Matx33d R2; cv::Vec3d t2;
+                if (std::isfinite(SolveIppe(keptW, keptI, R2, t2))) { R = R2; t = t2; }
+            }
+        } else {
+            keptW = worldPts;     // gate rejected nearly everything - keep all
+            keptI = imgPts;
+        }
+
+        // Levenberg-Marquardt polish over the kept set, then the final gates.
+        cv::Mat rvm; cv::Rodrigues(cv::Mat(R), rvm);
+        cv::Vec3d rv(rvm.at<double>(0), rvm.at<double>(1), rvm.at<double>(2));
+        cv::Vec3d tv = t;
+        cv::solvePnPRefineLM(keptW, keptI, K, D, rv, tv);
+        if (finite3(rv) && finite3(tv)) {
+            cv::Mat Rm; cv::Rodrigues(rv, Rm);
+            const cv::Matx33d Rf = toMatx33(Rm);
+            if (CameraAboveFloor(Rf, tv)) {
+                worldR_ = Rf;
+                worldT_ = tv;
+                poseOk_ = true;
+            }
+        }
+        return true;
+    } catch (const cv::Exception&) {
+        return false;   // solver threw - caller falls back to the RANSAC path
+    }
 }
 
 // =============================================================================
@@ -238,10 +498,17 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
     hasTarget_  = false;
     targetLive_ = false;
     hasEffectiveWorldR_ = false;
+    hasRingFingertip_ = false;
+    ringFromSecond_   = false;
+    ringCoasting_     = false;
     overlays_.clear();
     worldOutlines_.clear();
+    knownLayoutOutlines_.clear();
+    ringOverlay_ = RingOverlay{};
     worldMarkerCount_ = 0;
     poseOk_ = false;
+    worldReprojErr_.clear();
+    worldIds_.clear();
 
     const double fx = camCfg_.fx, fy = camCfg_.fy, cx = camCfg_.cx, cy = camCfg_.cy;
     const cv::Mat& K = camCfg_.cameraMatrix;
@@ -250,13 +517,19 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
     // --- 1. Gather detections -------------------------------------------------
     // World markers -> (world-frame corner <-> detected corner) correspondences
     // for the world pose. Object markers -> their own live pose (solved from
-    // their 4 corners).
+    // their 4 corners). Ring markers -> corners, resolved to the fingertip in
+    // step 2b.
     struct OPose { cv::Matx33d R; cv::Vec3d t; float roll; };
     std::vector<cv::Point3f> worldObj;   // world-frame marker corners (config geometry)
     std::vector<cv::Point2f> worldImg;   // detected corners
     const WorldMarkerGeom*   soloGeom = nullptr;   // last world marker seen (1-marker path)
     const DetectedMarker*    soloMk   = nullptr;
     std::map<int, OPose>     objPoses;   // object id -> live pose
+
+    const RingMarkerConfig& ring = objCfg_.ring;
+    const bool ringEnabled = (ring.baseMarker >= 0 && ring.markerSizeMm > 0.0f);
+    bool haveBase = false, haveSecond = false;
+    std::array<cv::Point2f, 4> baseCorners{}, secondCorners{};
 
     for (const auto& m : markers) {
         const auto wIt = worldGeom_.find(m.id);
@@ -265,17 +538,29 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
                 worldObj.push_back(wIt->second.cornersWorld[k]);
                 worldImg.push_back(m.cornersPx[k]);
             }
+            worldIds_.push_back(m.id);   // parallel to each group of 4 corners
             soloGeom = &wIt->second;
             soloMk   = &m;
             worldOutlines_.push_back(m.cornersPx);
             ++worldMarkerCount_;
             continue;
         }
+        if (ringEnabled && (m.id == ring.baseMarker || m.id == ring.secondMarker)) {
+            if (m.id == ring.baseMarker) { haveBase   = true; baseCorners   = m.cornersPx; }
+            else                         { haveSecond = true; secondCorners = m.cornersPx; }
+            ringOverlay_.outlines.push_back(m.cornersPx);     // cyan outline
+            continue;
+        }
         const auto oIt = objects_.find(m.id);
-        if (oIt != objects_.end() && oIt->second.def->markerSizeMm > 0.f) {   // object marker
-            cv::Matx33d R; cv::Vec3d t;
-            if (solveSquare(m.cornersPx, oIt->second.def->markerSizeMm * 0.5f, K, D, R, t) && t[2] > 1.0)
-                objPoses[m.id] = { R, t, m.rollRad };
+        if (oIt != objects_.end()) {                                          // object marker
+            // Presence re-scan counts the raw DETECTION (no pose needed) -
+            // presence only asks whether the printed marker is still there.
+            if (presenceScanning_) ++presenceSeen_[m.id];
+            if (oIt->second.def->markerSizeMm > 0.f) {
+                cv::Matx33d R; cv::Vec3d t;
+                if (solveSquare(m.cornersPx, oIt->second.def->markerSizeMm * 0.5f, K, D, R, t) && t[2] > 1.0)
+                    objPoses[m.id] = { R, t, m.rollRad };
+            }
         }
     }
 
@@ -283,23 +568,54 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
     // Corners give 4 points per marker, so ONE world marker is already enough
     // for a pose (the old centre-based solve needed >= 4 markers).
     if (worldMarkerCount_ >= 2) {
-        // Multi-marker: RANSAC keeps the misdetected-marker rejection.
-        cv::Vec3d rvec, tvec;
-        try {
-            if (cv::solvePnPRansac(worldObj, worldImg, K, D, rvec, tvec, false, 100, kRansacReprojPx)
-                && finite3(rvec) && finite3(tvec)) {
-                cv::Mat Rm; cv::Rodrigues(rvec, Rm);
-                worldR_ = toMatx33(Rm);
-                worldT_ = tvec;
-                poseOk_ = true;
+        // Multi-marker, coplanar board (all corners on y = 0): DETERMINISTIC
+        // IPPE solve - both planar solutions examined explicitly, mirror
+        // rejected by the above-the-floor gate, one deterministic outlier pass,
+        // LM polish (SolvePlanarWorldPose). solvePnPRansac remains ONLY as the
+        // fallback for a non-coplanar set (legacy wall markers) or an IPPE
+        // failure: its RANDOM inlier subsets made the pose jump frame-to-frame
+        // whenever a biased marker sat near the threshold - the coherent
+        // "trained wireframes jump together" symptom.
+        bool planar = true;
+        for (const auto& p : worldObj)
+            if (std::abs(p.y) > 1e-3f) { planar = false; break; }
+
+        if (!planar || !SolvePlanarWorldPose(worldObj, worldImg)) {
+            cv::Vec3d rvec, tvec;
+            std::vector<int> inliers;
+            try {
+                if (cv::solvePnPRansac(worldObj, worldImg, K, D, rvec, tvec, false, 100,
+                                       kRansacReprojPx, 0.99, inliers)
+                    && finite3(rvec) && finite3(tvec)) {
+                    // LM polish over the RANSAC inliers.
+                    if (inliers.size() >= 4) {
+                        std::vector<cv::Point3f> inObj; inObj.reserve(inliers.size());
+                        std::vector<cv::Point2f> inImg; inImg.reserve(inliers.size());
+                        for (const int idx : inliers) {
+                            inObj.push_back(worldObj[idx]);
+                            inImg.push_back(worldImg[idx]);
+                        }
+                        cv::solvePnPRefineLM(inObj, inImg, K, D, rvec, tvec);
+                    }
+                    if (finite3(rvec) && finite3(tvec)) {
+                        cv::Mat Rm; cv::Rodrigues(rvec, Rm);
+                        const cv::Matx33d Rwc = toMatx33(Rm);
+                        if (CameraAboveFloor(Rwc, tvec)) {
+                            worldR_ = Rwc;
+                            worldT_ = tvec;
+                            poseOk_ = true;
+                        }
+                    }
+                }
+            } catch (const cv::Exception&) {
+                poseOk_ = false;   // degenerate correspondence set - treat as no pose
             }
-        } catch (const cv::Exception&) {
-            poseOk_ = false;   // degenerate correspondence set - treat as no pose
         }
     } else if (worldMarkerCount_ == 1) {
         // Single marker: its own IPPE square pose composed with its known world
         // placement. R_world->cam = R_marker->cam * R_marker->world^T. No RANSAC
-        // is possible with 4 points, so gate on the reprojection error instead.
+        // is possible with 4 points, so gate on the reprojection error instead
+        // (plus the same above-the-floor gate as the multi-marker path).
         cv::Matx33d Rmc; cv::Vec3d tmc;
         if (solveSquare(soloMk->cornersPx, objCfg_.worldMarkerSizeMm * 0.5f, K, D, Rmc, tmc)
             && tmc[2] > 1.0) {
@@ -314,7 +630,8 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
                     ++nProj;
                 }
             }
-            if (nProj == 4 && errPx / 4.0 <= kRansacReprojPx && finite3(twc)) {
+            if (nProj == 4 && errPx / 4.0 <= kRansacReprojPx && finite3(twc)
+                && CameraAboveFloor(Rwc, twc)) {
                 worldR_ = Rwc;
                 worldT_ = twc;
                 poseOk_ = true;
@@ -322,32 +639,327 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
         }
     }
 
-    // --- 3. Per object: live pose (instant) or held anchor; overlay + target ---
+    // --- 2a'. Pose diagnostics ---------------------------------------------------
+    // Count frames where world markers were seen but no pose was accepted
+    // (exposes intermittent solve failures), and compute each detected marker's
+    // mean corner reprojection error against the accepted pose - a marker
+    // consistently above its neighbours has a biased marker_positions entry
+    // (bias the corner-std probe cannot see). Consumed by the 'D' probe below
+    // and GetWorldReprojErrors().
+    if (worldMarkerCount_ >= 1 && !poseOk_) ++poseFailCount_;
+    if (poseOk_) {
+        for (size_t m = 0; m < worldIds_.size(); ++m) {
+            double em = 0.0;
+            bool   ok = true;
+            for (int k = 0; k < 4 && ok; ++k) {
+                cv::Point2f p;
+                ok = projectMarkerPt(worldR_, worldT_, worldObj[4 * m + k], fx, fy, cx, cy, p);
+                if (ok) em += cv::norm(p - worldImg[4 * m + k]);
+            }
+            if (ok) worldReprojErr_[worldIds_[m]] = em / 4.0;
+        }
+    }
+
+    // --- 2a''. Corner-jitter probe ('D') ----------------------------------------
+    // Accumulates the RAW detected corners of the probe world markers plus their
+    // per-frame reprojection error, and when the window completes prints two
+    // copy/paste rows: per-marker corner std [px] (= sqrt(mean over the 4
+    // corners of (var_x + var_y)); random noise) and per-marker mean
+    // reprojection error [px] (bias - a high outlier = bad marker_positions
+    // entry). "nan" = marker seen < 2 frames / never with a pose.
+    if (probeActive_) {
+        for (const auto& m : markers) {
+            for (const int pid : kJitterProbeIds) {
+                if (m.id != pid) continue;
+                CornerStat& st = probeStats_[m.id];
+                for (int k = 0; k < 4; ++k) {
+                    const double x = m.cornersPx[k].x, y = m.cornersPx[k].y;
+                    st.s[2 * k]      += x;
+                    st.ss[2 * k]     += x * x;
+                    st.s[2 * k + 1]  += y;
+                    st.ss[2 * k + 1] += y * y;
+                }
+                st.n++;
+                if (const auto eIt = worldReprojErr_.find(pid); eIt != worldReprojErr_.end()) {
+                    st.esum += eIt->second;
+                    st.en++;
+                }
+                break;
+            }
+        }
+        if (--probeFramesLeft_ <= 0) {
+            probeActive_ = false;
+            std::ostringstream ids, ns, vals, errs;
+            bool first = true;
+            for (const int pid : kJitterProbeIds) {
+                if (!first) { ids << ","; ns << ","; vals << ", "; errs << ", "; }
+                first = false;
+                ids << pid;
+                const auto it = probeStats_.find(pid);
+                if (it == probeStats_.end()) {
+                    ns << 0;
+                    vals << "nan";
+                    errs << "nan";
+                    continue;
+                }
+                const CornerStat& st = it->second;
+                ns << st.n;
+                if (st.n < 2) {
+                    vals << "nan";
+                } else {
+                    double var = 0.0;   // sum of the 8 per-coordinate variances
+                    for (int c = 0; c < 8; ++c) {
+                        const double mean = st.s[c] / st.n;
+                        var += std::max(0.0, st.ss[c] / st.n - mean * mean);
+                    }
+                    vals << std::fixed << std::setprecision(3) << std::sqrt(var / 4.0);
+                }
+                if (st.en < 1) errs << "nan";
+                else           errs << std::fixed << std::setprecision(3) << (st.esum / st.en);
+            }
+            std::cout << "[JITTER] corner std [px] over " << kJitterProbeFrames
+                      << " frames, ids " << ids.str() << " (samples " << ns.str() << "):\n"
+                      << "[JITTER] " << vals.str() << "\n"
+                      << "[JITTER] mean reprojection error vs world pose [px] "
+                         "(bias check - one high outlier = bad marker_positions entry):\n"
+                      << "[JITTER] " << errs.str() << "\n";
+        }
+    }
+
+    // --- 2a. Known-layout reprojection (diagnostic, config show_known_layout) --
+    // Expected outline of EVERY configured world marker through the solved pose;
+    // squares that miss the printed markers reveal a wrong marker size /
+    // position / mounting convention at a glance. Only squares fully inside the
+    // frame are kept (mirrors the ArUcoTest overlay).
+    if (objCfg_.showKnownLayout && poseOk_) {
+        const float W = static_cast<float>(camCfg_.width);
+        const float H = static_cast<float>(camCfg_.height);
+        for (const auto& [id, g] : worldGeom_) {
+            std::array<cv::Point2f, 4> q{};
+            bool ok = true;
+            for (int k = 0; k < 4 && ok; ++k)
+                ok = projectMarkerPt(worldR_, worldT_, g.cornersWorld[k], fx, fy, cx, cy, q[k])
+                     && q[k].x >= 0.f && q[k].x < W && q[k].y >= 0.f && q[k].y < H;
+            if (ok) knownLayoutOutlines_.push_back(q);
+        }
+    }
+
+    // --- 2b. Ring fingertip (live-measured hand tracking) ----------------------
+    // Base marker pose directly when visible; otherwise reconstructed from the
+    // second marker via the base<-second rigid transform (learned live whenever
+    // both are seen together, seeded from config relationship_angle until then).
+    // The fingertip (fingertip_offset in the base marker frame) feeds
+    // ControllerHandler::SetFingertipOffsetOverride() in main.cpp, replacing the
+    // rigid Cal3 camera->fingertip offset while available.
+    if (ringEnabled && (haveBase || haveSecond)) {
+        const float rh = ring.markerSizeMm * 0.5f;
+        cv::Matx33d Rbase, Rsec; cv::Vec3d tbase, tsec;
+        const bool basePose = haveBase &&
+            solveSquare(baseCorners, rh, K, D, Rbase, tbase) && tbase[2] > 1.0;
+        const bool secPose  = haveSecond &&
+            solveSquare(secondCorners, rh, K, D, Rsec, tsec) && tsec[2] > 1.0;
+
+        // Learn/refresh the base<-second transform (X_base = R*X_sec + t) from
+        // the two live poses: R = Rb^T*Rs, t = Rb^T*(ts - tb). Absorbs mount
+        // build tolerance that the config-derived seed cannot capture.
+        if (basePose && secPose) {
+            ringRelR_       = Rbase.t() * Rsec;
+            ringRelT_       = Rbase.t() * (tsec - tbase);
+            ringRelLearned_ = true;
+        }
+
+        cv::Matx33d Rring; cv::Vec3d tring;
+        bool havePose = false, fromSecond = false;
+        if (basePose) {
+            Rring = Rbase; tring = tbase; havePose = true;
+        } else if (secPose) {
+            // R_base->cam = R_sec->cam * R^T;  t_base->cam = t_sec - R_base->cam * t.
+            Rring      = Rsec * ringRelR_.t();
+            tring      = tsec - Rring * ringRelT_;
+            havePose   = finite3(tring) && tring[2] > 1.0;
+            fromSecond = true;
+        }
+
+        if (havePose) {
+            const cv::Point3f fo = ring.fingertipOffsetMm;
+            const cv::Vec3d   Xc = Rring * cv::Vec3d(fo.x, fo.y, fo.z) + tring;
+            if (finite3(Xc) && Xc[2] > 1.0) {
+                ringFingertipCamYup_ = cv::Point3f(static_cast<float>(Xc[0]),
+                                                   static_cast<float>(-Xc[1]),   // Y-down -> Y-up
+                                                   static_cast<float>(Xc[2]));
+                hasRingFingertip_ = true;
+            }
+
+            // Overlay arrow: head at the fingertip, tail back along the marker
+            // Y axis at marker-centre height (the ArUcoTest arrow geometry).
+            // The fingertip pixel (error-vector line anchor) only needs the
+            // tip, so it is set independently of the tail projection.
+            cv::Point2f tipPx, tailPx;
+            if (hasRingFingertip_ &&
+                projectMarkerPt(Rring, tring, fo, fx, fy, cx, cy, tipPx)) {
+                ringOverlay_.fingertipPx    = tipPx;
+                ringOverlay_.hasFingertipPx = true;
+                if (projectMarkerPt(Rring, tring, {fo.x, 0.f, fo.z}, fx, fy, cx, cy, tailPx)) {
+                    ringOverlay_.arrowTip  = tipPx;
+                    ringOverlay_.arrowTail = tailPx;
+                    ringOverlay_.hasArrow  = true;
+
+                    // Pointing ray: kRayLenMm beyond the fingertip along the
+                    // arrow direction (tail -> tip = marker Y through fo.y).
+                    // Projected in 3D so it foreshortens correctly when the
+                    // finger tilts toward/away from the overhead camera.
+                    if (std::abs(fo.y) > 1e-3f) {
+                        constexpr float kRayLenMm = 400.0f;
+                        const float     s = 1.0f + kRayLenMm / std::abs(fo.y);
+                        const cv::Point3f rayEndMarker(fo.x, fo.y * s, fo.z);
+                        cv::Point2f rayPx;
+                        if (projectMarkerPt(Rring, tring, rayEndMarker, fx, fy, cx, cy, rayPx)) {
+                            ringOverlay_.rayEnd = rayPx;
+                            ringOverlay_.hasRay = true;
+                        }
+                    }
+                }
+            }
+            ringOverlay_.visible    = hasRingFingertip_;
+            ringOverlay_.fromSecond = fromSecond;
+            ringFromSecond_         = fromSecond;
+
+            // Arrow-frame error rotation for this frame's ring pose:
+            // cam(Y-up) -> arrow = trim * R_marker->cam^T * diag(1,-1,1); the
+            // diag flips the caller's Y-up camera vector into the OpenCV
+            // Y-down frame Rring lives in (right-multiplying negates col 1).
+            cv::Matx33d A = arrowTrimM_ * Rring.t();
+            A(0, 1) = -A(0, 1);
+            A(1, 1) = -A(1, 1);
+            A(2, 1) = -A(2, 1);
+            for (int i = 0; i < 3; ++i)
+                for (int j = 0; j < 3; ++j)
+                    camYupToArrowR_(i, j) = static_cast<float>(A(i, j));
+        }
+    }
+
+    // Ring-fingertip coast: hold the last measured fingertip for a short window
+    // when BOTH ring markers drop out (same kCoastFrames policy as trained
+    // objects), so a one-frame detection hiccup doesn't pulse guidance off/on.
+    // After the window the fingertip goes invalid - guidance must CUT, never
+    // fall back to a camera-co-located offset model (the camera is overhead,
+    // not on the ring). The coast holds POSITION only; a fast-moving hand makes
+    // the held value stale, which is why the window is short.
+    if (hasRingFingertip_) {
+        lastRingFingertip_ = ringFingertipCamYup_;
+        lastArrowR_        = camYupToArrowR_;
+        hasLastRing_       = true;
+        ringCoastLeft_     = kCoastFrames;
+    } else if (ringEnabled && hasLastRing_ && ringCoastLeft_ > 0) {
+        --ringCoastLeft_;
+        ringFingertipCamYup_ = lastRingFingertip_;
+        camYupToArrowR_      = lastArrowR_;
+        hasRingFingertip_    = true;
+        ringCoasting_        = true;
+        // Reproject the held fingertip so the operator-view error-vector line
+        // keeps its anchor through the coast (Y-up camera frame -> image
+        // Y-down, same pinhole model as everywhere else).
+        if (lastRingFingertip_.z > 1.0f) {
+            const double px = fx * lastRingFingertip_.x / lastRingFingertip_.z + cx;
+            const double py = cy - fy * lastRingFingertip_.y / lastRingFingertip_.z;
+            if (std::isfinite(px) && std::isfinite(py)) {
+                ringOverlay_.fingertipPx    = cv::Point2f(static_cast<float>(px),
+                                                          static_cast<float>(py));
+                ringOverlay_.hasFingertipPx = true;
+            }
+        }
+    }
+
+    // --- 2c. Training burst ('t') ----------------------------------------------
+    // Accumulate a marker->world sample per visible object while a burst is
+    // active. Frames without a world pose contribute nothing but still count
+    // down, so a burst is always time-bounded. On expiry, average each sampled
+    // object's pose (translation mean, rotation SVD-orthonormalized) into a
+    // LOCKED anchor. This is the ONLY place anchors are created.
+    if (training_) {
+        if (poseOk_) {
+            for (const auto& [id, op] : objPoses) {
+                TrainAccum& acc = trainAcc_[id];
+                acc.Rsum += worldR_.t() * op.R;
+                acc.tsum += worldR_.t() * (op.t - worldT_);
+                acc.n++;
+            }
+        }
+        if (--trainFramesLeft_ <= 0) {
+            training_         = false;
+            trainFramesLeft_  = 0;
+            lastTrainedCount_ = 0;
+            for (const auto& [id, acc] : trainAcc_) {
+                if (acc.n <= 0) continue;
+                const auto oIt = objects_.find(id);
+                if (oIt == objects_.end()) continue;
+                ObjectAnchor& a = oIt->second.anchor;
+                a.R   = Orthonormalize(acc.Rsum * (1.0 / acc.n));
+                a.t   = acc.tsum * (1.0 / acc.n);
+                a.has = true;
+                ++lastTrainedCount_;
+            }
+            trainAcc_.clear();
+        }
+    }
+
+    // --- 2d. Presence re-scan ('r') ---------------------------------------------
+    // Countdown decrements once per Update() (detection frame) like the training
+    // burst, so a scan is always time-bounded. On expiry, TRAINED objects whose
+    // marker was detected on >= kPresenceMinSeenFrames frames become the present
+    // set; main.cpp consumes it for the random pick (removed objects drop out).
+    if (presenceScanning_) {
+        if (--presenceFramesLeft_ <= 0) {
+            presenceScanning_   = false;
+            presenceFramesLeft_ = 0;
+            presentIds_.clear();
+            for (const auto& [id, n] : presenceSeen_) {
+                if (n < kPresenceMinSeenFrames) continue;
+                if (!IsObjectScanned(id)) continue;   // only trained objects can guide
+                presentIds_.push_back(id);
+            }
+            presenceSeen_.clear();
+            presenceResultReady_ = true;
+        }
+    }
+
+    // --- 3. Per object: trained anchor (locked) or live preview; overlay + target
     for (auto& [id, rt] : objects_) {
         const ObjectDef& obj = *rt.def;
         const auto oIt = objPoses.find(id);
-        const bool live = (oIt != objPoses.end());
+        const bool live    = (oIt != objPoses.end());
+        const bool trained = rt.anchor.has;
 
+        // Pose used this frame. A TRAINED object renders and guides from its
+        // locked anchor through the current world pose - the live marker only
+        // recolors the wireframe. If the world pose drops out it COASTS on the
+        // last rendered pose for a short window (then hides); it NEVER falls
+        // back to its own live marker pose - switching reference systems makes
+        // the wireframe snap, since the small marker's solo IPPE pose is far
+        // noisier and tilt-ambiguous. An UNTRAINED object draws a live preview
+        // while its marker is visible (aim before pressing 't') but never guides.
         cv::Matx33d Ruse; cv::Vec3d tuse;
-        bool have = false;
+        bool have       = false;
+        bool fromAnchor = false;
 
-        if (live) {
-            // Use the object marker's own pose directly - tracks the marker with
-            // zero lag. Refresh the world-frame anchor from this single frame (no
-            // averaging) so it can hold position once the marker is occluded.
-            Ruse = oIt->second.R;
-            tuse = oIt->second.t;
-            have = true;
-            if (poseOk_) {
-                rt.anchor.R   = worldR_.t() * Ruse;
-                rt.anchor.t   = worldR_.t() * (tuse - worldT_);
-                rt.anchor.has = true;
-            }
-        } else if (poseOk_ && rt.anchor.has) {
-            // Occluded: hold the last-seen world pose, reprojected via the current
-            // (steady) world pose.
+        if (trained && poseOk_) {
             Ruse = worldR_ * rt.anchor.R;
             tuse = worldR_ * rt.anchor.t + worldT_;
+            have       = true;
+            fromAnchor = true;
+            rt.lastR     = Ruse;
+            rt.lastT     = tuse;
+            rt.hasLast   = true;
+            rt.coastLeft = kCoastFrames;
+        } else if (trained && rt.hasLast && rt.coastLeft > 0) {
+            Ruse = rt.lastR;
+            tuse = rt.lastT;
+            --rt.coastLeft;
+            have       = true;
+            fromAnchor = true;
+        } else if (!trained && live) {
+            Ruse = oIt->second.R;
+            tuse = oIt->second.t;
             have = true;
         }
 
@@ -359,7 +971,8 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
         ov.id       = id;
         ov.name     = obj.name;
         ov.visible  = live;
-        ov.anchored = !live;
+        ov.anchored = fromAnchor && !live;
+        ov.trained  = trained;
         ov.active   = (id == activeId_);
         ov.worldRefCount = poseOk_ ? worldMarkerCount_ : 0;
 
@@ -408,9 +1021,11 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
         overlays_.push_back(std::move(ov));
 
         // ---- Active-object guidance target -----------------------------------
-        // Suppressed during the scan phase: anchors are being collected, no
-        // guidance until the operator confirms the scan (FinishScan()).
-        if (!scanning_ && id == activeId_ && obj.hasTarget) {
+        // TRAINED objects only (an untrained preview never guides), and
+        // suppressed during the scan phase until the operator confirms the scan
+        // (FinishScan()). Resolved through the anchor + world pose; during a
+        // brief world-pose dropout it rides the coasted pose above.
+        if (!scanning_ && id == activeId_ && obj.hasTarget && trained) {
             const cv::Vec3d Xc =
                 Ruse * cv::Vec3d(obj.targetPoint.x, obj.targetPoint.y, obj.targetPoint.z) + tuse;
             if (finite3(Xc) && Xc[2] > 1.0) {
@@ -422,13 +1037,13 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
 
                 // Effective world->camera rotation for the full-pose fingertip
                 // path (main.cpp rotates the Cal3 offset by this). Prefer the
-                // world-board pose; if it isn't solved this frame but the object
-                // is live with a stored anchor (anchor.R = R_object->world),
-                // reconstruct R_world->cam = R_object->cam * R_object->world^T.
+                // world-board pose; during a coast, reconstruct it from the
+                // coasted anchor-based pose (anchor.R = R_object->world):
+                // R_world->cam = R_object->cam * R_object->world^T.
                 if ( poseOk_ ) {
                     effectiveWorldR_    = worldR_;
                     hasEffectiveWorldR_ = true;
-                } else if ( live && rt.anchor.has ) {
+                } else if ( rt.anchor.has ) {
                     effectiveWorldR_    = Ruse * rt.anchor.R.t();
                     hasEffectiveWorldR_ = true;
                 }

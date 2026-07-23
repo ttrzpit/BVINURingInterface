@@ -27,7 +27,7 @@
 // The in-struct defaults below are FALLBACKS used only when config.yaml (or an
 // individual key) is missing. They are kept in sync with config.yaml so a
 // missing file cannot silently change board geometry or controller limits.
-// Last synced: 2026-07-03.
+// Last synced: 2026-07-05.
 
 
 #include <array>
@@ -45,6 +45,9 @@ struct CameraConfig {
     int height = 1200;
     int framerate = 90;
     bool rotate180 = false;  // Flip image 180° (upside-down mount)
+    bool detectOnClahe = true;  // true = detect on the CLAHE gray; false = plain gray
+                                // (CLAHE's content-adaptive mapping moves marker edges
+                                // slightly frame to frame -> corner jitter; see config.yaml)
 
     // Calibration intrinsics
     double fx = 600.98172, fy = 599.86930;  // Focal lengths [px]
@@ -106,6 +109,12 @@ struct ArucoDetectorConfig {
     int cornerRefinementMethod = 1;
     int cornerRefinementMaxIterations = 30;
     double cornerRefinementMinAccuracy = 0.01;
+
+    // Detector-level corner refinement for the OBJECTS-mode detector ONLY
+    // (DICT_6X6_100, <=~20 markers - cheap to refine every marker, unlike the
+    // dense Fitts board). 2 = contour (whole-edge line fits, recommended),
+    // 3 = AprilTag (most accurate, slower), 1 = subpix, 0 = none.
+    int objectCornerRefinementMethod = 2;
 
     // Detect markers printed on reflective or glossy surfaces that invert the
     // black/white pattern under certain lighting conditions.
@@ -203,14 +212,16 @@ struct AccuracyTrialsConfig {
 };
 
 // ---- Object-Guidance World (OBJECTS mode, 'O') ------------------------------
-// A physical ArUco "world board" (marker_positions, ids 1–36) establishes a rig
-// world frame, and a set of physical objects (target_objects, ids 50–90) each
-// tagged by an ArUco marker are guided to. All markers use DICT_6X6_100 - a
-// different dictionary from the Fitts/Cal DICT_4X4_* grids, so OBJECTS mode
-// swaps the detector (see ArucoHandler::SetObjectDetection). Ported from the
-// ~/Code/ArUcoTest prototype. Geometry (marker frame, mm): origin = marker
-// centre, +X right, +Y up, +Z out of the marker face (toward the camera); the
-// object body extends toward -Z.
+// A physical ArUco "world board" (marker_positions, ids 1–45, a single ground
+// plane at y = 0) establishes a rig world frame, a set of physical objects
+// (target_objects, ids 60–72) each tagged by an ArUco marker are guided to, and
+// two ring markers (ids 73/74) on the hand track the fingertip live. All
+// markers use DICT_6X6_100 - a different dictionary from the Fitts/Cal
+// DICT_4X4_* grids, so OBJECTS mode swaps the detector (see
+// ArucoHandler::SetObjectDetection). Ported from the ~/Code/ArUcoTest
+// prototype. Geometry (marker frame, mm): origin = marker centre, +X right,
+// +Y up, +Z out of the marker face (toward the camera); the object body
+// extends toward -Z.
 
 // Shape of a virtual object drawn from its marker.
 enum class ObjectType { Box, Cylinder };
@@ -250,11 +261,51 @@ struct ObjectDef {
     bool        hasTarget = false;
 };
 
+// Ring markers (config.yaml [object_world.ring_markers]) - two markers on a
+// rigid mount worn on the hand, tracking the fingertip live in the camera
+// frame. fingertip = base marker pose * fingertipOffsetMm. When the base
+// marker is occluded its pose is reconstructed from the second marker via the
+// fixed base<-second rigid transform: learned live whenever both markers are
+// seen in the same frame, seeded until then from relationshipAngleDeg
+// (marker planes folded about the base marker's printed top edge).
+struct RingMarkerConfig {
+    int         baseMarker   = 73;      // Fingertip reference marker id; < 0 disables ring tracking
+    int         secondMarker = 74;      // Companion marker id
+    float       relationshipAngleDeg = 45.0f;  // Fold angle between the marker planes [deg]
+    float       markerSizeMm = 40.0f;   // Printed side length of BOTH ring markers [mm]
+    cv::Point3f fingertipOffsetMm = {0.0f, -60.0f, -20.0f};  // Fingertip in the base marker frame [mm]
+
+    // Yaw trim [deg] about the ARROW axis for the arrow-frame guidance error
+    // (OBJECTS mode): the error Δp is expressed in the arrow frame (X = right
+    // across the finger, Y = up out of the base marker face, Z = along the
+    // arrow). The frame's handedness/signs are corrected in code (see the Sx
+    // fix in WorldObjectHandler), so 0 is normal. This trim ROTATES the X/Y
+    // axes about the arrow only for a residual rotational mount misalignment;
+    // it cannot flip a single axis (that is a reflection, fixed in code). Tune
+    // on the rig with guidance output off, watching the Guiding Pos row.
+    float       arrowYawTrimDeg = 0.0f;
+};
+
 struct ObjectWorldConfig {
     // Physical side length of the WORLD board markers [mm]. Used to solve each
     // world marker's own 6DOF pose (for the relative/local object anchoring).
     // Must match the printed board.
-    float worldMarkerSizeMm = 100.0f;
+    float worldMarkerSizeMm = 64.0f;
+
+    // Draw the known-layout reprojection overlay (dark blue expected outline of
+    // EVERY configured world marker, from the solved world pose). Diagnostic
+    // for verifying marker size / positions / mounting convention.
+    bool showKnownLayout = false;
+
+    // Detection frames averaged by a 't' training burst (the ONLY way an object
+    // is mapped into the world frame). ~20 frames is about 0.25 s.
+    int trainFrames = 20;
+
+    // Detection frames of the 'r' presence re-scan: before a random object is
+    // picked, trained object markers are re-checked for this many frames and
+    // only the ones actually seen stay in the random pool (a physically removed
+    // object is never re-selected). ~30 frames is about 0.4 s.
+    int presenceScanFrames = 30;
 
     // Roll trim [deg] added to the world-board camera roll used to orient the Cal3
     // fingertip offset for objects. LEGACY scalar-roll fallback path only: used
@@ -290,6 +341,9 @@ struct ObjectWorldConfig {
 
     // Virtual objects tagged by object markers (id -> definition).
     std::map<int, ObjectDef> targetObjects;
+
+    // Ring markers - live fingertip tracking on the moving hand.
+    RingMarkerConfig ring;
 };
 
 // ---- Touchscreen Monitor ----------------------------------------------------

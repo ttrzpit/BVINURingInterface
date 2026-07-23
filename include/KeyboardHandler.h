@@ -122,6 +122,9 @@ enum class KeyAction {
     RANDOM_OBJECT_TARGET,
     SET_OBJECT_TARGET,
     FINISH_OBJECT_SCAN,
+    TRAIN_OBJECTS,
+    UNTRAIN_OBJECTS,
+    PROBE_CORNER_JITTER,
     PRETENSION_ADVANCE,
     ADJUST_TENSION_INC,
     ADJUST_TENSION_DEC,
@@ -195,6 +198,9 @@ struct KeyboardState {
     bool                 pendingRandomTarget = false;                           ///< One-shot: 'r' pressed - main picks the (distance-stratified) target
     bool                 pendingRandomObjectTarget = false;                     ///< One-shot: 'r' in OBJECTS - main picks from object_marker_pool
     bool                 pendingFinishObjectScan = false;                       ///< One-shot: Enter in OBJ_SCAN - main ends the object scan phase
+    bool                 pendingTrainObjects = false;                           ///< One-shot: 't' in OBJECTS - main starts a training burst
+    bool                 pendingUntrainObjects = false;                         ///< One-shot: 'u' in OBJECTS - main clears all trained anchors
+    bool                 pendingCornerJitterProbe = false;                      ///< One-shot: 'D' in OBJECTS - main starts the corner-jitter probe
     bool                 pendingLoggingToggle = false;                          ///< One-shot: 'L' pressed - main toggles the trial logger
     bool                 pendingEStopToggle = false;                            ///< One-shot: spacebar pressed - main toggles the guidance-output e-stop
     std::string          inputBuffer;                                           ///< Numeric value currently being typed
@@ -256,6 +262,15 @@ class KeyboardHandler {
 
     /** @brief Clear the one-shot Enter finish-object-scan request (OBJ_SCAN). */
     void ClearFinishObjectScan() { state_.pendingFinishObjectScan = false; }
+
+    /** @brief Clear the one-shot 't' train-objects request (main consumed it). */
+    void ClearTrainObjects() { state_.pendingTrainObjects = false; }
+
+    /** @brief Clear the one-shot 'u' untrain-objects request (main consumed it). */
+    void ClearUntrainObjects() { state_.pendingUntrainObjects = false; }
+
+    /** @brief Clear the one-shot 'D' corner-jitter-probe request (main consumed it). */
+    void ClearCornerJitterProbe() { state_.pendingCornerJitterProbe = false; }
 
     /** @brief Clear the one-shot 'L' logging-toggle request (main consumed it). */
     void ClearLoggingToggle() { state_.pendingLoggingToggle = false; }

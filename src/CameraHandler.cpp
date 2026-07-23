@@ -178,9 +178,15 @@ void CameraHandler::captureLoop() {
         // Grayscale for ArUco detection
         cv::cuda::cvtColor( gpuUndistorted_, gpuGray_, cv::COLOR_BGR2GRAY );
 
-        // CLAHE improves local contrast in variable/uneven lighting.
-        // Applied after grayscale conversion, only to the detection channel.
-        clahe->apply( gpuGray_, gpuGrayEq_ );
+        // CLAHE improves local contrast in variable/uneven lighting - but it is
+        // content-adaptive, so frame-to-frame noise changes each tile's mapping
+        // and slightly MOVES marker edges (corner jitter). detect_on_clahe: 0
+        // skips it and detects on the plain gray (well-lit static board).
+        if ( cfg_.detectOnClahe ) {
+            clahe->apply( gpuGray_, gpuGrayEq_ );
+        } else {
+            gpuGrayEq_ = gpuGray_;   // shallow GpuMat reference - no copy
+        }
 
         // Download into FRESH buffers each frame (download allocates when the
         // destination is empty). Fresh buffers per frame are required anyway -

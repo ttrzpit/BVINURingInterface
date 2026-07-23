@@ -87,18 +87,35 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
 
     // ---- OBJECTS (Task 2 - object guidance) ------------------------------------
     // Mirrors the Fitts 'F' block. 'O' from IDLE starts the scan/training phase
-    // (OBJ_SCAN): the operator sweeps the camera so each object is seen together
-    // with a world marker, mapping its target into the world frame; Enter then
-    // opens target selection. The calibration-incomplete gate (OBJ_WARN) is set
-    // up in KeyboardHandler::ProcessKey.
-    { { 'O' }, InputState::IDLE, InputState::OBJ_SCAN, "Scanning objects - show each object with a world marker, [Enter] to finish.", KeyAction::NONE },
-    { { 'p' }, InputState::OBJ_WARN, InputState::OBJ_SCAN, "Scanning objects - show each object with a world marker, [Enter] to finish.", KeyAction::NONE },
+    // (OBJ_SCAN): the operator aims the camera so an object (or several) and a
+    // world marker are visible and presses 't' - a burst averages each visible
+    // object's pose into a locked world anchor (the ONLY way objects are mapped).
+    // Enter then opens target selection. 't'/'u' stay available in OBJ_SEL /
+    // OBJ_RUN to re-train after moving an object or to forget all anchors. The
+    // calibration-incomplete gate (OBJ_WARN) is set up in
+    // KeyboardHandler::ProcessKey.
+    { { 'O' }, InputState::IDLE, InputState::OBJ_SCAN, "Scanning objects - aim at each object with a world marker, [t] to train, [Enter] to finish.", KeyAction::NONE },
+    { { 'p' }, InputState::OBJ_WARN, InputState::OBJ_SCAN, "Scanning objects - aim at each object with a world marker, [t] to train, [Enter] to finish.", KeyAction::NONE },
     { { 'r' }, InputState::OBJ_WARN, InputState::IDLE, "Returning to idle - complete calibrations, then press O.", KeyAction::NONE },
     { { 13, 10 }, InputState::OBJ_SCAN, InputState::OBJ_SEL, "Select object mode: [r] Random, [m] Manual...", KeyAction::FINISH_OBJECT_SCAN },
     { { 'm' }, InputState::OBJ_SEL, InputState::OBJ_ACT, "Which object marker ID (00-99)...", KeyAction::NONE },
     { { 'm' }, InputState::OBJ_RUN, InputState::OBJ_ACT, "Which object marker ID (00-99)...", KeyAction::NONE },
     { { 'r' }, InputState::OBJ_SEL, InputState::OBJ_RUN, "Object marker set to [OBJECT_ID].", KeyAction::RANDOM_OBJECT_TARGET },
     { { 'r' }, InputState::OBJ_RUN, InputState::OBJ_RUN, "Object marker set to [OBJECT_ID].", KeyAction::RANDOM_OBJECT_TARGET },
+    // Train ('t') / untrain ('u') - real outcome text is set via
+    // SetExternalStatus() by main.cpp (burst countdown / trained count).
+    { { 't' }, InputState::OBJ_SCAN, InputState::SAME, "Training visible objects - hold the camera steady...", KeyAction::TRAIN_OBJECTS },
+    { { 't' }, InputState::OBJ_SEL, InputState::SAME, "Training visible objects - hold the camera steady...", KeyAction::TRAIN_OBJECTS },
+    { { 't' }, InputState::OBJ_RUN, InputState::SAME, "Training visible objects - hold the camera steady...", KeyAction::TRAIN_OBJECTS },
+    { { 'u' }, InputState::OBJ_SCAN, InputState::SAME, "Clearing all trained objects...", KeyAction::UNTRAIN_OBJECTS },
+    { { 'u' }, InputState::OBJ_SEL, InputState::SAME, "Clearing all trained objects...", KeyAction::UNTRAIN_OBJECTS },
+    { { 'u' }, InputState::OBJ_RUN, InputState::SAME, "Clearing all trained objects...", KeyAction::UNTRAIN_OBJECTS },
+    // Corner-jitter probe ('D') - accumulates world-marker corners for ~300
+    // detection frames, then prints one row of per-marker corner std [px] to
+    // the terminal. Camera must be held rigidly still.
+    { { 'D' }, InputState::OBJ_SCAN, InputState::SAME, "Corner-jitter probe running - hold the camera rigidly still (result in terminal).", KeyAction::PROBE_CORNER_JITTER },
+    { { 'D' }, InputState::OBJ_SEL, InputState::SAME, "Corner-jitter probe running - hold the camera rigidly still (result in terminal).", KeyAction::PROBE_CORNER_JITTER },
+    { { 'D' }, InputState::OBJ_RUN, InputState::SAME, "Corner-jitter probe running - hold the camera rigidly still (result in terminal).", KeyAction::PROBE_CORNER_JITTER },
 
     // ---- RIG ALIGNMENT (one-time screen<->world-board capture) ------------------
     // 'R' from IDLE runs the one-time rig-alignment capture: show the touchscreen

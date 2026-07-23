@@ -267,7 +267,7 @@ void DisplayHandler::PopulateTelemetryPanel(
     detectedIds.reserve( markers.size() * 2 );
     for ( const auto &m : markers ) detectedIds.insert( m.id );
 
-    constexpr int pad = 13;      // dot pitch [px] - panel geometry, not board geometry
+    constexpr int pad = 13;    // dot pitch [px] - panel geometry, not board geometry
     constexpr int xStart = 16;
     constexpr int yStart = 55;
     constexpr int rDot = 4;
@@ -371,7 +371,7 @@ void DisplayHandler::PopulateTelemetryPanel(
     AddBodyCell( serial.hasRx ? fmt2Dec( serial.lastRx.current_raw_C * 0.01 ) : na, "AT3", 2, 1, "center", bodyFontSize );
     AddBorder( "S1", 29, 3, Colors::GraMd, 2 );
 
-    (void)touch;    // touch state is currently not shown on this panel
+    ( void )touch;    // touch state is currently not shown on this panel
 }
 
 void DisplayHandler::DrawTelCell( const std::string &text,
@@ -494,18 +494,34 @@ void DisplayHandler::SetTouchedTargetBox( bool visible, const std::array<cv::Poi
 
 void DisplayHandler::SetObjectOverlays( bool visible, const std::vector<ObjectOverlay> &overlays ) {
     objectOverlaysVisible_ = visible;
-    objectOverlays_        = overlays;
+    objectOverlays_ = overlays;
 }
 
 void DisplayHandler::SetObjectStatusLine( bool visible, const std::string &text ) {
     objectStatusVisible_ = visible;
-    objectStatusLine_    = text;
+    objectStatusLine_ = text;
 }
 
-void DisplayHandler::SetWorldMarkerOutlines( bool visible,
+void DisplayHandler::SetWorldMarkerOutlines( bool                                           visible,
                                              const std::vector<std::array<cv::Point2f, 4>> &outlines ) {
     worldOutlinesVisible_ = visible;
-    worldOutlines_        = outlines;
+    worldOutlines_ = outlines;
+}
+
+void DisplayHandler::SetRingOverlay( bool visible, const RingOverlay &ring ) {
+    ringOverlayVisible_ = visible;
+    ringOverlay_ = ring;
+}
+
+void DisplayHandler::SetObjectGuidanceStatus( bool visible, const std::string &text ) {
+    objGuidanceVisible_ = visible;
+    objGuidanceText_ = text;
+}
+
+void DisplayHandler::SetKnownLayoutOutlines( bool                                           visible,
+                                             const std::vector<std::array<cv::Point2f, 4>> &outlines ) {
+    knownLayoutVisible_ = visible;
+    knownLayoutOutlines_ = outlines;
 }
 
 void DisplayHandler::SetCal1State( bool recording, const std::vector<cv::Point2f> &samples,
@@ -660,7 +676,10 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
 
     // --- Target Telemetry Panel ----------------------------------------------------------------------------
     AddControllerHeadingCell( "Target Telemetry / Error Vector", "A7", 15, 1, "center", headerFontSize );
-    AddControllerSubheadingCell( "", "A8", 5, 1, "center", bodyFontSize );
+    // OBJECTS guidance-source tag (SetObjectGuidanceStatus): where the fingertip
+    // and target driving the error vector come from (e.g. "RING LIVE W:5",
+    // "COAST ANCH W:0"). Empty outside OBJECTS mode.
+    AddControllerSubheadingCell( objGuidanceVisible_ ? objGuidanceText_ : "", "A8", 5, 1, "center", bodyFontSize );
     AddControllerSubheadingCell( "x", "F8", 2, 1, "center", bodyFontSize );
     AddControllerSubheadingCell( "y", "H8", 2, 1, "center", bodyFontSize );
     AddControllerSubheadingCell( "z", "J8", 2, 1, "center", bodyFontSize );
@@ -694,9 +713,13 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
     // Guiding Position - the displacement Δp = pos_target_3d − pos_fingertip [mm]
     // computed by ControllerHandler's fingertip-to-target transform. This is the
     // move that lands the fingertip on the target (the error to the actual guided
-    // target, offsets/roll compensation included). Δp.z is the depth from the
-    // FINGERTIP to the target (target depth minus the Cal3 standoff), so it is
-    // smaller than the camera-to-target depth shown in Position above.
+    // target, offsets/roll compensation included). FITTS: camera frame Y-up,
+    // Δp.z = fingertip-to-target depth (target depth minus the Cal3 standoff).
+    // OBJECTS (arrow-frame path): expressed in ring marker 73's arrow frame -
+    // x/y = lateral deviation from the finger's pointing line, z = distance to
+    // go along it (aim the arrow at the target -> x,y -> 0). NOTE: therefore
+    // NOT the same frame as the Position/Fingertip rows (camera frame) in
+    // OBJECTS mode - their difference only matches Δp after rotation.
     AddControllerSubheadingCell( "Guiding Pos [mm]", "A10", 5, 1, "center", bodyFontSize );
     if ( haveTarget ) {
         const cv::Point3f dp = controllerTele_.displacement;
@@ -713,22 +736,43 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
         AddControllerBodyCell( "--", "N10", 2, 1, "center", bodyFontSize );
     }
 
+    // Fingertip - the fingertip position Δp was formed against [mm], camera
+    // frame Y-up: R_roll·d (Cal3 offset) on the scalar-roll path, or the live
+    // ring-marker fingertip when the OBJECTS override is active. Together with
+    // Position above it makes the error vector (Guiding Pos = Position -
+    // Fingertip) verifiable at a glance.
+    AddControllerSubheadingCell( "Fingertip [mm]", "A11", 5, 1, "center", bodyFontSize );
+    if ( controllerTele_.isTargetActive ) {
+        const cv::Point3f ft = controllerTele_.pos_fingertip;
+        AddControllerBodyCell( FmtFloat( ft.x, 1 ), "F11", 2, 1, "center", bodyFontSize );
+        AddControllerBodyCell( FmtFloat( ft.y, 1 ), "H11", 2, 1, "center", bodyFontSize );
+        AddControllerBodyCell( FmtFloat( ft.z, 1 ), "J11", 2, 1, "center", bodyFontSize );
+        AddControllerBodyCell( FmtFloat( std::sqrt( ft.x * ft.x + ft.y * ft.y ), 1 ), "L11", 2, 1, "center", bodyFontSize );                  // Rxy
+        AddControllerBodyCell( FmtFloat( std::sqrt( ft.x * ft.x + ft.y * ft.y + ft.z * ft.z ), 1 ), "N11", 2, 1, "center", bodyFontSize );    // Rxyz
+    } else {
+        AddControllerBodyCell( "--", "F11", 2, 1, "center", bodyFontSize );
+        AddControllerBodyCell( "--", "H11", 2, 1, "center", bodyFontSize );
+        AddControllerBodyCell( "--", "J11", 2, 1, "center", bodyFontSize );
+        AddControllerBodyCell( "--", "L11", 2, 1, "center", bodyFontSize );
+        AddControllerBodyCell( "--", "N11", 2, 1, "center", bodyFontSize );
+    }
+
     // Accumulated Error - PID integral term (accumulated position error), no z-component
-    AddControllerSubheadingCell( "Accumulated [mm]", "A11", 5, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.posErrorIntegral.x, 1 ), "F11", 2, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.posErrorIntegral.y, 1 ), "H11", 2, 1, "center", bodyFontSize );
-    AddControllerBodyCell( "--", "J11", 2, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( std::sqrt( controllerTele_.posErrorIntegral.x * controllerTele_.posErrorIntegral.x + controllerTele_.posErrorIntegral.y * controllerTele_.posErrorIntegral.y ), 1 ), "L11", 2, 1, "center", bodyFontSize );
-    AddControllerBodyCell( "--", "N11", 2, 1, "center", bodyFontSize );
-    AddControllerBorder( "A7", 15, 5, Colors::GraMd, 2 );
+    AddControllerSubheadingCell( "Accumulated [mm]", "A12", 5, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.posErrorIntegral.x, 1 ), "F12", 2, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.posErrorIntegral.y, 1 ), "H12", 2, 1, "center", bodyFontSize );
+    AddControllerBodyCell( "--", "J12", 2, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( std::sqrt( controllerTele_.posErrorIntegral.x * controllerTele_.posErrorIntegral.x + controllerTele_.posErrorIntegral.y * controllerTele_.posErrorIntegral.y ), 1 ), "L12", 2, 1, "center", bodyFontSize );
+    AddControllerBodyCell( "--", "N12", 2, 1, "center", bodyFontSize );
+    AddControllerBorder( "A7", 15, 6, Colors::GraMd, 2 );
 
     // --- Controller Output Panel ----------------------------------------------------------------------------
     // Header
-    AddControllerHeadingCell( "Controller Output", "A12", 15, 1, "center", headerFontSize );
-    AddControllerSubheadingCell( "", "A13", 6, 1, "center", bodyFontSize );
-    AddControllerSubheadingCell( "A | AdEx", "G13", 3, 1, "center", bodyFontSize );
-    AddControllerSubheadingCell( "B | AbEx", "J13", 3, 1, "center", bodyFontSize );
-    AddControllerSubheadingCell( "C | Flex", "M13", 3, 1, "center", bodyFontSize );
+    AddControllerHeadingCell( "Controller Output", "A13", 15, 1, "center", headerFontSize );
+    AddControllerSubheadingCell( "", "A14", 6, 1, "center", bodyFontSize );
+    AddControllerSubheadingCell( "A | AdEx", "G14", 3, 1, "center", bodyFontSize );
+    AddControllerSubheadingCell( "B | AbEx", "J14", 3, 1, "center", bodyFontSize );
+    AddControllerSubheadingCell( "C | Flex", "M14", 3, 1, "center", bodyFontSize );
 
     // Tension - preload tensions set during the pretensioning process. While the
     // operator is actively adjusting tension (pretensioning step 3/4, before the
@@ -736,111 +780,111 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
     // tension/PWM being adjusted instead of the stale preload from last time.
     cv::Point3f tensionRowN = controllerTele_.manualTensionMode ? controllerTele_.tension : controllerTele_.preloadTension;
     cv::Point3f tensionRowPwm = controllerTele_.manualTensionMode ? controllerTele_.pwm : controllerTele_.preloadPwm;
-    AddControllerSubheadingCell( "Tension", "A14", 3, 2, "center", bodyFontSize );
-    AddControllerSubheadingCell( "N", "D14", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( FmtFloat( tensionRowN.x, 2 ), "G14", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( FmtFloat( tensionRowN.y, 2 ), "J14", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( FmtFloat( tensionRowN.z, 2 ), "M14", 3, 1, "center", tableFontSize );
-    AddControllerSubheadingCell( "PWM", "D15", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( std::to_string( static_cast<int>( 2048 - tensionRowPwm.x ) ), "G15", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( std::to_string( static_cast<int>( 2048 - tensionRowPwm.y ) ), "J15", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( std::to_string( static_cast<int>( 2048 - tensionRowPwm.z ) ), "M15", 3, 1, "center", tableFontSize );
+    AddControllerSubheadingCell( "Tension", "A15", 3, 2, "center", bodyFontSize );
+    AddControllerSubheadingCell( "N", "D15", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( FmtFloat( tensionRowN.x, 2 ), "G15", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( FmtFloat( tensionRowN.y, 2 ), "J15", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( FmtFloat( tensionRowN.z, 2 ), "M15", 3, 1, "center", tableFontSize );
+    AddControllerSubheadingCell( "PWM", "D16", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( std::to_string( static_cast<int>( 2048 - tensionRowPwm.x ) ), "G16", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( std::to_string( static_cast<int>( 2048 - tensionRowPwm.y ) ), "J16", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( std::to_string( static_cast<int>( 2048 - tensionRowPwm.z ) ), "M16", 3, 1, "center", tableFontSize );
 
     // Force - per-motor tension/PWM contribution from the guidance force command
-    AddControllerSubheadingCell( "Force", "A16", 3, 2, "center", bodyFontSize );
-    AddControllerSubheadingCell( "N", "D16", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.deflectionForce.x, 2 ), "G16", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.deflectionForce.y, 2 ), "J16", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.deflectionForce.z, 2 ), "M16", 3, 1, "center", tableFontSize );
-    AddControllerSubheadingCell( "PWM", "D17", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( std::to_string( static_cast<int>( std::lround( controllerTele_.deflectionForcePwm.x ) ) ), "G17", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( std::to_string( static_cast<int>( std::lround( controllerTele_.deflectionForcePwm.y ) ) ), "J17", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( std::to_string( static_cast<int>( std::lround( controllerTele_.deflectionForcePwm.z ) ) ), "M17", 3, 1, "center", tableFontSize );
+    AddControllerSubheadingCell( "Force", "A17", 3, 2, "center", bodyFontSize );
+    AddControllerSubheadingCell( "N", "D17", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.deflectionForce.x, 2 ), "G17", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.deflectionForce.y, 2 ), "J17", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.deflectionForce.z, 2 ), "M17", 3, 1, "center", tableFontSize );
+    AddControllerSubheadingCell( "PWM", "D18", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( std::to_string( static_cast<int>( std::lround( controllerTele_.deflectionForcePwm.x ) ) ), "G18", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( std::to_string( static_cast<int>( std::lround( controllerTele_.deflectionForcePwm.y ) ) ), "J18", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( std::to_string( static_cast<int>( std::lround( controllerTele_.deflectionForcePwm.z ) ) ), "M18", 3, 1, "center", tableFontSize );
 
     // Stiffness - K(theta), the stiffness-calibration profile interpolated at
     // the current error heading. Independent of "Gain kP" (gainTune) below -
     // only reflects the Cal2 stiffness calibration result. A single scalar
     // (not per-motor), so it spans the A/B/C columns.
-    AddControllerSubheadingCell( "Stiffness", "A18", 3, 1, "center", bodyFontSize );
-    AddControllerSubheadingCell( "N/mm", "D18", 3, 1, "center", tableFontSize );
+    AddControllerSubheadingCell( "Stiffness", "A19", 3, 1, "center", bodyFontSize );
+    AddControllerSubheadingCell( "N/mm", "D19", 3, 1, "center", tableFontSize );
     // Cell color: green when K(theta) is measured and contributing to
     // kP_effective, orange when measured but not contributing (disabled via
     // 'k' toggle), dark red when Cal2 hasn't produced a profile yet.
-    AddControllerBodyCell( FmtFloat( controllerTele_.stiffnessGain, 2 ), "G18", 9, 1, "center", tableFontSize,
+    AddControllerBodyCell( FmtFloat( controllerTele_.stiffnessGain, 2 ), "G19", 9, 1, "center", tableFontSize,
                            !controllerTele_.stiffnessValid        ? Colors::RedBk
                            : controllerTele_.stiffnessGainEnabled ? Colors::GreBk
                                                                   : Colors::OraBk );
 
     // Gain kP - custom-tuned proportional gain per motor, seeded from
     // cfg_.gain_kP and adjustable via 'G' (the other term in kP_effective).
-    AddControllerSubheadingCell( "Gain kP", "A19", 3, 1, "center", bodyFontSize );
-    AddControllerSubheadingCell( "N/mm", "D19", 3, 1, "center", tableFontSize );
+    AddControllerSubheadingCell( "Gain kP", "A20", 3, 1, "center", bodyFontSize );
+    AddControllerSubheadingCell( "N/mm", "D20", 3, 1, "center", tableFontSize );
     // Cell color: green when this motor's gain is contributing to
     // kP_effective, black (default) when it's zero.
-    AddControllerBodyCell( FmtFloat( controllerTele_.gainTune.x, 2 ), "G19", 3, 1, "center", tableFontSize,
+    AddControllerBodyCell( FmtFloat( controllerTele_.gainTune.x, 2 ), "G20", 3, 1, "center", tableFontSize,
                            controllerTele_.gainTune.x > 0.0f ? Colors::GreBk : Colors::Black );
-    AddControllerBodyCell( FmtFloat( controllerTele_.gainTune.y, 2 ), "J19", 3, 1, "center", tableFontSize,
+    AddControllerBodyCell( FmtFloat( controllerTele_.gainTune.y, 2 ), "J20", 3, 1, "center", tableFontSize,
                            controllerTele_.gainTune.y > 0.0f ? Colors::GreBk : Colors::Black );
-    AddControllerBodyCell( FmtFloat( controllerTele_.gainTune.z, 2 ), "M19", 3, 1, "center", tableFontSize,
+    AddControllerBodyCell( FmtFloat( controllerTele_.gainTune.z, 2 ), "M20", 3, 1, "center", tableFontSize,
                            controllerTele_.gainTune.z > 0.0f ? Colors::GreBk : Colors::Black );
 
     // Gain kI - custom-tuned integral gain per motor, seeded from cfg_.gain_kI
     // and adjustable via 'I'. Forms kI_effective for the Stage 1 endgame
     // integrator. Cell color: green when this motor's integral gain is active
     // (> 0), black (default) when zero.
-    AddControllerSubheadingCell( "Gain kI", "A20", 3, 2, "center", bodyFontSize );
-    AddControllerSubheadingCell( "N/mm*s", "D20", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.iGainTune.x, 2 ), "G20", 3, 1, "center", tableFontSize,
+    AddControllerSubheadingCell( "Gain kI", "A21", 3, 2, "center", bodyFontSize );
+    AddControllerSubheadingCell( "N/mm*s", "D21", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.iGainTune.x, 2 ), "G21", 3, 1, "center", tableFontSize,
                            controllerTele_.iGainTune.x > 0.0f ? Colors::GreBk : Colors::Black );
-    AddControllerBodyCell( FmtFloat( controllerTele_.iGainTune.y, 2 ), "J20", 3, 1, "center", tableFontSize,
+    AddControllerBodyCell( FmtFloat( controllerTele_.iGainTune.y, 2 ), "J21", 3, 1, "center", tableFontSize,
                            controllerTele_.iGainTune.y > 0.0f ? Colors::GreBk : Colors::Black );
-    AddControllerBodyCell( FmtFloat( controllerTele_.iGainTune.z, 2 ), "M20", 3, 1, "center", tableFontSize,
+    AddControllerBodyCell( FmtFloat( controllerTele_.iGainTune.z, 2 ), "M21", 3, 1, "center", tableFontSize,
                            controllerTele_.iGainTune.z > 0.0f ? Colors::GreBk : Colors::Black );
 
     // PWM equivalent of the integral component's per-motor tension contribution.
-    AddControllerSubheadingCell( "PWM", "D21", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( std::to_string( static_cast<int>( controllerTele_.integralPwm.x ) ), "G21", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( std::to_string( static_cast<int>( controllerTele_.integralPwm.y ) ), "J21", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( std::to_string( static_cast<int>( controllerTele_.integralPwm.z ) ), "M21", 3, 1, "center", tableFontSize );
+    AddControllerSubheadingCell( "PWM", "D22", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( std::to_string( static_cast<int>( controllerTele_.integralPwm.x ) ), "G22", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( std::to_string( static_cast<int>( controllerTele_.integralPwm.y ) ), "J22", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( std::to_string( static_cast<int>( controllerTele_.integralPwm.z ) ), "M22", 3, 1, "center", tableFontSize );
 
     // Output - T_output = T_preload + T_deflection, clamped to [T_preload,
     // tension_output_max]. `tension`/`pwm` ARE the Stage 2 output values (the
     // former duplicate outputTension/outputPwm telemetry fields were removed).
-    AddControllerSubheadingCell( "Output", "A22", 3, 2, "center", bodyFontSize );
-    AddControllerSubheadingCell( "N", "D22", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.tension.x, 2 ), "G22", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.tension.y, 2 ), "J22", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.tension.z, 2 ), "M22", 3, 1, "center", tableFontSize );
+    AddControllerSubheadingCell( "Output", "A23", 3, 2, "center", bodyFontSize );
+    AddControllerSubheadingCell( "N", "D23", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.tension.x, 2 ), "G23", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.tension.y, 2 ), "J23", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.tension.z, 2 ), "M23", 3, 1, "center", tableFontSize );
 
-    AddControllerSubheadingCell( "PWM", "D23", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( std::to_string( static_cast<int>( controllerTele_.pwm.x ) ), "G23", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( std::to_string( static_cast<int>( controllerTele_.pwm.y ) ), "J23", 3, 1, "center", tableFontSize );
-    AddControllerBodyCell( std::to_string( static_cast<int>( controllerTele_.pwm.z ) ), "M23", 3, 1, "center", tableFontSize );
+    AddControllerSubheadingCell( "PWM", "D24", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( std::to_string( static_cast<int>( controllerTele_.pwm.x ) ), "G24", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( std::to_string( static_cast<int>( controllerTele_.pwm.y ) ), "J24", 3, 1, "center", tableFontSize );
+    AddControllerBodyCell( std::to_string( static_cast<int>( controllerTele_.pwm.z ) ), "M24", 3, 1, "center", tableFontSize );
 
-    AddControllerBorder( "A12", 15, 12, Colors::GraMd, 2 );
+    AddControllerBorder( "A13", 15, 12, Colors::GraMd, 2 );
 
     // --- Virtual XY fingertip panel ------------------------------------------------------------------
-    AddControllerHeadingCell( "Virtual Fingertip Mapping", "A24", 15, 1, "center", headerFontSize );
-    AddControllerSubheadingCell( "Tendons", "A25", 6, 1, "center", bodyFontSize );
-    AddControllerSubheadingCell( "A | AdEx", "G25", 3, 1, "center", bodyFontSize );
-    AddControllerSubheadingCell( "B | AbEx", "J25", 3, 1, "center", bodyFontSize );
-    AddControllerSubheadingCell( "C | Flex", "M25", 3, 1, "center", bodyFontSize );
-    AddControllerSubheadingCell( "Unspooled Angle", "A26", 6, 1, "center", bodyFontSize );
-    AddControllerSubheadingCell( "Home Angle", "A27", 6, 1, "center", bodyFontSize );
-    AddControllerSubheadingCell( "Effective Pulley Radius", "A28", 6, 1, "center", bodyFontSize );
-    AddControllerSubheadingCell( "Length Change", "A29", 6, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.q_abs.x, 2 ), "G26", 3, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.q_abs.y, 2 ), "J26", 3, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.q_abs.z, 2 ), "M26", 3, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.q_home.x, 2 ), "G27", 3, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.q_home.y, 2 ), "J27", 3, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.q_home.z, 2 ), "M27", 3, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.r_eff.x * 1000.0f, 1 ), "G28", 3, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.r_eff.y * 1000.0f, 1 ), "J28", 3, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.r_eff.z * 1000.0f, 1 ), "M28", 3, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.dL.x * 1000.0f, 1 ), "G29", 3, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.dL.y * 1000.0f, 1 ), "J29", 3, 1, "center", bodyFontSize );
-    AddControllerBodyCell( FmtFloat( controllerTele_.dL.z * 1000.0f, 1 ), "M29", 3, 1, "center", bodyFontSize );
+    AddControllerHeadingCell( "Virtual Fingertip Mapping", "A25", 15, 1, "center", headerFontSize );
+    AddControllerSubheadingCell( "Tendons", "A26", 6, 1, "center", bodyFontSize );
+    AddControllerSubheadingCell( "A | AdEx", "G26", 3, 1, "center", bodyFontSize );
+    AddControllerSubheadingCell( "B | AbEx", "J26", 3, 1, "center", bodyFontSize );
+    AddControllerSubheadingCell( "C | Flex", "M26", 3, 1, "center", bodyFontSize );
+    AddControllerSubheadingCell( "Unspooled Angle", "A27", 6, 1, "center", bodyFontSize );
+    AddControllerSubheadingCell( "Home Angle", "A28", 6, 1, "center", bodyFontSize );
+    AddControllerSubheadingCell( "Effective Pulley Radius", "A29", 6, 1, "center", bodyFontSize );
+    AddControllerSubheadingCell( "Length Change", "A30", 6, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.q_abs.x, 2 ), "G27", 3, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.q_abs.y, 2 ), "J27", 3, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.q_abs.z, 2 ), "M27", 3, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.q_home.x, 2 ), "G28", 3, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.q_home.y, 2 ), "J28", 3, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.q_home.z, 2 ), "M28", 3, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.r_eff.x * 1000.0f, 1 ), "G29", 3, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.r_eff.y * 1000.0f, 1 ), "J29", 3, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.r_eff.z * 1000.0f, 1 ), "M29", 3, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.dL.x * 1000.0f, 1 ), "G30", 3, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.dL.y * 1000.0f, 1 ), "J30", 3, 1, "center", bodyFontSize );
+    AddControllerBodyCell( FmtFloat( controllerTele_.dL.z * 1000.0f, 1 ), "M30", 3, 1, "center", bodyFontSize );
 
     AddControllerSubheadingCell( "Virtual Position", "A44", 5, 1, "center", headerFontSize );
     AddControllerBodyCell( FmtFloat( controllerTele_.pos_virtual.x, 1 ), "F44", 5, 1, "center", headerFontSize );
@@ -983,7 +1027,7 @@ void DisplayHandler::PopulateControllerPanel( const std::vector<DetectedMarker> 
     }
 
     // Border
-    AddControllerBorder( "A24", 15, 21, Colors::GraMd, 2 );
+    AddControllerBorder( "A25", 15, 20, Colors::GraMd, 2 );
 }
 
 void DisplayHandler::DrawControllerCell( const std::string &text, const std::string &cellRef,
@@ -1158,19 +1202,41 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
                           static_cast<int>( std::lround( p.y ) ) );
     };
 
+    // Known-layout reprojection (diagnostic, config show_known_layout): the
+    // expected outline of every configured world marker through the solved
+    // world pose. Dark blue and thin, drawn under everything else - a square
+    // that misses its printed marker reveals a wrong marker size / position /
+    // mounting convention at a glance.
+    if ( knownLayoutVisible_ ) {
+        for ( const auto &q : knownLayoutOutlines_ ) {
+            bool                   ok = true;
+            std::vector<cv::Point> poly( 4 );
+            for ( int k = 0; k < 4; k++ ) {
+                if ( !sane( q[k] ) ) {
+                    ok = false;
+                    break;
+                }
+                poly[k] = ipt( q[k] );
+            }
+            if ( ok ) cv::polylines( frame, poly, true, Colors::BluDk, 1, cv::LINE_4 );
+        }
+    }
+
     // Faint blue outline around each detected world-board marker, so the operator
     // can see which markers are anchoring the scene. Drawn first (under the object
     // overlays). Muted blue, thin.
     if ( worldOutlinesVisible_ ) {
-        
         for ( const auto &q : worldOutlines_ ) {
-            bool ok = true;
+            bool                   ok = true;
             std::vector<cv::Point> poly( 4 );
             for ( int k = 0; k < 4; k++ ) {
-                if ( !sane( q[k] ) ) { ok = false; break; }
+                if ( !sane( q[k] ) ) {
+                    ok = false;
+                    break;
+                }
                 poly[k] = ipt( q[k] );
             }
-            if ( ok ) cv::polylines( frame, poly, true, Colors::BluMd, 2, cv::LINE_4 );
+            if ( ok ) cv::polylines( frame, poly, true, Colors::BluMd, 1, cv::LINE_4 );
         }
     }
 
@@ -1185,10 +1251,13 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
         // Marker outline when anchored (a live marker is outlined by the
         // detection overlay / active-tag box already).
         if ( o.hasOutline ) {
-            bool ok = true;
+            bool                   ok = true;
             std::vector<cv::Point> poly( 4 );
             for ( int k = 0; k < 4; k++ ) {
-                if ( !sane( o.outline[k] ) ) { ok = false; break; }
+                if ( !sane( o.outline[k] ) ) {
+                    ok = false;
+                    break;
+                }
                 poly[k] = ipt( o.outline[k] );
             }
             if ( ok ) cv::polylines( frame, poly, true, col, 1, cv::LINE_4 );
@@ -1204,28 +1273,70 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
         // Guidance-target dot (magenta). Brightness encodes how many world
         // markers back the current world pose - the target's confidence once the
         // object marker leaves the frame: dark = 1 (or none), medium = 2,
-        // light = 3+. For the ACTIVE object also draw the guidance line from the
-        // camera principal point to the target, matching the FITTS "where
-        // guidance is pulling" cue.
+        // light = 3+. For the ACTIVE object also draw the ERROR-VECTOR line from
+        // the ring-measured fingertip (arrow head; reprojected held point while
+        // coasting) to the target - the pixel-space twin of the guidance error
+        // Δp = target − fingertip. No fingertip -> no line: guidance is cut
+        // then, and the old principal-point anchor (a relic of the
+        // camera-on-ring model) would misrepresent the error with an overhead
+        // camera.
         if ( o.hasTargetDot && sane( o.targetDot ) ) {
-            if ( o.active )
-                cv::line( frame, principalPoint_, ipt( o.targetDot ), Colors::GreMd, 2, cv::LINE_4 );
+            if ( o.active && ringOverlayVisible_ && ringOverlay_.hasFingertipPx &&
+                 sane( ringOverlay_.fingertipPx ) )
+                cv::line( frame, ipt( ringOverlay_.fingertipPx ), ipt( o.targetDot ),
+                          Colors::GreMd, 2, cv::LINE_4 );
             const cv::Scalar dotColor = ( o.worldRefCount >= 3 )   ? Colors::MagLt
                                         : ( o.worldRefCount == 2 ) ? Colors::MagMd
                                                                    : Colors::MagDk;
             cv::circle( frame, ipt( o.targetDot ), 5, dotColor, cv::FILLED, cv::LINE_4 );
         }
 
-        // Name label at the marker origin (black shadow + magenta text). The
-        // active object is marked; anchored objects note the anchored fallback.
+        // Name label at the marker origin (black shadow + magenta text). State
+        // suffix: untrained objects are a live "(preview)" (never guided);
+        // trained objects show "(memory)" while drawn with their marker occluded.
+        // The active object is marked with *.
         if ( o.hasLabel && sane( o.labelPos ) ) {
             std::string label = o.name;
-            if ( o.anchored ) label += " (memory)";
-            if ( o.active )   label += " *";
+            if ( !o.trained )
+                label += " (preview)";
+            else if ( !o.visible )
+                label += " (memory)";
+            if ( o.active ) label += " *";
             const cv::Point p = ipt( o.labelPos );
             cv::putText( frame, label, p, cv::FONT_HERSHEY_SIMPLEX, 0.75, Colors::White, 5, cv::LINE_4 );
             cv::putText( frame, label, p, cv::FONT_HERSHEY_SIMPLEX, 0.75, Colors::MagDk, 2, cv::LINE_4 );
         }
     }
-}
 
+    // Ring fingertip (cyan, drawn on top of the object overlays): outlines on
+    // the detected ring markers + the fingertip arrow (head = live-measured
+    // fingertip). Dark cyan when the pose came via the second marker (base
+    // occluded) so the operator can see the fallback engage.
+    if ( ringOverlayVisible_ ) {
+        const cv::Scalar ringCol = ringOverlay_.fromSecond ? Colors::CyaDk : Colors::CyaMd;
+        for ( const auto &q : ringOverlay_.outlines ) {
+            bool                   ok = true;
+            std::vector<cv::Point> poly( 4 );
+            for ( int k = 0; k < 4; k++ ) {
+                if ( !sane( q[k] ) ) {
+                    ok = false;
+                    break;
+                }
+                poly[k] = ipt( q[k] );
+            }
+            if ( ok ) cv::polylines( frame, poly, true, ringCol, 1, cv::LINE_4 );
+        }
+        if ( ringOverlay_.hasArrow && sane( ringOverlay_.arrowTail ) && sane( ringOverlay_.arrowTip ) ) {
+            cv::arrowedLine( frame, ipt( ringOverlay_.arrowTail ), ipt( ringOverlay_.arrowTip ),
+                             ringCol, 2, cv::LINE_AA, 0, 0.3 );
+
+            // Thin 400 mm pointing ray extending from the arrowhead along the
+            // finger's pointing direction (endpoint projected in 3D by
+            // WorldObjectHandler). Shows where the finger is aiming relative to
+            // the target dot.
+            if ( ringOverlay_.hasRay && sane( ringOverlay_.rayEnd ) )
+                cv::line( frame, ipt( ringOverlay_.arrowTip ), ipt( ringOverlay_.rayEnd ),
+                          ringCol, 1, cv::LINE_AA );
+        }
+    }
+}

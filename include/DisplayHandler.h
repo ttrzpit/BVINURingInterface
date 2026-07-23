@@ -209,6 +209,24 @@ public:
      *         outside OBJECTS mode. */
     void SetWorldMarkerOutlines(bool visible, const std::vector<std::array<cv::Point2f, 4>> &outlines);
 
+    /** @brief Ring-marker fingertip overlay for OBJECTS mode: cyan outlines on
+     *         the detected ring markers plus the cyan fingertip arrow (tail ->
+     *         tip = live-measured fingertip). Pre-projected to operator-view
+     *         pixels by WorldObjectHandler. Pass visible=false outside OBJECTS. */
+    void SetRingOverlay(bool visible, const RingOverlay &ring);
+
+    /** @brief Known-layout reprojection (config show_known_layout): the expected
+     *         outline of EVERY configured world marker through the solved world
+     *         pose, drawn as thin dark-blue squares. Diagnostic for verifying
+     *         board geometry. Pass visible=false outside OBJECTS mode. */
+    void SetKnownLayoutOutlines(bool visible, const std::vector<std::array<cv::Point2f, 4>> &outlines);
+
+    /** @brief OBJECTS guidance-source tag for the controller panel's Target
+     *         Telemetry block (e.g. "RING LIVE W:5", "COAST ANCH W:3") - shows
+     *         where the fingertip and target driving the error vector come
+     *         from. Pass visible=false outside OBJECTS mode (cell stays empty). */
+    void SetObjectGuidanceStatus(bool visible, const std::string &text);
+
     // ---- Controller panel ---------------------------------------------------
 
     void ClearController();
@@ -313,6 +331,12 @@ private:
     std::string                objectStatusLine_      = {};
     bool                       worldOutlinesVisible_  = false;
     std::vector<std::array<cv::Point2f, 4>> worldOutlines_ = {};
+    bool                       ringOverlayVisible_    = false;
+    RingOverlay                ringOverlay_           = {};
+    bool                       knownLayoutVisible_    = false;
+    std::vector<std::array<cv::Point2f, 4>> knownLayoutOutlines_ = {};
+    bool                       objGuidanceVisible_    = false;
+    std::string                objGuidanceText_       = {};
 
     bool        touchFingertipVisible_ = false;
     cv::Point2i touchFingertipPx_      = {};

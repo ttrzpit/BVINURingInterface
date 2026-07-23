@@ -196,7 +196,18 @@ void ControllerHandler::Update( const TeensyToPcPacket& rx,
         // Target is the marker CENTRE itself: drive the fingerpad onto the tag,
         // using the cal3 offset (rolled) purely as the camera->fingertip geometry.
         const cv::Point3f pos_target_3d = targetMarkerPosMm_;
-        displacement_ = ComputeDisplacement( pos_target_3d, pos_fingertip );
+        displacement_   = ComputeDisplacement( pos_target_3d, pos_fingertip );
+        pos_fingertip_  = pos_fingertip;    // telemetry: the fingertip Δp was formed against
+
+        // OBJECTS arrow-frame path: express Δp in the ring arrow frame
+        // (SetErrorFrameRotation) so the planar PID corrects the lateral
+        // deviation from the finger's pointing line and Δp.z is the distance
+        // to go along it - the overhead-camera analog of the FITTS image-axis
+        // error. Rotation preserves |Δp|, so the 3D distance ramp is unchanged.
+        if ( errorFrameActive_ ) {
+            const cv::Vec3f r = errorFrameR_ * cv::Vec3f( displacement_.x, displacement_.y, displacement_.z );
+            displacement_ = cv::Point3f( r[0], r[1], r[2] );
+        }
 
         // Expose the offset components for main.cpp's camera-pixel projection.
         // corrX/corrY are the rolled offset = pos_fingertip.xy (pos_camera = 0).
@@ -210,7 +221,8 @@ void ControllerHandler::Update( const TeensyToPcPacket& rx,
         pos_target_raw.y += displacement_.y;
 
     } else {
-        displacement_ = {};
+        displacement_  = {};
+        pos_fingertip_ = {};
         targetOx_ = targetOy_ = targetCorrX_ = targetCorrY_ = 0.0f;
     }
 
@@ -262,7 +274,17 @@ void ControllerHandler::Update( const TeensyToPcPacket& rx,
         case 2:
             // Hold the last rampValue_ while the target isn't detected (no valid depth).
             if ( targetMarkerActive_ ) {
-                const float z = displacement_.z;    // fingertip-to-target depth [mm]
+                // Distance metric that "closes" as the fingertip approaches. On
+                // the ring-camera path the camera-depth axis IS the approach
+                // axis, so Δp.z is used. With the OBJECTS fingertip override
+                // the camera is overhead: Δp.z is just the height difference
+                // (near zero for an on-table approach), so the full 3D
+                // fingertip-to-target distance is used instead.
+                const float z = fingertipOverrideActive_
+                                    ? std::sqrt( displacement_.x * displacement_.x +
+                                                 displacement_.y * displacement_.y +
+                                                 displacement_.z * displacement_.z )
+                                    : displacement_.z;    // fingertip-to-target depth [mm]
                 if ( !rampZInit_ && z > 1e-3f ) {
                     rampStartZ_ = z;    // starting depth for this target
                     rampZInit_ = true;
@@ -436,7 +458,8 @@ ControllerTelemetry ControllerHandler::GetTelemetry() const {
     t.pos_virtual = pos_virtual_;
     t.vel_virtual = vel_filtered_;
     t.posErrorIntegral = integral_;
-    t.displacement = displacement_;
+    t.displacement  = displacement_;
+    t.pos_fingertip = pos_fingertip_;
     t.q_abs = GetAbsoluteAngles();
     t.q_home = GetHomeAngles();
     t.r_eff = GetEffectiveRadii();
