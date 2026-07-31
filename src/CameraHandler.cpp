@@ -57,13 +57,28 @@ bool CameraHandler::WaitForFrame( double lastTimestamp, int timeoutMs ) {
     } );
 }
 
+void CameraHandler::RequestCamera( int index ) {
+    // Stage requested but not configured -> stay on the ring camera.
+    if ( index == 1 && cfg_.device2.empty() ) index = 0;
+    requestedCamera_.store( index );
+    // The capture thread picks this up at the top of its next iteration; no
+    // VideoCapture access here (that stays on the capture thread).
+}
+
+const std::string& CameraHandler::DevicePath( int index ) const {
+    return ( index == 1 && !cfg_.device2.empty() ) ? cfg_.device2 : cfg_.device;
+}
+
 // ---- Private - setup --------------------------------------------------------
 
 void CameraHandler::openCamera() {
     cv::setUseOptimized( true );
 
+    const int          idx = requestedCamera_.load();
+    const std::string& dev = DevicePath( idx );
+
     try {
-        camera_.open( cfg_.device, cv::CAP_V4L2 );
+        camera_.open( dev, cv::CAP_V4L2 );
 
         // Codec and resolution - MJPEG allows the camera to deliver full
         // resolution at high frame rates over USB
@@ -90,11 +105,12 @@ void CameraHandler::openCamera() {
         camera_.set( cv::CAP_PROP_ZOOM, cfg_.zoom );
 
         if ( !camera_.isOpened() ) {
-            std::cerr << "CameraHandler: Failed to open '" << cfg_.device << "'\n";
+            std::cerr << "CameraHandler: Failed to open '" << dev << "'\n";
             return;
         }
 
-        std::cout << "CameraHandler: Opened " << cfg_.device << " - "
+        activeCamera_.store( idx );
+        std::cout << "CameraHandler: Opened " << ( idx == 1 ? "STAGE " : "RING " ) << dev << " - "
                   << camera_.get( cv::CAP_PROP_FRAME_HEIGHT ) << "x"
                   << camera_.get( cv::CAP_PROP_FRAME_WIDTH ) << " @ "
                   << camera_.get( cv::CAP_PROP_FPS ) << " fps"
@@ -138,6 +154,20 @@ void CameraHandler::captureLoop() {
     int     grabFailures = 0;
 
     while ( running_ ) {
+        // Camera switch (RequestCamera): the main thread only records the
+        // request; the actual release/reopen happens here so the VideoCapture
+        // is never touched off the capture thread. The last published frame is
+        // left in place - the main loop just sees no NEW frames (so detection
+        // does not re-run) during the brief reopen, then resumes on the new
+        // camera. grab() failures below also reopen, so activeCamera_ tracks
+        // whichever device is actually open.
+        if ( requestedCamera_.load() != activeCamera_.load() ) {
+            camera_.release();
+            openCamera();
+            grabFailures = 0;
+            continue;
+        }
+
         // grab() blocks until the camera delivers a new frame at its native
         // frame rate. This is the throttle that keeps the capture loop from
         // busy-spinning - no sleep needed.
@@ -150,7 +180,8 @@ void CameraHandler::captureLoop() {
             }
             std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
             if ( grabFailures % 200 == 0 ) {
-                std::cerr << "CameraHandler: attempting to reopen " << cfg_.device << "\n";
+                std::cerr << "CameraHandler: attempting to reopen "
+                          << DevicePath( requestedCamera_.load() ) << "\n";
                 camera_.release();
                 openCamera();
             }

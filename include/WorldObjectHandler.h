@@ -119,6 +119,14 @@ struct RingOverlay {
     bool        hasRay = false;     // thin pointing ray extending past the arrow tip
     cv::Point2f rayEnd{};           //   (kRayLenMm along the finger's pointing dir)
 
+    // Where the finger's pointing ray meets the world-board ground plane
+    // (world y = 0). Valid only when a world pose is solved this frame and the
+    // ray actually strikes the plane ahead of the fingertip. Drawn as a small
+    // cyan circle so the operator can see where the finger is aiming in
+    // physical space.
+    bool        hasGroundHit = false;
+    cv::Point2f groundHit{};
+
     // Projected fingertip pixel - valid whenever a fingertip is available
     // (live, or reprojected from the held position while COASTING, when the
     // arrow itself can't draw). Anchor of the operator-view error-vector line

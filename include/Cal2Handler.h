@@ -80,6 +80,11 @@ public:
      *         meaningful once IsComplete() is true. */
     std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT> GetStiffnessProfile() const;
 
+    /** @brief Inject a stiffness K(theta) profile loaded from a participant
+     *         config file and mark the stage complete, bypassing the force-ramp
+     *         calibration. GetStiffnessProfile() then returns the loaded values. */
+    void LoadStiffnessProfile( const std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT>& kTheta );
+
     const std::array<Cal2HeadingResult, CONSTANT_CALIBRATION_ANGLES_COUNT>& GetResults() const { return results_; }
 
     /** @brief Index into CONSTANT_CALIBRATION_ANGLES_DEG for the heading

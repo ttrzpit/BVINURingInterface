@@ -40,7 +40,11 @@
 
 struct CameraConfig {
     // Device
-    std::string device = "/dev/video0";
+    std::string device = "/dev/video0";   // Ring camera (default feed: FITTS/Cal/idle)
+    std::string device2 = "";              // Stage camera (OBJECTS mode); empty = no
+                                           // second camera, ring is used everywhere.
+                                           // Identical hardware to `device`, so the
+                                           // intrinsics/settings below apply to both.
     int width = 1600;
     int height = 1200;
     int framerate = 90;

@@ -118,8 +118,11 @@ Two parallel overlays: `P` tunes the per-motor proportional gain (`gainTune`), `
  `L`       | 76       | "Toggle trial logging (prime / disarm)" | ANY                        | (same as previous, or LOG_UID if no user ID) | "Trial logging primed." / "Trial logging off." (see Note2)
  `U`       | 85       | "Set user ID"                           | ANY                        | LOG_UID                 | "Enter ID for user (000-999)..."
  `nnn`     | [NUM]    | "Set user ID value (000-999)"           | LOG_UID 	                  | LOG                 | "User ID set to [VAL]."
+ `y`       | 121/89   | "Load stored participant calibration"   | LOG_CONFIRM                | IDLE                    | "Loading participant configuration..."
+ `n`       | 110/78   | "Ignore stored participant calibration" | LOG_CONFIRM                | IDLE                    | "Ignoring stored configuration - recalibrate to overwrite."
 **Note1** For command `nnn`, this represents a 3-digit value from 000 to 999, always entered with three digits (e.g., 001, 104, 204)
 **Note2** `L` is a system-level toggle that works in any state, so logging can be armed once at the start of a session and left alone. If no user ID has been entered yet (`activeUserId < 0`), the first `L` instead jumps straight to the `LOG_UID` prompt ("Enter user ID (000-999) to start logging..."); once a valid ID is entered, logging is primed automatically ("User ID set - trial logging primed."). While primed, the next Fitts target start (`r`/`m`) begins a capture; pressing `L` mid-capture cancels and discards it. The operator panel's "Trial Logging" cell shows OFF / PRIMED / REC.
+**Note3** Per-participant calibration config: when a user ID is set, main.cpp checks for `logging/<UUU>/config<UUU>.yaml`. If it exists with stored calibrations, the system diverts to the `LOG_CONFIRM` prompt ("User <UUU> configuration found, load (y/n)?"). `y` loads the stored Cal1 (AROM) / Cal2 (stiffness) / Cal3 (fingertip offset) values and marks them complete; `n` ignores them. The file is created/updated automatically as each calibration completes (partial-aware - each of the three sections is saved independently). Pressing `n` then re-running a calibration overwrites that section. Only real participant IDs (>= 001) are persisted; `000` is the non-logging ID.
 
 
 

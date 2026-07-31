@@ -61,6 +61,13 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { { 'L' }, InputState::ANY, InputState::SAME, "", KeyAction::TOGGLE_LOGGING },
     { { 'U' }, InputState::ANY, InputState::LOG_UID, "Enter ID for user (000-999)...", KeyAction::NONE },
 
+    // Per-participant config prompt (LOG_CONFIRM): main.cpp diverts here after a
+    // user ID is set IF logging/<UUU>/config<UUU>.yaml exists. Single-keypress
+    // y/n (matches FIT_WARN/OBJ_WARN). 'y' loads the stored Cal1/2/3 values; 'n'
+    // ignores them (they are overwritten when a calibration is (re)run).
+    { { 'y', 'Y' }, InputState::LOG_CONFIRM, InputState::IDLE, "Loading participant configuration...", KeyAction::LOAD_USER_CONFIG },
+    { { 'n', 'N' }, InputState::LOG_CONFIRM, InputState::IDLE, "Ignoring stored configuration - recalibrate to overwrite.", KeyAction::DISCARD_USER_CONFIG },
+
     // ---- PWM_TEST ---------------------------------------------------------------
     { { 'M' }, InputState::ANY, InputState::MOT_PWM, "Select motor to test: [a] Motor A, [b] Motor B, [c] Motor C, [d] All Motors...", KeyAction::NONE },
     { { 'a', 185 }, InputState::MOT_PWM, InputState::MOT_PWM_A, "Enter PWM for Motor A (0-2047)...", KeyAction::NONE },

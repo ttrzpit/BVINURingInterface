@@ -65,6 +65,15 @@ public:
 
     const AromBoundary& GetBoundary() const { return boundary_; }
 
+    /** @brief Inject an AROM boundary loaded from a participant config file and
+     *         mark the stage complete, bypassing the recording phase. */
+    void LoadBoundary( const AromBoundary& b ) {
+        boundary_       = b;
+        boundary_.valid = true;
+        phase_          = Phase::DONE;
+        status_         = "AROM: loaded from participant config.";
+    }
+
     /** @brief Recorded virtual fingertip positions [mm] so far this recording. */
     const std::vector<cv::Point2f>& GetSamples() const { return samples_; }
 

@@ -70,7 +70,9 @@ aruco_calibration_grid:
 
 # ---- Camera -----------------------------------------------------------------
 camera:
-   device: "/dev/video0"
+   # device: "/dev/video0" # Original camera
+   device:  "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:1.3:1.0-video-index0"    # Ring camera
+   device2: "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:1.4:1.0-video-index0"    # Stage camera
    width: 1600    # 1600
    height: 1200   # 1200
    framerate: 90
@@ -348,14 +350,14 @@ object_world:
    # The measured fingertip replaces the Cal3 rigid camera->fingertip offset in
    # OBJECTS guidance whenever it is available (robust to finger deflection).
    ring_markers:
-      base_marker:        73   # Fingertip reference marker (fingertip_offset is in ITS frame)
-      second_marker:      74   # Companion marker, folded about 73's printed top edge
+      base_marker:        50   # Fingertip reference marker (fingertip_offset is in ITS frame)
+      second_marker:      51   # Companion marker, folded about 73's printed top edge
       relationship_angle: 45   # Fold angle between the two marker planes [deg]
       marker_size_mm:     40   # Printed side length of BOTH ring markers [mm]
-      fingertip_offset:   { x: 0, y: -40, z: -20 }   # Fingertip in 73's frame [mm]
+      fingertip_offset:   { x: 0, y: -40, z: -15 }   # Fingertip in 73's frame [mm]
       # Yaw trim [deg] about the ARROW axis for the arrow-frame guidance error.
       # The OBJECTS error vector is expressed in the arrow frame (X = right
-      # across the finger, Y = up out of 73's face, Z = along the arrow /
+      # across the finger, Y = up out of 50's face, Z = along the arrow /
       # distance to go). The frame is already right-handed and sign-correct in
       # code (see the Sx handedness fix in WorldObjectHandler), so 0 is normal.
       # This ROTATES the X/Y error axes about the arrow only for a residual

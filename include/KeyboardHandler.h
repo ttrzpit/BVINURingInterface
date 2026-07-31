@@ -36,6 +36,7 @@ enum class InputState {
     PRE_TENSION,
     LOG,
     LOG_UID,
+    LOG_CONFIRM,    // Per-participant config found - (y)es load / (n)o ignore prompt
     MOT_PWM,
     MOT_PWM_A,
     MOT_PWM_B,
@@ -140,6 +141,8 @@ enum class KeyAction {
     TOGGLE_STIFFNESS_GAIN,
     TOGGLE_LOGGING,
     TOGGLE_ESTOP,
+    LOAD_USER_CONFIG,
+    DISCARD_USER_CONFIG,
 };
 
 // ---- Motor test request -----------------------------------------------------
@@ -202,6 +205,8 @@ struct KeyboardState {
     bool                 pendingUntrainObjects = false;                         ///< One-shot: 'u' in OBJECTS - main clears all trained anchors
     bool                 pendingCornerJitterProbe = false;                      ///< One-shot: 'D' in OBJECTS - main starts the corner-jitter probe
     bool                 pendingLoggingToggle = false;                          ///< One-shot: 'L' pressed - main toggles the trial logger
+    bool                 pendingLoadUserConfig = false;                         ///< One-shot: 'y' in LOG_CONFIRM - main loads the participant's stored calibrations
+    bool                 pendingDiscardUserConfig = false;                      ///< One-shot: 'n' in LOG_CONFIRM - main ignores the stored calibrations
     bool                 pendingEStopToggle = false;                            ///< One-shot: spacebar pressed - main toggles the guidance-output e-stop
     std::string          inputBuffer;                                           ///< Numeric value currently being typed
     std::string          outputBuffer;                                          ///< Display text for the last executed command
@@ -274,6 +279,10 @@ class KeyboardHandler {
 
     /** @brief Clear the one-shot 'L' logging-toggle request (main consumed it). */
     void ClearLoggingToggle() { state_.pendingLoggingToggle = false; }
+
+    /** @brief Clear the one-shot 'y'/'n' participant-config requests (main consumed them). */
+    void ClearLoadUserConfig() { state_.pendingLoadUserConfig = false; }
+    void ClearDiscardUserConfig() { state_.pendingDiscardUserConfig = false; }
 
     /** @brief Clear the one-shot spacebar e-stop-toggle request (main consumed it). */
     void ClearEStopToggle() { state_.pendingEStopToggle = false; }

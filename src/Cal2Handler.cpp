@@ -192,3 +192,12 @@ std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT> Cal2Handler::GetStiffnessPr
     }
     return profile;
 }
+
+void Cal2Handler::LoadStiffnessProfile( const std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT>& kTheta ) {
+    for ( int i = 0; i < CONSTANT_CALIBRATION_ANGLES_COUNT; i++ ) {
+        results_[i].stiffness_kP = kTheta[i];
+        results_[i].valid        = true;
+    }
+    phase_  = Phase::DONE;
+    status_ = "Stiffness: loaded from participant config.";
+}

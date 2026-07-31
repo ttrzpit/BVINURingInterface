@@ -1180,8 +1180,23 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
     // the object is drawn from its world anchor (its own marker occluded).
     if ( !objectOverlaysVisible_ ) return;
 
+    // Guidance-target name banner: the object currently being guided to, from
+    // its config "name" property. Drawn prominently at the top-left so the
+    // operator always knows the active target (the per-object labels below also
+    // suffix the active object with '*'). Magenta matches those labels.
+    for ( const auto &o : objectOverlays_ ) {
+        if ( o.active && !o.name.empty() ) {
+            const std::string banner = "Guiding to: " + o.name;
+            cv::putText( frame, banner, cv::Point( 11, 25 ), cv::FONT_HERSHEY_SIMPLEX,
+                         0.8, cv::Scalar( 0, 0, 0 ), 4, cv::LINE_AA );
+            cv::putText( frame, banner, cv::Point( 10, 24 ), cv::FONT_HERSHEY_SIMPLEX,
+                         0.8, Colors::MagLt, 2, cv::LINE_AA );
+            break;
+        }
+    }
+
     // Rig-diagnostic status line (world markers / pose / active-object state),
-    // top-left under the "Target:" label. Black shadow then white for contrast.
+    // top-left under the guidance-target banner. Black shadow then white for contrast.
     if ( objectStatusVisible_ && !objectStatusLine_.empty() ) {
         cv::putText( frame, objectStatusLine_, cv::Point( 11, 47 ), cv::FONT_HERSHEY_SIMPLEX,
                      0.55, cv::Scalar( 0, 0, 0 ), 3, cv::LINE_4 );
@@ -1335,8 +1350,22 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
             // WorldObjectHandler). Shows where the finger is aiming relative to
             // the target dot.
             if ( ringOverlay_.hasRay && sane( ringOverlay_.rayEnd ) )
-                cv::line( frame, ipt( ringOverlay_.arrowTip ), ipt( ringOverlay_.rayEnd ),
-                          ringCol, 1, cv::LINE_AA );
+
+                // If ray is intersecting Y=0 plane, draw intersection point projection
+                // Shows where the finger is aiming in physical space.
+                if ( ringOverlay_.hasGroundHit && sane( ringOverlay_.groundHit ) ) {
+                    // Draw line
+                    cv::line( frame, ipt( ringOverlay_.arrowTip ), ipt( ringOverlay_.groundHit ),
+                              ringCol, 1, cv::LINE_AA );
+
+                    // Draw ground-plane intersection
+                    cv::circle( frame, ipt( ringOverlay_.groundHit ), 4, ringCol, -1, cv::LINE_AA );
+
+                } else {
+                    // If ray is not intersecting Y=0 plane, do not project intersection point
+                    cv::line( frame, ipt( ringOverlay_.arrowTip ), ipt( ringOverlay_.rayEnd ),
+                              ringCol, 1, cv::LINE_AA );
+                }
         }
     }
 }

@@ -79,14 +79,39 @@ public:
      */
     bool WaitForFrame(double lastTimestamp, int timeoutMs);
 
+    /**
+     * @brief Select which physical camera the capture thread grabs from:
+     *        0 = ring (cfg.device, default), 1 = stage (cfg.device2, OBJECTS
+     *        mode). Only one camera is open at a time - the other is fully
+     *        released. The VideoCapture reopen (~100s of ms of UVC warm-up)
+     *        happens on the capture thread, which owns the device, so this is
+     *        safe to call from the main loop; it just records the request and
+     *        returns. A no-op if that camera is already active/requested, or
+     *        if index 1 is requested but cfg.device2 is empty (stays on ring).
+     *        The main loop simply sees no new frames during the brief switch.
+     */
+    void RequestCamera(int index);
+    /** @brief Currently-open camera index (0 ring / 1 stage), -1 before start. */
+    int  ActiveCamera() const { return activeCamera_.load(); }
+
 private:
     void captureLoop();       // Runs on captureThread_
-    void openCamera();        // Open VideoCapture and apply all hardware settings
+    void openCamera();        // Open the requested VideoCapture + apply hardware settings
     void buildUndistortMap(); // Precompute GPU remap tables from intrinsics
+
+    /** @brief Device path for a camera index (0 ring / 1 stage). Falls back to
+     *         the ring device when the stage device is not configured. */
+    const std::string& DevicePath(int index) const;
 
     const CameraConfig& cfg_;
 
     cv::VideoCapture camera_;
+
+    // Which physical camera to grab from. requestedCamera_ is set by the main
+    // thread (RequestCamera); the capture thread reopens when activeCamera_
+    // differs from it, so all VideoCapture access stays on the capture thread.
+    std::atomic<int> requestedCamera_{ 0 };
+    std::atomic<int> activeCamera_{ -1 };
 
     // GPU pipeline resources (allocated once, reused every frame)
     cv::cuda::GpuMat gpuRaw_, gpuUndistorted_, gpuGray_, gpuGrayEq_;

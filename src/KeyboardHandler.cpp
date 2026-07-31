@@ -256,6 +256,14 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
             state_.pendingLoggingToggle = true;
             break;
 
+        case KeyAction::LOAD_USER_CONFIG:
+            state_.pendingLoadUserConfig = true;
+            break;
+
+        case KeyAction::DISCARD_USER_CONFIG:
+            state_.pendingDiscardUserConfig = true;
+            break;
+
         case KeyAction::SET_FITTS_TARGET:
             if ( value < fittsTargetIdMin_ ) value = fittsTargetIdMin_;
             if ( value > fittsBoardMaxId_  ) value = fittsBoardMaxId_;

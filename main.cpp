@@ -50,6 +50,7 @@
 #include <iomanip>
 #include <iostream>
 #include <random>
+#include <sstream>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -67,6 +68,7 @@
 #include "GestureHandler.h"
 #include "KeyboardHandler.h"
 #include "PacketTypes.h"
+#include "ParticipantConfigHandler.h"
 #include "PretensionHandler.h"
 #include "RigAlignmentHandler.h"
 #include "SerialHandler.h"
@@ -149,6 +151,7 @@ int main() {
     RigAlignmentHandler rigAlign( cfg.arucoCalGrid, cfg.touchscreen,
                                   cfg.objectWorld, cfg.camera );    // one-time screen<->world capture ('R')
     TrialLogger         trialLogger( loggingDir );
+    ParticipantConfigHandler participantCfg;    // per-participant calibration load/save (logging/<UUU>/config<UUU>.yaml)
 
     ControllerHandler controller( cfg.controllerGains );
     PretensionHandler pretension( controller );
@@ -184,6 +187,29 @@ int main() {
     // Manual entry ('m' key) can also reach coarse markers for testing.
     keyboard.SetFittsBoardMaxId( aruco.GetFittsBoardMaxId() );
 
+    // Persist the current calibration state to logging/<UUU>/config<UUU>.yaml.
+    // Partial-aware: writes whichever of Cal1/Cal2/Cal3 are complete right now,
+    // so completing one calibration always saves it alongside any earlier ones.
+    // No-op for user 000 / unset (only real participant IDs are persisted).
+    auto SaveParticipantConfig = [&]() {
+        const int uid = keyboard.GetState().activeUserId;
+        if ( uid < 1 ) return;
+
+        const AromBoundary* aromPtr = cal1.IsComplete() ? &cal1.GetBoundary() : nullptr;
+
+        std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT>        stiff{};
+        const std::array<float, CONSTANT_CALIBRATION_ANGLES_COUNT>* stiffPtr = nullptr;
+        if ( cal2.IsComplete() ) { stiff = cal2.GetStiffnessProfile(); stiffPtr = &stiff; }
+
+        cv::Point3f        off{};
+        float              roll    = 0.0f;
+        const cv::Point3f* offPtr  = nullptr;
+        const float*       rollPtr = nullptr;
+        if ( cal3.IsComplete() ) { off = cal3.GetFinalOffset(); roll = cal3.GetRollRef(); offPtr = &off; rollPtr = &roll; }
+
+        participantCfg.Save( uid, loggingDir, aromPtr, stiffPtr, offPtr, rollPtr );
+    };
+
     double lastFrameTimestamp = -1.0;
 
     // Recent camera frames, newest at the back - lets the operator display
@@ -209,6 +235,7 @@ int main() {
     int          distanceBandCursor = 0;    // cycles 0..numDistanceBands-1
     bool         prevLogTouched = false;
     bool         primeLoggingAfterUserId = false;    // 'L' with no user ID set: prime once the ID is entered
+    int          lastCheckedUserId = -1;             // last user ID checked for a per-participant config file (prompt fires once per distinct ID)
     int          prevActiveTagId = 0;                ///< Detects kb.activeTagId changes -> ramps guidance force on new targets
     int          prevActiveObjectId = 0;             ///< Detects kb.activeObjectId changes -> ramp reset in OBJECTS mode
     double       lastObjDiagSecs = 0.0;              ///< Throttles the OBJECTS once/sec console diagnostic
@@ -354,6 +381,13 @@ int main() {
 
         // Handle system state transitions
         if ( kb.systemState != prevState ) {
+            // Camera feed follows the mode: the STAGE camera (overhead, device2)
+            // for OBJECTS guidance, the RING camera (fingertip, device) for
+            // everything else. Only one is open at a time - CameraHandler
+            // reopens on its own thread, so this just records the request. A
+            // no-op when device2 is unconfigured (stays on the ring camera).
+            camera.RequestCamera( kb.systemState == SystemState::OBJECTS ? 1 : 0 );
+
             // Close whichever grid was open in the previous state
             if ( prevState == SystemState::CAL3 ) {
                 aruco.SetCalibrationGridVisible( false );
@@ -536,6 +570,7 @@ int main() {
                 display.SetCal3State( true, cal3.GetFinalOffset(), cal3.GetRollRef() );
                 aruco.SetCalibrationGridVisible( false );
                 aruco.SetCalibrationDetection( false );
+                SaveParticipantConfig();   // persist the new fingertip offset
                 // Multi-step process finished - return to the default IDLE state
                 // and wait for the next command.
                 keyboard.SetInputState( InputState::IDLE );
@@ -569,6 +604,7 @@ int main() {
 
             if ( cal1.IsComplete() && !cal1CompletionHandled ) {
                 cal1CompletionHandled = true;
+                SaveParticipantConfig();   // persist the new AROM boundary
                 // Multi-step process finished - return to the default IDLE state.
                 keyboard.SetInputState( InputState::IDLE );
             }
@@ -587,6 +623,7 @@ int main() {
             if ( cal2.IsComplete() && !cal2ProfileApplied ) {
                 controller.SetStiffnessProfile( cal2.GetStiffnessProfile() );
                 cal2ProfileApplied = true;
+                SaveParticipantConfig();   // persist the new stiffness profile
                 // Multi-step process finished - return to the default IDLE state.
                 keyboard.SetInputState( InputState::IDLE );
             }
@@ -621,15 +658,61 @@ int main() {
             }
         }
 
+        // Per-participant config check: setting a user ID (the 'U' flow) lands in
+        // LOG. If logging/<UUU>/config<UUU>.yaml exists with stored calibrations,
+        // divert to the LOG_CONFIRM (y/n) prompt to offer loading them; otherwise
+        // fall through to the LOG->IDLE drop below (the file is created/populated
+        // as calibrations complete). Runs once per distinct ID.
+        if ( kb.inputState == InputState::LOG && kb.activeUserId >= 1 &&
+             kb.activeUserId != lastCheckedUserId ) {
+            lastCheckedUserId = kb.activeUserId;
+            if ( participantCfg.Load( kb.activeUserId, loggingDir ) ) {
+                std::ostringstream msg;
+                msg << "User " << std::setfill( '0' ) << std::setw( 3 ) << kb.activeUserId
+                    << " configuration found, load (y/n)?";
+                keyboard.SetInputState( InputState::LOG_CONFIRM );
+                keyboard.SetExternalStatus( msg.str() );
+            }
+        }
+
         // Once the logging-prime flow has set the user ID, it lands in the LOG
         // state - a dead end with no commands of its own, so it would block the
         // IDLE-gated commands ('F', 'C', ...). Drop back to the default IDLE state
         // to wait for the next input, mirroring how the guided tensioning returns
         // to IDLE after its final step. (LOG_UID, the live user-ID prompt, is left
         // alone so the operator can still type; an 'L' armed mid-task never enters
-        // LOG, so this won't disturb a running FITTS/calibration.)
+        // LOG, so this won't disturb a running FITTS/calibration. LOG_CONFIRM, if
+        // we diverted above, is also left alone so the operator can answer y/n.)
         if ( kb.inputState == InputState::LOG ) {
             keyboard.SetInputState( InputState::IDLE );
+        }
+
+        // Consume the LOG_CONFIRM answer. 'y' applies whichever stored
+        // calibrations Load() found (partial-aware); 'n' ignores them (a later
+        // (re)calibration overwrites that section). The SetCalibrationsComplete
+        // gate above reflects the loaded state on the next loop.
+        if ( kb.pendingLoadUserConfig ) {
+            if ( participantCfg.HasArom() ) {
+                cal1.LoadBoundary( participantCfg.GetArom() );
+            }
+            if ( participantCfg.HasStiffness() ) {
+                cal2.LoadStiffnessProfile( participantCfg.GetStiffness() );
+                controller.SetStiffnessProfile( participantCfg.GetStiffness() );
+            }
+            if ( participantCfg.HasOffset() ) {
+                const cv::Point3f off  = participantCfg.GetOffset();
+                const float       roll = participantCfg.GetRollRef();
+                cal3.LoadOffset( off, roll );
+                display.SetCal3State( true, off, roll );
+            }
+            std::cout << "Main: loaded participant " << kb.activeUserId << " calibrations ("
+                      << ( participantCfg.HasArom() ? "AROM " : "" )
+                      << ( participantCfg.HasStiffness() ? "stiffness " : "" )
+                      << ( participantCfg.HasOffset() ? "offset" : "" ) << ").\n";
+            keyboard.ClearLoadUserConfig();
+        }
+        if ( kb.pendingDiscardUserConfig ) {
+            keyboard.ClearDiscardUserConfig();
         }
 
         // 'r' - distance-stratified random target. Bands of distance (from the

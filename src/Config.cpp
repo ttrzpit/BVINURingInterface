@@ -37,6 +37,8 @@ bool Config::load(const std::string& filepath) {
     cv::FileNode cam = fs["camera"];
     if (!cam.empty()) {
         cam["device"]     >> camera.device;
+        if (!cam["device2"].empty())
+            cam["device2"] >> camera.device2;
         cam["width"]      >> camera.width;
         cam["height"]     >> camera.height;
         cam["framerate"]  >> camera.framerate;

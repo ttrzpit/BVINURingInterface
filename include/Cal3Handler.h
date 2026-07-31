@@ -57,6 +57,18 @@ public:
     cv::Point3f GetFinalOffset()  const { return finalOffset_; }
     float       GetRollRef()      const { return rollReference_; }
 
+    /** @brief Inject a camera->fingertip offset + roll reference loaded from a
+     *         participant config file and mark the stage complete, bypassing the
+     *         touch-collection state machine. */
+    void LoadOffset( cv::Point3f offset, float rollRef ) {
+        finalOffset_   = offset;
+        lastOffset_    = offset;
+        rollReference_ = rollRef;
+        sampleCount_   = maxSamples_;   // -> IsComplete()
+        phase_         = Phase::DONE;
+        status_        = "Fingertip offset: loaded from participant config.";
+    }
+
     /** @brief One-line status string suitable for the telemetry Output row. */
     const std::string& GetStatus() const { return status_; }
 

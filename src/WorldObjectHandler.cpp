@@ -820,6 +820,38 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
                     }
                 }
             }
+
+            // Ground-plane hit: where the finger's pointing ray strikes the
+            // world board (world y = 0), so the operator can see the aim point
+            // in physical space. The ray is the finger axis through the
+            // fingertip (marker origin fo, direction +Y, tail -> tip). Both the
+            // ring pose (Rring/tring) and the world pose (worldR_/worldT_) are
+            // in the same OpenCV camera frame, so the intersection is solved
+            // there directly and projected with the same pinhole model.
+            if (poseOk_ && std::abs(fo.y) > 1e-3f) {
+                const cv::Vec3d P   = Rring * cv::Vec3d(fo.x, fo.y, fo.z) + tring;  // fingertip
+                const cv::Vec3d dir = Rring * cv::Vec3d(0.0, fo.y, 0.0);            // pointing dir
+                // Ground plane in camera coords: normal = world +Y (worldR_
+                // column 1); the world origin maps to worldT_, a point on it.
+                const cv::Vec3d n(worldR_(0, 1), worldR_(1, 1), worldR_(2, 1));
+                const double    denom = n.dot(dir);
+                if (std::abs(denom) > 1e-9) {
+                    const double u = -n.dot(P - worldT_) / denom;
+                    if (u > 0.0) {   // ahead of the fingertip along the pointing dir
+                        const cv::Vec3d X = P + u * dir;
+                        cv::Point2f     gpx;
+                        if (X[2] > 1.0 &&
+                            projectMarkerPt(cv::Matx33d::eye(), cv::Vec3d(0, 0, 0),
+                                            cv::Point3f(static_cast<float>(X[0]),
+                                                        static_cast<float>(X[1]),
+                                                        static_cast<float>(X[2])),
+                                            fx, fy, cx, cy, gpx)) {
+                            ringOverlay_.groundHit    = gpx;
+                            ringOverlay_.hasGroundHit = true;
+                        }
+                    }
+                }
+            }
             ringOverlay_.visible    = hasRingFingertip_;
             ringOverlay_.fromSecond = fromSecond;
             ringFromSecond_         = fromSecond;
