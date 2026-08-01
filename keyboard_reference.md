@@ -116,12 +116,15 @@ Two parallel overlays: `P` tunes the per-motor proportional gain (`gainTune`), `
  Command   | KeyID    | Description                             | Required Input State       | New Input State         | Display Text            
 -----------|----------|-----------------------------------------|----------------------------|-------------------------|-------------------------------------------------------------------------------
  `L`       | 76       | "Toggle trial logging (prime / disarm)" | ANY                        | (same as previous, or LOG_UID if no user ID) | "Trial logging primed." / "Trial logging off." (see Note2)
+ `l`       | 108      | "Start / stop operator-view video recording" | ANY                    | (same as previous, or LOG_UID if no user ID) | "Video logging started - [FILE]." / "Video logging stopped - saved [FILE]." (see Note2b)
  `U`       | 85       | "Set user ID"                           | ANY                        | LOG_UID                 | "Enter ID for user (000-999)..."
  `nnn`     | [NUM]    | "Set user ID value (000-999)"           | LOG_UID 	                  | LOG                 | "User ID set to [VAL]."
  `y`       | 121/89   | "Load stored participant calibration"   | LOG_CONFIRM                | IDLE                    | "Loading participant configuration..."
  `n`       | 110/78   | "Ignore stored participant calibration" | LOG_CONFIRM                | IDLE                    | "Ignoring stored configuration - recalibrate to overwrite."
 **Note1** For command `nnn`, this represents a 3-digit value from 000 to 999, always entered with three digits (e.g., 001, 104, 204)
 **Note2** `L` is a system-level toggle that works in any state, so logging can be armed once at the start of a session and left alone. If no user ID has been entered yet (`activeUserId < 0`), the first `L` instead jumps straight to the `LOG_UID` prompt ("Enter user ID (000-999) to start logging..."); once a valid ID is entered, logging is primed automatically ("User ID set - trial logging primed."). While primed, the next Fitts target start (`r`/`m`) begins a capture; pressing `L` mid-capture cancels and discards it. The operator panel's "Trial Logging" cell shows OFF / PRIMED / REC.
+**Note2b** `l` (lowercase) records the composited "NURing Operator" camera view - every overlay included - to `logging/<UUU>/<UUU>-mmddyyyy-hhmmss.mp4`, named from the recording START time using the same convention as the trial CSVs. Like `L` it works in any state, and if no user ID has been entered yet it jumps to the `LOG_UID` prompt first ("Enter user ID (000-999) to start recording...") and begins recording once a valid ID is set. It is fully independent of `L` - either can run without the other. The operator panel's "Video Logging" cell shows ON (green) / OFF, and while recording an elapsed-time stamp (`12.3456 s`, matching the accuracy CSVs' `t_secs` format) is drawn in the bottom left of the camera view and captured into the video. The view is sampled at 10 fps and encoded to H.264 by an `ffmpeg` child process on a background thread, so recording adds no measurable work to the main loop; if the encoder ever falls behind, video frames are dropped (and the count reported on stop) rather than the main loop being stalled. A recording left running is finalised automatically on exit.
+
 **Note3** Per-participant calibration config: when a user ID is set, main.cpp checks for `logging/<UUU>/config<UUU>.yaml`. If it exists with stored calibrations, the system diverts to the `LOG_CONFIRM` prompt ("User <UUU> configuration found, load (y/n)?"). `y` loads the stored Cal1 (AROM) / Cal2 (stiffness) / Cal3 (fingertip offset) values and marks them complete; `n` ignores them. The file is created/updated automatically as each calibration completes (partial-aware - each of the three sections is saved independently). Pressing `n` then re-running a calibration overwrites that section. Only real participant IDs (>= 001) are persisted; `000` is the non-logging ID.
 
 
@@ -245,6 +248,7 @@ Every command from the sections above, in one list. **State** is the section the
  `I`       | Close integral gain tuning, resume task                 | GAIN TUNING
  `k`       | Toggle K(theta) stiffness gain                          | SYSTEM
  `L`       | Toggle trial logging (prime / disarm)                   | LOGGING
+ `l`       | Start / stop operator-view video recording              | LOGGING
  `m`       | Manually set active marker                              | ACCURACY
  `m`       | Manually set active object marker                       | OBJECTS
  `M`       | Enter motor test mode                                   | PWM_TEST

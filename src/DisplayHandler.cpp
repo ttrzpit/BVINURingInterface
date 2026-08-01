@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -145,7 +146,32 @@ void DisplayHandler::Update( const cv::Mat                     &frame,
             cv::circle( canvas, virtualTargetPx_, 6, Colors::GreLt, 1 );
         }
 
+        // Recording stamp: seconds since 'l' was pressed, bottom left, in the
+        // same fixed-4dp format as the accuracy CSVs' t_secs column so a video
+        // frame can be matched against a logged sample. Drawn LAST so it is
+        // never occluded, and drawn on the canvas itself (not a copy) so the
+        // operator sees the same counter the recording captures. The operator
+        // view refreshes at camera rate, so this ticks smoothly even though
+        // VideoLogger only samples 10 frames per second of it.
+        if ( videoLoggingActive_ ) {
+            char stampBuf[32];
+            std::snprintf( stampBuf, sizeof( stampBuf ), "%.4f s", videoElapsedSecs_ );
+            const cv::Point stampOrg( 10, canvas.rows - 12 );
+            cv::putText( canvas, stampBuf, stampOrg + cv::Point( 1, 1 ), cv::FONT_HERSHEY_SIMPLEX,
+                         0.6, cv::Scalar( 0, 0, 0 ), 3, cv::LINE_4 );
+            cv::putText( canvas, stampBuf, stampOrg, cv::FONT_HERSHEY_SIMPLEX,
+                         0.6, Colors::White, 1, cv::LINE_4 );
+        }
+
         cv::imshow( WIN_OPERATOR, canvas );
+
+        // Publish the finished frame for VideoLogger. `canvas` is a uniquely
+        // owned clone, so this stores a HEADER onto its buffer - no pixel copy -
+        // and keeps that buffer alive until the next Update() replaces it (or
+        // the encoder thread releases its own reference, whichever is later).
+        // NOTE: if the clone above is ever optimised away, this would alias a
+        // buffer the camera thread can recycle mid-encode.
+        lastOperatorFrame_ = canvas;
     }
 
     // ---- Telemetry + Controller panels (throttled to 10 Hz) -----------------
@@ -333,6 +359,14 @@ void DisplayHandler::PopulateTelemetryPanel(
     AddBodyCell( trialTargetStr, "M4", 6, 1, "center", bodyFontSize );
     AddBorder( "M1", 6, 4, Colors::GraMd, 2 );
 
+    // ---- Video logging status ('l') -----------------------------------------
+    // ON (green) = the operator camera view is being recorded to MP4; OFF (gray)
+    // = idle. Independent of the trial CSV logging below it.
+    AddHeadingCell( "Video Logging", "M5", 6, 1, "center", headerFontSize );
+    AddBodyCell( videoLoggingActive_ ? "ON" : "OFF", "M6", 6, 1, "center", bodyFontSize,
+                 videoLoggingActive_ ? Colors::GreDk : Colors::GraBk );
+    AddBorder( "M5", 6, 2, Colors::GraMd, 2 );
+
     // ---- Trial logging status -----------------------------------------------
     // REC (red) = capturing; PRIMED (green) = armed, next 'r' starts capture;
     // OFF (gray) = idle.
@@ -509,6 +543,11 @@ void DisplayHandler::SetActiveTargetPosition( bool valid, cv::Point3f posMm ) {
 void DisplayHandler::SetLoggingStatus( bool primed, bool active ) {
     loggingPrimed_ = primed;
     loggingActive_ = active;
+}
+
+void DisplayHandler::SetVideoLoggingStatus( bool recording, double elapsedSecs ) {
+    videoLoggingActive_ = recording;
+    videoElapsedSecs_ = elapsedSecs;
 }
 
 void DisplayHandler::SetAccuracyBlockStatus( bool active, int blockIndex,

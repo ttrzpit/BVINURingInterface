@@ -143,6 +143,7 @@ enum class KeyAction {
     SET_ROBOT_READY,
     TOGGLE_STIFFNESS_GAIN,
     TOGGLE_LOGGING,
+    TOGGLE_VIDEO_LOGGING,
     TOGGLE_ESTOP,
     LOAD_USER_CONFIG,
     DISCARD_USER_CONFIG,
@@ -210,6 +211,7 @@ struct KeyboardState {
     bool                 pendingUntrainObjects = false;                         ///< One-shot: 'u' in OBJECTS - main clears all trained anchors
     bool                 pendingCornerJitterProbe = false;                      ///< One-shot: 'D' in OBJECTS - main starts the corner-jitter probe
     bool                 pendingLoggingToggle = false;                          ///< One-shot: 'L' pressed - main toggles the trial logger
+    bool                 pendingVideoLoggingToggle = false;                     ///< One-shot: 'l' pressed - main starts/stops the operator-view recorder
     bool                 pendingLoadUserConfig = false;                         ///< One-shot: 'y' in LOG_CONFIRM - main loads the participant's stored calibrations
     bool                 pendingDiscardUserConfig = false;                      ///< One-shot: 'n' in LOG_CONFIRM - main ignores the stored calibrations
     bool                 pendingEStopToggle = false;                            ///< One-shot: spacebar pressed - main toggles the guidance-output e-stop
@@ -290,6 +292,9 @@ class KeyboardHandler {
 
     /** @brief Clear the one-shot 'L' logging-toggle request (main consumed it). */
     void ClearLoggingToggle() { state_.pendingLoggingToggle = false; }
+
+    /** @brief Clear the one-shot 'l' video-logging-toggle request (main consumed it). */
+    void ClearVideoLoggingToggle() { state_.pendingVideoLoggingToggle = false; }
 
     /** @brief Clear the one-shot 'y'/'n' participant-config requests (main consumed them). */
     void ClearLoadUserConfig() { state_.pendingLoadUserConfig = false; }

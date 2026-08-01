@@ -273,6 +273,10 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
             state_.pendingLoggingToggle = true;
             break;
 
+        case KeyAction::TOGGLE_VIDEO_LOGGING:
+            state_.pendingVideoLoggingToggle = true;
+            break;
+
         case KeyAction::LOAD_USER_CONFIG:
             state_.pendingLoadUserConfig = true;
             break;

@@ -62,6 +62,10 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     // be armed once at the start of a session. If no user ID has been entered,
     // main.cpp jumps to the user-ID prompt first and primes once it is set.
     { { 'L' }, InputState::ANY, InputState::SAME, "", KeyAction::TOGGLE_LOGGING },
+    // 'l' (lowercase) records the operator camera view to MP4 - also system-level,
+    // and likewise prompts for a user ID first when none is set, so the file lands
+    // in the participant's folder. Independent of 'L': either can run alone.
+    { { 'l' }, InputState::ANY, InputState::SAME, "", KeyAction::TOGGLE_VIDEO_LOGGING },
     { { 'U' }, InputState::ANY, InputState::LOG_UID, "Enter ID for user (000-999)...", KeyAction::NONE },
 
     // Per-participant config prompt (LOG_CONFIRM): main.cpp diverts here after a

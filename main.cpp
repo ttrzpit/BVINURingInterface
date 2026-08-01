@@ -75,6 +75,7 @@
 #include "SerialHandler.h"
 #include "TouchHandler.h"
 #include "TrialLogger.h"
+#include "VideoLogger.h"
 #include "WorldObjectHandler.h"
 
 // Global shutdown flag - written by SIGINT handler, read by the main loop.
@@ -152,6 +153,7 @@ int main() {
     RigAlignmentHandler rigAlign( cfg.arucoCalGrid, cfg.touchscreen,
                                   cfg.objectWorld, cfg.camera );    // one-time screen<->world capture ('R')
     TrialLogger         trialLogger( loggingDir );
+    VideoLogger         videoLogger( loggingDir );    // operator-view MP4 recorder ('l')
     ParticipantConfigHandler participantCfg;    // per-participant calibration load/save (logging/<UUU>/config<UUU>.yaml)
     AccuracyBlockHandler accuracyBlock( cfg.accuracyTrials );    // ACCURACY study blocks ('b0'-'b9', then 'n')
 
@@ -237,6 +239,7 @@ int main() {
     int          distanceBandCursor = 0;    // cycles 0..numDistanceBands-1
     bool         prevLogTouched = false;
     bool         primeLoggingAfterUserId = false;    // 'L' with no user ID set: prime once the ID is entered
+    bool         startVideoAfterUserId   = false;    // 'l' with no user ID set: record once the ID is entered
     int          lastCheckedUserId = -1;             // last user ID checked for a per-participant config file (prompt fires once per distinct ID)
     int          prevActiveTagId = 0;                ///< Detects kb.activeTagId changes -> ramps guidance force on new targets
     int          prevActiveObjectId = 0;             ///< Detects kb.activeObjectId changes -> ramp reset in OBJECTS mode
@@ -661,6 +664,41 @@ int main() {
                 keyboard.SetExternalStatus( "User ID set - trial logging primed." );
             } else if ( kb.inputState != InputState::LOG_UID ) {
                 primeLoggingAfterUserId = false;    // user left the prompt without setting an ID
+            }
+        }
+
+        // 'l' - operator-view video recorder (works in any state). Mirrors 'L':
+        // with no user ID entered yet, divert to the user-ID prompt first so the
+        // MP4 lands in the participant's folder, and start once the ID is set.
+        if ( kb.pendingVideoLoggingToggle ) {
+            if ( videoLogger.IsRecording() ) {
+                videoLogger.Stop();
+                keyboard.SetExternalStatus( "Video logging stopped - saved " +
+                                            videoLogger.CurrentFile() );
+            } else if ( kb.activeUserId < 0 ) {
+                keyboard.SetInputState( InputState::LOG_UID );
+                keyboard.SetExternalStatus( "Enter user ID (000-999) to start recording..." );
+                startVideoAfterUserId = true;
+            } else if ( videoLogger.Start( kb.activeUserId ) ) {
+                keyboard.SetExternalStatus( "Video logging started - " +
+                                            videoLogger.CurrentFile() );
+            } else {
+                keyboard.SetExternalStatus( "Video logging failed to start (see terminal)." );
+            }
+            keyboard.ClearVideoLoggingToggle();
+        }
+
+        // Auto-start once an 'l'-triggered user-ID prompt has been completed.
+        if ( startVideoAfterUserId ) {
+            if ( kb.activeUserId >= 0 ) {
+                startVideoAfterUserId = false;
+                if ( videoLogger.Start( kb.activeUserId ) )
+                    keyboard.SetExternalStatus( "User ID set - video logging started (" +
+                                                videoLogger.CurrentFile() + ")." );
+                else
+                    keyboard.SetExternalStatus( "Video logging failed to start (see terminal)." );
+            } else if ( kb.inputState != InputState::LOG_UID ) {
+                startVideoAfterUserId = false;    // user left the prompt without setting an ID
             }
         }
 
@@ -1595,6 +1633,11 @@ int main() {
                                   cal2.GetCurrentHeadingIndex() );
             display.SetGestureIndicator( gesture.IsIndicatorActive( nowSecs ), gesture.GetLastGesture() );
             display.SetLoggingStatus( trialLogger.IsPrimed(), trialLogger.IsActive() );
+            // Video recorder ('l'): drives the panel cell AND the elapsed-time
+            // stamp burned into the bottom left of the frame. Must precede
+            // display.Update() so the frame handed to VideoLogger below carries
+            // the stamp for its own capture instant.
+            display.SetVideoLoggingStatus( videoLogger.IsRecording(), videoLogger.ElapsedSecs() );
             display.SetAccuracyBlockStatus( accuracyBlock.IsActive(), accuracyBlock.BlockIndex(),
                                             accuracyBlock.TrialNumber(), accuracyBlock.TrialCount() );
             display.SetArucoStats( aruco.GetDetectionHz(), aruco.GetDetectionLagMs() );
@@ -1688,6 +1731,13 @@ int main() {
             }
 
             display.Update( *displayFrame, markers, touchState, kb, serialSt );
+
+            // Offer the finished operator view to the recorder. Nearly free on
+            // this thread: VideoLogger returns immediately unless this frame is
+            // the next one due at 10 Hz, and even then only takes a mutex and
+            // copies the cv::Mat header (the encode happens on its own thread,
+            // in an ffmpeg child process).
+            videoLogger.Submit( display.GetOperatorFrame() );
         }
 
         // Stall probe (see iterStart): flag long iterations that drop frames.
@@ -1705,6 +1755,10 @@ int main() {
 
     // ---- Clean shutdown -----------------------------------------------------
     std::cout << "\nMain: Shutting down...\n";
+
+    // Finalise any recording still running (ESC pressed without a closing 'l')
+    // before the display and camera go away.
+    videoLogger.Stop();
 
     aruco.Stop();
     camera.stop();

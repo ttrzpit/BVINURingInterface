@@ -166,6 +166,24 @@ public:
     /** @brief Trial-logging status for the operator panel indicator. */
     void SetLoggingStatus(bool primed, bool active);
 
+    /** @brief Operator-view recorder status ('l', VideoLogger). Drives the
+     *         "Video Logging" ON/OFF panel cell AND the elapsed-time stamp burned
+     *         into the bottom left of the camera view while recording. Call once
+     *         per frame BEFORE Update(), so the stamp drawn on the frame is the
+     *         one the recorder captures.
+     *  @param recording    VideoLogger::IsRecording()
+     *  @param elapsedSecs  VideoLogger::ElapsedSecs() - seconds since 'l', in the
+     *                      same format as the accuracy CSVs' t_secs column. */
+    void SetVideoLoggingStatus(bool recording, double elapsedSecs);
+
+    /** @brief The composited operator view drawn by the most recent Update() -
+     *         overlays, banners and recording stamp included, exactly as shown in
+     *         the "NURing Operator" window. This is a cv::Mat HEADER onto the
+     *         frame's buffer, so handing it to VideoLogger costs a refcount bump
+     *         rather than a ~5 MB copy. Empty until the first Update() with a
+     *         non-empty frame. */
+    const cv::Mat &GetOperatorFrame() const { return lastOperatorFrame_; }
+
     /** @brief ACCURACY study-block progress for the Active Trial panel: the trial
      *         name cell reads "Accuracy B<block> <n>/<count>" while a block runs.
      *         Pass active=false when no block is armed (cell reads "Accuracy").
@@ -329,6 +347,13 @@ private:
     // Trial-logging status indicator
     bool        loggingPrimed_ = false;
     bool        loggingActive_ = false;
+
+    // Operator-view recorder status (updated via SetVideoLoggingStatus)
+    bool        videoLoggingActive_ = false;
+    double      videoElapsedSecs_   = 0.0;
+
+    // Last composited operator view (header only - see GetOperatorFrame)
+    cv::Mat     lastOperatorFrame_;
 
     // ACCURACY study-block progress (updated via SetAccuracyBlockStatus)
     bool        blockActive_      = false;
