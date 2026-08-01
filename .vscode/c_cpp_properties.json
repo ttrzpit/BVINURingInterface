@@ -1,0 +1,26 @@
+{
+    "version": 4,
+    "configurations": [
+        {
+            "name": "Linux",
+            "compilerPath": "/usr/bin/g++",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64",
+
+            // Primary source of truth: the compile database CMake writes on every
+            // configure (CMAKE_EXPORT_COMPILE_COMMANDS in CMakeLists.txt). Using
+            // it means IntelliSense sees the EXACT flags each file is built with -
+            // including -isystem /usr/local/include/opencv4 - so cv:: completions,
+            // go-to-definition and hover work without duplicating paths here.
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+
+            // Fallback for files the database does not cover (e.g. a brand-new
+            // .cpp before the next configure, or a header opened on its own).
+            "includePath": [
+                "${workspaceFolder}/include",
+                "/usr/local/include/opencv4"
+            ]
+        }
+    ]
+}

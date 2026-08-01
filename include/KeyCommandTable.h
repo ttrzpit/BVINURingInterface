@@ -23,6 +23,9 @@ struct KeyCommand {
     InputState       newState;         ///< New InputState, or InputState::SAME / InputState::QUIT
     std::string      displayText;      ///< May contain [MARKER_ID] / [VAL] / [MOTOR]
     KeyAction        action;
+    int              actionValue = -1; ///< Passed to ExecuteAction() as `value`. Only needed by
+                                       ///< rows whose action carries a constant (e.g. which
+                                       ///< accuracy block 'b0'-'b9' starts); -1 elsewhere.
 };
 
 inline const std::vector<KeyCommand> kKeyCommandTable = {
@@ -91,6 +94,28 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { { 'm' }, InputState::FIT_RUN, InputState::FIT_ACT, "Which marker ID (fine = 1-414 | coarse = 451-454)...", KeyAction::NONE },
     { { 'r' }, InputState::FIT_SEL, InputState::FIT_RUN, "Active marker set to [MARKER_ID].", KeyAction::RANDOM_FITTS_TARGET },
     { { 'r' }, InputState::FIT_RUN, InputState::FIT_RUN, "Active marker set to [MARKER_ID].", KeyAction::RANDOM_FITTS_TARGET },
+
+    // ---- ACCURACY study blocks ('b0'..'b9', then 'n' per trial) ----------------
+    // 'b' followed by a single digit (0-9) starts that block: one marker is drawn
+    // from each configured target_set_NN, the list is shuffled and printed, and
+    // the block waits. No Enter - the digit fires immediately (FIT_BLK is NOT a
+    // numeric-entry state). The block number is a label only (every block is an
+    // independent draw), so all ten are equivalent. Each 'n' presents the next
+    // target; the real status text for both comes from AccuracyBlockHandler via
+    // SetExternalStatus().
+    { { 'b' }, InputState::FIT_SEL, InputState::FIT_BLK, "Which block? [0] - [9]...", KeyAction::NONE },
+    { { 'b' }, InputState::FIT_RUN, InputState::FIT_BLK, "Which block? [0] - [9]...", KeyAction::NONE },
+    { { '0', 176 }, InputState::FIT_BLK, InputState::FIT_RUN, "", KeyAction::START_ACCURACY_BLOCK, 0 },
+    { { '1', 177 }, InputState::FIT_BLK, InputState::FIT_RUN, "", KeyAction::START_ACCURACY_BLOCK, 1 },
+    { { '2', 178 }, InputState::FIT_BLK, InputState::FIT_RUN, "", KeyAction::START_ACCURACY_BLOCK, 2 },
+    { { '3', 179 }, InputState::FIT_BLK, InputState::FIT_RUN, "", KeyAction::START_ACCURACY_BLOCK, 3 },
+    { { '4', 180 }, InputState::FIT_BLK, InputState::FIT_RUN, "", KeyAction::START_ACCURACY_BLOCK, 4 },
+    { { '5', 181 }, InputState::FIT_BLK, InputState::FIT_RUN, "", KeyAction::START_ACCURACY_BLOCK, 5 },
+    { { '6', 182 }, InputState::FIT_BLK, InputState::FIT_RUN, "", KeyAction::START_ACCURACY_BLOCK, 6 },
+    { { '7', 183 }, InputState::FIT_BLK, InputState::FIT_RUN, "", KeyAction::START_ACCURACY_BLOCK, 7 },
+    { { '8', 184 }, InputState::FIT_BLK, InputState::FIT_RUN, "", KeyAction::START_ACCURACY_BLOCK, 8 },
+    { { '9', 185 }, InputState::FIT_BLK, InputState::FIT_RUN, "", KeyAction::START_ACCURACY_BLOCK, 9 },
+    { { 'n' }, InputState::FIT_RUN, InputState::SAME, "", KeyAction::ADVANCE_ACCURACY_BLOCK },
 
     // ---- OBJECTS (Task 2 - object guidance) ------------------------------------
     // Mirrors the Fitts 'F' block. 'O' from IDLE starts the scan/training phase

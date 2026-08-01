@@ -11,6 +11,13 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# Write build/compile_commands.json on every configure. This is what VS Code's
+# C/C++ IntelliSense reads (see .vscode/c_cpp_properties.json) so it knows where
+# the OpenCV headers are (/usr/local/include/opencv4, not a default search path)
+# and offers cv:: completions. Previously only set on the cmake command line, so
+# a fresh configure elsewhere silently lost autocomplete.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # ---- Find dependencies ------------------------------------------------------
 
 find_package(OpenCV REQUIRED)       # Must be built with CUDA support for GPU pipeline

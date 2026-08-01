@@ -46,6 +46,7 @@ enum class InputState {
     FIT_SEL,
     FIT_RUN,
     FIT_ACT,
+    FIT_BLK,     // Accuracy study block: waiting for the block digit after 'b'
     OBJ_WARN,    // Calibration-incomplete confirmation prompt before OBJECTS
     OBJ_SCAN,    // Object task: scan/training phase - map objects into the world frame
     OBJ_SEL,     // Object task: choose [r] random / [m] manual
@@ -120,6 +121,8 @@ enum class KeyAction {
     SET_MOTOR_PWM,
     RANDOM_FITTS_TARGET,
     SET_FITTS_TARGET,
+    START_ACCURACY_BLOCK,
+    ADVANCE_ACCURACY_BLOCK,
     RANDOM_OBJECT_TARGET,
     SET_OBJECT_TARGET,
     FINISH_OBJECT_SCAN,
@@ -199,6 +202,8 @@ struct KeyboardState {
     bool                 pendingStiffnessGainToggle = false;                    ///< One-shot: 'k' pressed (toggle K(theta) application)
     bool                 pendingSetHomePosition = false;                        ///< One-shot: 'Z' pressed (record current encoder pose as home)
     bool                 pendingRandomTarget = false;                           ///< One-shot: 'r' pressed - main picks the (distance-stratified) target
+    int                  pendingBlockStart = -1;                                ///< One-shot: 'b'+digit - accuracy block index to start (-1 = none)
+    bool                 pendingBlockAdvance = false;                           ///< One-shot: 'n' in FIT_RUN - present the next block target
     bool                 pendingRandomObjectTarget = false;                     ///< One-shot: 'r' in OBJECTS - main picks from object_marker_pool
     bool                 pendingFinishObjectScan = false;                       ///< One-shot: Enter in OBJ_SCAN - main ends the object scan phase
     bool                 pendingTrainObjects = false;                           ///< One-shot: 't' in OBJECTS - main starts a training burst
@@ -261,6 +266,12 @@ class KeyboardHandler {
 
     /** @brief Clear the one-shot 'r' random-target request (main consumed it). */
     void ClearRandomTarget() { state_.pendingRandomTarget = false; }
+
+    /** @brief Clear the one-shot 'b'+digit block-start request (main consumed it). */
+    void ClearBlockStart() { state_.pendingBlockStart = -1; }
+
+    /** @brief Clear the one-shot 'n' block-advance request (main consumed it). */
+    void ClearBlockAdvance() { state_.pendingBlockAdvance = false; }
 
     /** @brief Clear the one-shot 'r' random-object-target request (OBJECTS mode). */
     void ClearRandomObjectTarget() { state_.pendingRandomObjectTarget = false; }

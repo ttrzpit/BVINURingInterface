@@ -270,6 +270,32 @@ object_world:
    # physically removed object is never selected again. ~30 frames is ~0.4 s.
    presence_scan_frames: 30
 
+   # Contact detection: horizontal displacement [mm] of the ACTIVE object's own
+   # marker away from where it was trained ('t') that latches " CONTACT" onto its
+   # name label - i.e. the participant has reached the object and disturbed it.
+   # Measured in the world frame with Y (height) IGNORED, so a slide across the
+   # board triggers it and a perfectly vertical lift does not. Requires the
+   # object's own marker AND the world board to be visible in the same frame, so
+   # it fires when the marker reappears from behind the hand; three consecutive
+   # frames over the threshold are needed before it latches, so marker pose noise
+   # cannot trip it. Raise this if noise still triggers it; lower it to catch a
+   # gentler nudge; 0 (or negative) disables the cue entirely. Cleared on a new
+   # target ('m'/'r'), re-train ('t'), 'u', or OBJECTS re-entry.
+   contact_move_threshold_mm: 1.5
+
+   # Overshoot detection: how far [mm] the fingertip must travel PAST the active
+   # object's target before "OVERSHOOT" appears in the top right of the operator
+   # camera view. Measured along the finger's own pointing direction - the same
+   # arrow-frame depth the retrieval guidance uses (Δp.z = reach still to go), so
+   # a negative depth past this many mm means the participant has reached beyond
+   # the object. Lateral deviation from the pointing line is NOT part of the test;
+   # because the axis is the finger's, re-aiming the finger without moving the
+   # hand can flip the sign. The cue is LIVE, not latched: it clears as soon as
+   # the fingertip comes back. Needs both a resolved target and a ring fingertip
+   # (it rides the coast window with them). Raise if it flickers at the target;
+   # 0 (or negative) disables it.
+   overshoot_threshold_mm: 15.0
+
    # Roll trim [deg] for orienting the Cal3 fingertip offset in OBJECTS mode.
    # LEGACY FALLBACK ONLY: used when no rig alignment has been captured (no
    # rig_alignment.yaml) or no world pose is available. The preferred path is the
@@ -384,7 +410,7 @@ object_world:
         marker_size_mm:     40
         cylinder_radius_mm: 7
         cylinder_height_mm: 138
-        base_origin_mm:     { x: -65, y: 41, z:  5 }
+        base_origin_mm:     { x: 37, y: 0, z:  5 }
         base_normal_mm:     { x:   1, y:  0, z:  0 }
         target_point_mm:    { x:  95, y:  0, z:  0 }
 
@@ -397,7 +423,7 @@ object_world:
         cylinder_height_mm: 134
         base_origin_mm:     { x:   0, y: 61, z:  0 }
         base_normal_mm:     { x:   0, y:  0, z:  1 }
-        target_point_mm:    { x:   0, y:  0, z:  134 }
+        target_point_mm:    { x:   0, y:  0, z:  120 }
 
       # Coin
       - id:                 62
@@ -406,7 +432,7 @@ object_world:
         marker_size_mm:     40
         cylinder_radius_mm: 12
         cylinder_height_mm: 2
-        base_origin_mm:     { x:   0, y: 46, z: -2 }
+        base_origin_mm:     { x:   0, y: 64, z: -1 }
         base_normal_mm:     { x:   0, y:  0, z:  1 }
         target_point_mm:    { x:   0, y:  0, z:  1 }
 
@@ -432,15 +458,18 @@ object_world:
         type:               "box"
         marker_size_mm:     40
         points:
-           - { x: -146.0, y: 52.0, z:  2.0 }   # 1 top    UL
-           - { x:   82.0, y: 52.0, z:  2.0 }   # 2 top    UR
-           - { x: -146.0, y: 30.0, z:  2.0 }   # 3 top    BL
-           - { x:   82.0, y: 30.0, z:  2.0 }   # 4 top    BR
-           - { x: -146.0, y: 52.0, z: -2.0 }   # 5 bottom UL
-           - { x:   82.0, y: 52.0, z: -2.0 }   # 6 bottom UR
-           - { x: -146.0, y: 30.0, z: -2.0 }   # 7 bottom BL
-           - { x:   82.0, y: 30.0, z: -2.0 }   # 8 bottom BR
-        target_point_mm:    { x: 46, y: 41, z:  2 }
+           - { x: 48.0, y: 10.0, z:  2.0 }   # 1 top    UL
+           - { x:   280.0, y: 10.0, z:  2.0 }   # 2 top    UR
+           - { x: 48.0, y: -10.0, z:  2.0 }   # 3 top    BL
+           - { x:   280.0, y: -10.0, z:  2.0 }   # 4 top    BR
+           - { x: 48.0, y: 10.0, z: -2.0 }   # 5 bottom UL
+           - { x:   280.0, y: 10.0, z: -2.0 }   # 6 bottom UR
+           - { x: 48.0, y: -10.0, z: -2.0 }   # 7 bottom BL
+           - { x:   280.0, y: -10.0, z: -2.0 }   # 8 bottom BR
+        target_point_mm:    { x: 240, y: 0, z:  2 }
+
+
+
 
       # Fork
       - id:                 72
@@ -448,15 +477,24 @@ object_world:
         type:               "box"
         marker_size_mm:     40
         points:
-           - { x: -92.0, y: 50.0, z:  6.0 }   # 1 top    UL
-           - { x:  92.0, y: 50.0, z:  6.0 }   # 2 top    UR
-           - { x: -92.0, y: 26.0, z:  6.0 }   # 3 top    BL
-           - { x:  92.0, y: 26.0, z:  6.0 }   # 4 top    BR
-           - { x: -92.0, y: 50.0, z: -6.0 }   # 5 bottom UL
-           - { x:  92.0, y: 50.0, z: -6.0 }   # 6 bottom UR
-           - { x: -92.0, y: 26.0, z: -6.0 }   # 7 bottom BL
-           - { x:  92.0, y: 26.0, z: -6.0 }   # 8 bottom BR
-        target_point_mm:    { x: 52, y: 38, z:  6 }
+           - { x: 65.0, y: 10.0, z:  6.0 }   # 1 top    UL
+           - { x:  245.0, y: 10.0, z:  6.0 }   # 2 top    UR
+           - { x: 65.0, y: -10.0, z:  6.0 }   # 3 top    BL
+           - { x:  245.0, y: -10.0, z:  6.0 }   # 4 top    BR
+           - { x: 65.0, y: 10.0, z: 0.0 }   # 5 bottom UL
+           - { x:  245.0, y: 10.0, z: 0.0 }   # 6 bottom UR
+           - { x: 65.0, y: -10.0, z: 0.0 }   # 7 bottom BL
+           - { x:  245.0, y: -10.0, z: 0.0 }   # 8 bottom BR
+        target_point_mm:    { x: 200, y: 0, z:  3 }
+
+         #   - { x: -92.0, y: 50.0, z:  6.0 }   # 1 top    UL
+         #   - { x:  92.0, y: 50.0, z:  6.0 }   # 2 top    UR
+         #   - { x: -92.0, y: 26.0, z:  6.0 }   # 3 top    BL
+         #   - { x:  92.0, y: 26.0, z:  6.0 }   # 4 top    BR
+         #   - { x: -92.0, y: 50.0, z: -6.0 }   # 5 bottom UL
+         #   - { x:  92.0, y: 50.0, z: -6.0 }   # 6 bottom UR
+         #   - { x: -92.0, y: 26.0, z: -6.0 }   # 7 bottom BL
+         #   - { x:  92.0, y: 26.0, z: -6.0 }   # 8 bottom BR
 
 
 # ---- Fitts target circle ------------------------------------------------------
@@ -516,10 +554,19 @@ serial:
 #                     gain (iGainTune_A/B/C, adjustable live via 'I'). Drives the
 #                     gated "endgame" integrator below to cancel steady-state
 #                     bias (e.g. the fingertip settling below the target in y).
-# integral_enable_radius_mm  : Integrator winds up only within this error radius [mm]
-# integral_z_based           : 0 = radius is the in-plane (X/Y) error only (depth ignored);
-#                              1 = radius is the full 3D fingertip-to-target distance, so it
-#                                  includes Z depth (a true sphere around the target centre)
+# The integrator winds up only inside an error radius, and the radius (plus the
+# distance it is measured against) is per task, because the two tasks put the
+# remaining reach in different components of the error:
+# integral_enable_radius_2D_mm : ACCURACY (FITTS). Radius [mm] against the IN-PLANE
+#                              (X/Y) error only - depth ignored. The camera rides the
+#                              hand, so the image-plane error is the guided quantity.
+# integral_enable_radius_3D_mm : RETRIEVAL (OBJECTS). Radius [mm] against the FULL 3D
+#                              fingertip-to-target distance (a true sphere around the
+#                              target). Retrieval guidance expresses the error in the
+#                              ring's arrow frame, where X/Y is only the lateral
+#                              deviation from the finger's pointing line and the whole
+#                              remaining reach sits in Z - so an in-plane gate would
+#                              open while the finger is still far away but well aimed.
 # integral_enable_speed_mm_s : ...and only below this finger speed [mm/s] (final settling)
 # integral_leak              : Per-frame decay of the integral while not winding up (0-1)
 # deflection_force_max : Maximum commanded guidance deflection force magnitude [N] (Stage 1, task space)
@@ -553,8 +600,8 @@ controller_gains:
    gain_kP: 0.0
    gain_kD: 0.0
    gain_kI: 0.05
-   integral_enable_radius_mm: 100.0
-   integral_z_based: 0          # 0 = in-plane (X/Y) radius, 1 = 3D distance incl. Z depth
+   integral_enable_radius_2D_mm: 100.0   # ACCURACY: in-plane (X/Y) error radius [mm]
+   integral_enable_radius_3D_mm: 100.0   # RETRIEVAL: 3D fingertip-to-target radius [mm]
    integral_enable_speed_mm_s: 100.0
    integral_leak: 0.95
    deflection_force_max: 20.0

@@ -1,7 +1,9 @@
 #include "Config.h"
 
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 
 // Read an {x, y, z} FileNode into a cv::Point3f (zero if the node is absent).
 static cv::Point3f readPoint3f(const cv::FileNode& n) {
@@ -178,6 +180,21 @@ bool Config::load(const std::string& filepath) {
     if (!at.empty()) {
         if (!at["random_pool"].empty())
             at["random_pool"] >> accuracyTrials.randomPool;
+
+        // Study-block target sets. Probed by NUMBER (target_set_01..99) rather
+        // than by iterating the node, so each set keeps its configured index -
+        // that index is the "bNN" in a trial label, and must not shift if a set
+        // is commented out. Missing numbers are simply skipped.
+        for (int n = 1; n <= 99; ++n) {
+            std::ostringstream key;
+            key << "target_set_" << std::setw(2) << std::setfill('0') << n;
+            cv::FileNode ts = at[key.str()];
+            if (ts.empty()) continue;
+            AccuracyTargetSet set;
+            set.index = n;
+            ts >> set.ids;
+            if (!set.ids.empty()) accuracyTrials.targetSets.push_back(set);
+        }
     }
 
     // ---- Object-guidance world (OBJECTS mode) -------------------------------
@@ -196,6 +213,10 @@ bool Config::load(const std::string& filepath) {
             ow["train_frames"] >> objectWorld.trainFrames;
         if (!ow["presence_scan_frames"].empty())
             ow["presence_scan_frames"] >> objectWorld.presenceScanFrames;
+        if (!ow["contact_move_threshold_mm"].empty())
+            ow["contact_move_threshold_mm"] >> objectWorld.contactMoveThresholdMm;
+        if (!ow["overshoot_threshold_mm"].empty())
+            ow["overshoot_threshold_mm"] >> objectWorld.overshootThresholdMm;
         if (!ow["roll_offset_deg"].empty())
             ow["roll_offset_deg"] >> objectWorld.rollOffsetDeg;
 
@@ -365,8 +386,8 @@ bool Config::load(const std::string& filepath) {
         cg["gain_kP"]               >> controllerGains.gain_kP;
         cg["gain_kD"]               >> controllerGains.gain_kD;
         cg["gain_kI"]               >> controllerGains.gain_kI;
-        if (!cg["integral_enable_radius_mm"].empty())  cg["integral_enable_radius_mm"]  >> controllerGains.integral_enable_radius_mm;
-        if (!cg["integral_z_based"].empty())           cg["integral_z_based"]           >> controllerGains.integral_z_based;
+        if (!cg["integral_enable_radius_2D_mm"].empty()) cg["integral_enable_radius_2D_mm"] >> controllerGains.integral_enable_radius_2D_mm;
+        if (!cg["integral_enable_radius_3D_mm"].empty()) cg["integral_enable_radius_3D_mm"] >> controllerGains.integral_enable_radius_3D_mm;
         if (!cg["integral_enable_speed_mm_s"].empty()) cg["integral_enable_speed_mm_s"] >> controllerGains.integral_enable_speed_mm_s;
         if (!cg["integral_leak"].empty())              cg["integral_leak"]              >> controllerGains.integral_leak;
         cg["deflection_force_max"]  >> controllerGains.deflection_force_max;

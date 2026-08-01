@@ -55,6 +55,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "AccuracyBlockHandler.h"
 #include "ArucoHandler.h"
 #include "Cal1Handler.h"
 #include "Cal2Handler.h"
@@ -152,6 +153,7 @@ int main() {
                                   cfg.objectWorld, cfg.camera );    // one-time screen<->world capture ('R')
     TrialLogger         trialLogger( loggingDir );
     ParticipantConfigHandler participantCfg;    // per-participant calibration load/save (logging/<UUU>/config<UUU>.yaml)
+    AccuracyBlockHandler accuracyBlock( cfg.accuracyTrials );    // ACCURACY study blocks ('b0'-'b9', then 'n')
 
     ControllerHandler controller( cfg.controllerGains );
     PretensionHandler pretension( controller );
@@ -423,6 +425,10 @@ int main() {
                 // Clear the random-target memory so a fresh Fitts sequence can
                 // reuse every marker exactly once before any repeats.
                 usedRandomTargets.clear();
+                // Drop any block left over from a previous run - 'F' starts a
+                // clean session, and a half-finished block would otherwise keep
+                // its cursor and refuse the first 'n'.
+                accuracyBlock.Cancel();
             } else if ( kb.systemState == SystemState::OBJECTS ) {
                 // OBJECTS: world board (1-45) + physical tagged objects (60-72)
                 // + ring markers (73/74), DICT_6X6_100. No touchscreen grid -
@@ -715,6 +721,75 @@ int main() {
             keyboard.ClearDiscardUserConfig();
         }
 
+        // Make `nextId` the active Fitts target and, if logging is primed, open a
+        // fresh trial capture for it (header metadata included). Shared by every
+        // way a target is presented - the random 'r' pick and the study-block 'n'
+        // advance - so a block trial is logged exactly like a manual one.
+        auto ActivateFittsTarget = [&]( int nextId ) {
+            keyboard.SetFittsTargetId( nextId );
+            // Arm the task state here rather than relying solely on the
+            // fittsTargetId-changed block below: if the same marker is presented
+            // twice in a row, that block sees no change and the previous trial's
+            // touch sample would still be latched - leaving guidance suppressed
+            // and the block unable to advance. OnNewTarget is idempotent.
+            fitts.OnNewTarget( nextId );
+
+            if ( !trialLogger.IsPrimed() ) return;
+
+            trialLogger.SetUserId( kb.activeUserId );
+            trialLogger.StartTrial( nextId );
+            // Header metadata: target centroid relative to screen centre [mm]
+            // (x right+, y down+) and the measured Cal3 fingertip offset
+            // (0,0,0 if Cal3 never ran).
+            const cv::Point2i tCenterPx = aruco.GetGridMarkerCenterPx( nextId );
+            const float       tScreenXmm = ( tCenterPx.x - cfg.touchscreen.width * 0.5f ) * cfg.touchscreen.mmPerPixel;
+            const float       tScreenYmm = ( tCenterPx.y - cfg.touchscreen.height * 0.5f ) * cfg.touchscreen.mmPerPixel;
+            const cv::Point3f ftOff = cal3.GetFinalOffset();
+            trialLogger.SetTrialMeta( tScreenXmm, tScreenYmm,
+                                      ftOff.x, ftOff.y, ftOff.z, cal3.IsComplete() );
+
+            // Calibration metadata for offline reconstruction (MATLAB): the Cal1
+            // AROM envelope spline control points and the Cal2 stiffness
+            // measurements, plus the calibration headings.
+            const AromBoundary& arom = cal1.GetBoundary();
+            const auto          stiff = controller.GetStiffnessProfile();
+            trialLogger.SetCalibrationMeta(
+                std::vector<float>( CONSTANT_CALIBRATION_ANGLES_DEG,
+                                    CONSTANT_CALIBRATION_ANGLES_DEG + CONSTANT_CALIBRATION_ANGLES_COUNT ),
+                arom.valid,
+                std::vector<float>( arom.theta.begin(), arom.theta.end() ),
+                std::vector<float>( arom.radius.begin(), arom.radius.end() ),
+                std::vector<float>( arom.accel.begin(), arom.accel.end() ),
+                controller.HasStiffnessProfile(),
+                std::vector<float>( stiff.begin(), stiff.end() ) );
+
+            // Sync prevLogTouched so a touch already in progress at trial start
+            // is not immediately detected as the finish rising edge.
+            prevLogTouched = touchState.isTouched;
+        };
+
+        // 'b' + a digit 0-9 - draw a study block: one target from each configured
+        // target_set_NN, shuffled, printed to the terminal. No target goes active
+        // here; the operator presses 'n' for the first trial.
+        if ( kb.pendingBlockStart >= 0 ) {
+            std::string status;
+            accuracyBlock.StartBlock( kb.pendingBlockStart, targetRng, status );
+            keyboard.SetExternalStatus( status );
+            keyboard.ClearBlockStart();
+        }
+
+        // 'n' - present the next block target. The handler refuses while the
+        // current trial has no touchscreen contact yet, and reports the block as
+        // complete after the last one, so the only thing to do here is activate
+        // whatever ID it hands back.
+        if ( kb.pendingBlockAdvance ) {
+            std::string status;
+            const int   nextId = accuracyBlock.Advance( status );
+            if ( nextId > 0 ) ActivateFittsTarget( nextId );
+            keyboard.SetExternalStatus( status );
+            keyboard.ClearBlockAdvance();
+        }
+
         // 'r' - distance-stratified random target. Bands of distance (from the
         // PREVIOUS target's position) are cycled for an even spread; a target is
         // picked uniformly within the current band, never repeating the previous.
@@ -797,41 +872,8 @@ int main() {
                 // both the debug-pool and whole-board paths.
                 usedRandomTargets.insert( nextId );
 
-                keyboard.SetFittsTargetId( nextId );
+                ActivateFittsTarget( nextId );
                 keyboard.SetExternalStatus( "Active marker set to " + std::to_string( nextId ) + "." );
-                // If logging is primed, this 'r' also begins the trial capture.
-                if ( trialLogger.IsPrimed() ) {
-                    trialLogger.SetUserId( kb.activeUserId );
-                    trialLogger.StartTrial( nextId );
-                    // Header metadata: target centroid relative to screen centre
-                    // [mm] (x right+, y down+) and the measured Cal3 fingertip
-                    // offset (0,0,0 if Cal3 never ran).
-                    const cv::Point2i tCenterPx = aruco.GetGridMarkerCenterPx( nextId );
-                    const float       tScreenXmm = ( tCenterPx.x - cfg.touchscreen.width * 0.5f ) * cfg.touchscreen.mmPerPixel;
-                    const float       tScreenYmm = ( tCenterPx.y - cfg.touchscreen.height * 0.5f ) * cfg.touchscreen.mmPerPixel;
-                    const cv::Point3f ftOff = cal3.GetFinalOffset();
-                    trialLogger.SetTrialMeta( tScreenXmm, tScreenYmm,
-                                              ftOff.x, ftOff.y, ftOff.z, cal3.IsComplete() );
-
-                    // Calibration metadata for offline reconstruction (MATLAB):
-                    // the Cal1 AROM envelope spline control points and the Cal2
-                    // stiffness measurements, plus the calibration headings.
-                    const AromBoundary& arom = cal1.GetBoundary();
-                    const auto          stiff = controller.GetStiffnessProfile();
-                    trialLogger.SetCalibrationMeta(
-                        std::vector<float>( CONSTANT_CALIBRATION_ANGLES_DEG,
-                                            CONSTANT_CALIBRATION_ANGLES_DEG + CONSTANT_CALIBRATION_ANGLES_COUNT ),
-                        arom.valid,
-                        std::vector<float>( arom.theta.begin(), arom.theta.end() ),
-                        std::vector<float>( arom.radius.begin(), arom.radius.end() ),
-                        std::vector<float>( arom.accel.begin(), arom.accel.end() ),
-                        controller.HasStiffnessProfile(),
-                        std::vector<float>( stiff.begin(), stiff.end() ) );
-
-                    // Sync prevLogTouched so a touch already in progress at trial
-                    // start is not immediately detected as the finish rising edge.
-                    prevLogTouched = touchState.isTouched;
-                }
             }
             keyboard.ClearRandomTarget();
         }
@@ -1462,6 +1504,9 @@ int main() {
                 // the directly-detected marker; fall back to the board estimate.
                 const bool fittsTouchSample = fitts.HasTouchSample();
                 if ( fittsTouchSample && !prevFittsTouchSample ) {
+                    // Same rising edge marks the block trial as finished - only
+                    // then will the next 'n' present the following target.
+                    accuracyBlock.MarkCurrentComplete();
                     if ( activeMarker ) {
                         for ( int k = 0; k < 4; k++ ) touchedTargetCorners[k] = activeMarker->cornersPx[k];
                         touchedTargetBoxValid = true;
@@ -1550,6 +1595,8 @@ int main() {
                                   cal2.GetCurrentHeadingIndex() );
             display.SetGestureIndicator( gesture.IsIndicatorActive( nowSecs ), gesture.GetLastGesture() );
             display.SetLoggingStatus( trialLogger.IsPrimed(), trialLogger.IsActive() );
+            display.SetAccuracyBlockStatus( accuracyBlock.IsActive(), accuracyBlock.BlockIndex(),
+                                            accuracyBlock.TrialNumber(), accuracyBlock.TrialCount() );
             display.SetArucoStats( aruco.GetDetectionHz(), aruco.GetDetectionLagMs() );
 
             // OBJECTS overlays (green live / yellow anchored wireframes, gizmo,
@@ -1560,6 +1607,12 @@ int main() {
             display.SetWorldMarkerOutlines( kb.systemState == SystemState::OBJECTS, worldObj.GetWorldOutlines() );
             display.SetRingOverlay( kb.systemState == SystemState::OBJECTS, worldObj.GetRingOverlay() );
             display.SetKnownLayoutOutlines( kb.systemState == SystemState::OBJECTS, worldObj.GetKnownLayoutOutlines() );
+
+            // Retrieval overshoot cue ("OVERSHOOT", top right of the camera view):
+            // the fingertip has reached past the active object's target along the
+            // finger's pointing direction. Live per frame, never latched.
+            display.SetObjectOvershoot( kb.systemState == SystemState::OBJECTS &&
+                                        worldObj.IsOvershooting() );
 
             // OBJECTS status line + once/sec console diagnostic: shows why guidance
             // is (or isn't) locked - world marker count, world-pose availability,

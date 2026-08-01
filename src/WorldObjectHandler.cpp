@@ -37,6 +37,13 @@ static constexpr double kWorldMarkerReprojGatePx = 3.0;
 // live marker pose. After this it hides until the world pose returns.
 static constexpr int kCoastFrames = 20;
 
+// Consecutive frames whose measured horizontal displacement from the trained
+// anchor must exceed objects.contact_move_threshold_mm before CONTACT latches.
+// The latch is permanent for the trial, and the threshold is small (a few mm),
+// so a single noisy solo-IPPE pose of the 40 mm object marker must not be able
+// to set it; three frames (~40 ms) costs nothing perceptually.
+static constexpr int kContactConfirmFrames = 3;
+
 // ---- File-local helpers -----------------------------------------------------
 
 static bool finite3(const cv::Vec3d& v) {
@@ -208,6 +215,8 @@ void WorldObjectHandler::Reset() {
     targetLive_  = false;
     targetPosMm_ = {};
     targetRoll_  = 0.0f;
+    overshooting_ = false;
+    overshootMm_  = 0.0f;
     overlays_.clear();
     worldOutlines_.clear();
     knownLayoutOutlines_.clear();
@@ -236,9 +245,11 @@ void WorldObjectHandler::Reset() {
     // ringRelR_/ringRelT_ (the learned base<-second transform) are deliberately
     // KEPT: the ring mount is rigid, so the transform survives OBJECTS re-entry.
     for (auto& [id, rt] : objects_) {
-        rt.anchor    = ObjectAnchor{};
-        rt.hasLast   = false;
-        rt.coastLeft = 0;
+        rt.anchor         = ObjectAnchor{};
+        rt.hasLast        = false;
+        rt.coastLeft      = 0;
+        rt.contactRun     = 0;
+        rt.contactLatched = false;
     }
 }
 
@@ -254,6 +265,12 @@ void WorldObjectHandler::StartTraining() {
     training_        = true;
     trainFramesLeft_ = std::max(1, objCfg_.trainFrames);
     trainAcc_.clear();
+    // A burst re-measures the anchors, so any CONTACT latch (which only means
+    // "displaced from the OLD anchor") is stale - clear it and re-arm.
+    for (auto& [id, rt] : objects_) {
+        rt.contactRun     = 0;
+        rt.contactLatched = false;
+    }
 }
 
 void WorldObjectHandler::StartPresenceScan() {
@@ -269,9 +286,11 @@ void WorldObjectHandler::UntrainAll() {
     trainFramesLeft_ = 0;
     trainAcc_.clear();
     for (auto& [id, rt] : objects_) {
-        rt.anchor    = ObjectAnchor{};
-        rt.hasLast   = false;
-        rt.coastLeft = 0;
+        rt.anchor         = ObjectAnchor{};
+        rt.hasLast        = false;
+        rt.coastLeft      = 0;
+        rt.contactRun     = 0;
+        rt.contactLatched = false;
     }
 }
 
@@ -313,7 +332,15 @@ void WorldObjectHandler::OnNewTarget(int objectMarkerId) {
     activeId_   = objectMarkerId;
     hasTarget_  = false;
     targetLive_ = false;
-    // Held anchors are kept across target changes.
+    overshooting_ = false;   // live cue, but don't carry a stale one into the new trial
+    overshootMm_  = 0.0f;
+    // Held anchors are kept across target changes. CONTACT latches are per-trial,
+    // so they all re-arm here (including the object just guided to, whose object
+    // may have been carried away and put back).
+    for (auto& [id, rt] : objects_) {
+        rt.contactRun     = 0;
+        rt.contactLatched = false;
+    }
 }
 
 bool WorldObjectHandler::HasActiveAnchor() const {
@@ -998,6 +1025,33 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
         if (!have) continue;
         if (!(tuse[2] > 1.0)) continue;
 
+        // ---- Contact detection (retrieval task) -------------------------------
+        // While guidance is running to THIS object, compare its own live marker
+        // pose against the LOCKED trained anchor: the anchor is where the object
+        // sat when 't' was pressed, so displacement past the threshold means it
+        // has since been moved - the participant reached it. The live pose is
+        // mapped into the world frame exactly as the training burst does
+        // (worldR_^T * (t - worldT_)) so both sides of the comparison are in the
+        // same frame, and world Y (height) is dropped: a slide across the board
+        // triggers, a perfectly vertical lift alone does not. Needs the object's
+        // OWN marker plus a world pose in the same frame - the reaching hand is
+        // exactly what hides that marker, so the test simply resumes when it
+        // reappears. kContactConfirmFrames consecutive frames are required
+        // because the latch is permanent for the trial.
+        if (!scanning_ && id == activeId_ && trained && obj.hasTarget &&
+            !rt.contactLatched && live && poseOk_ &&
+            objCfg_.contactMoveThresholdMm > 0.0f) {   // <= 0 disables the cue
+            const cv::Vec3d tw = worldR_.t() * (oIt->second.t - worldT_);
+            const double    dx = tw[0] - rt.anchor.t[0];
+            const double    dz = tw[2] - rt.anchor.t[2];
+            const double    dHoriz = std::sqrt(dx * dx + dz * dz);
+            if (std::isfinite(dHoriz) && dHoriz > objCfg_.contactMoveThresholdMm) {
+                if (++rt.contactRun >= kContactConfirmFrames) rt.contactLatched = true;
+            } else {
+                rt.contactRun = 0;
+            }
+        }
+
         // ---- Overlay geometry (green = marker seen, yellow = held anchor) -----
         ObjectOverlay ov;
         ov.id       = id;
@@ -1006,6 +1060,7 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
         ov.anchored = fromAnchor && !live;
         ov.trained  = trained;
         ov.active   = (id == activeId_);
+        ov.contact  = rt.contactLatched;
         ov.worldRefCount = poseOk_ ? worldMarkerCount_ : 0;
 
         for (const auto& [A, B] : rt.edges) {
@@ -1103,4 +1158,36 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
             }
         }
     }
+
+    // Both halves of the guidance error vector are final now - test for overshoot.
+    UpdateOvershoot();
+}
+
+// =============================================================================
+// UpdateOvershoot - has the fingertip reached PAST the active object?
+// =============================================================================
+
+void WorldObjectHandler::UpdateOvershoot() {
+    overshooting_ = false;
+    overshootMm_  = 0.0f;
+
+    // Needs both halves of the error vector; either missing means guidance is
+    // cut this frame and there is nothing meaningful to test.
+    if (!hasTarget_ || !hasRingFingertip_) return;
+
+    // Δp = target - fingertip (camera frame, Y-up) rotated into the ring's arrow
+    // frame: z is the reach still to go along the finger's pointing direction, so
+    // -z is how far the fingertip has already travelled PAST the target. Lateral
+    // deviation (x/y) is deliberately not part of the test - it is the aiming
+    // error the guidance is already correcting, not a reach-distance measure.
+    const cv::Vec3f dCam(targetPosMm_.x - ringFingertipCamYup_.x,
+                         targetPosMm_.y - ringFingertipCamYup_.y,
+                         targetPosMm_.z - ringFingertipCamYup_.z);
+    const cv::Vec3f dArrow = camYupToArrowR_ * dCam;
+    if (!std::isfinite(dArrow[2])) return;
+
+    overshootMm_ = -dArrow[2];
+    // A non-positive threshold disables the cue (see config overshoot_threshold_mm).
+    overshooting_ = objCfg_.overshootThresholdMm > 0.0f &&
+                    overshootMm_ > objCfg_.overshootThresholdMm;
 }

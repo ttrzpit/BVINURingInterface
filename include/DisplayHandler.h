@@ -166,6 +166,14 @@ public:
     /** @brief Trial-logging status for the operator panel indicator. */
     void SetLoggingStatus(bool primed, bool active);
 
+    /** @brief ACCURACY study-block progress for the Active Trial panel: the trial
+     *         name cell reads "Accuracy B<block> <n>/<count>" while a block runs.
+     *         Pass active=false when no block is armed (cell reads "Accuracy").
+     *  @param blockIndex  Block number as typed ('b1' -> 1)
+     *  @param trialNumber 1-based trial currently presented (0 before the first 'n')
+     *  @param trialCount  Trials in the block */
+    void SetAccuracyBlockStatus(bool active, int blockIndex, int trialNumber, int trialCount);
+
     /** Supply ArUco detection thread stats for display in the controller panel. */
     void SetArucoStats(float detectionHz, float lagMs);
 
@@ -220,6 +228,13 @@ public:
      *         pose, drawn as thin dark-blue squares. Diagnostic for verifying
      *         board geometry. Pass visible=false outside OBJECTS mode. */
     void SetKnownLayoutOutlines(bool visible, const std::vector<std::array<cv::Point2f, 4>> &outlines);
+
+    /** @brief OBJECTS retrieval overshoot cue: draws "OVERSHOOT" in the top right
+     *         of the operator camera view while the fingertip has reached past
+     *         the active object's target (WorldObjectHandler::IsOvershooting).
+     *         LIVE - pass the current per-frame value; pass visible=false outside
+     *         OBJECTS mode. */
+    void SetObjectOvershoot(bool visible);
 
     /** @brief OBJECTS guidance-source tag for the controller panel's Target
      *         Telemetry block (e.g. "RING LIVE W:5", "COAST ANCH W:3") - shows
@@ -315,6 +330,12 @@ private:
     bool        loggingPrimed_ = false;
     bool        loggingActive_ = false;
 
+    // ACCURACY study-block progress (updated via SetAccuracyBlockStatus)
+    bool        blockActive_      = false;
+    int         blockIndex_       = 0;
+    int         blockTrialNumber_ = 0;
+    int         blockTrialCount_  = 0;
+
     // Estimated active-target outline (board-pose projection) for the operator
     // view when the target marker is not directly detected.
     bool                       estTargetVisible_ = false;
@@ -337,6 +358,7 @@ private:
     std::vector<std::array<cv::Point2f, 4>> knownLayoutOutlines_ = {};
     bool                       objGuidanceVisible_    = false;
     std::string                objGuidanceText_       = {};
+    bool                       objOvershootVisible_   = false;
 
     bool        touchFingertipVisible_ = false;
     cv::Point2i touchFingertipPx_      = {};

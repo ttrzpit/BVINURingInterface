@@ -363,16 +363,27 @@ void ControllerHandler::Update( const TeensyToPcPacket& rx,
         // error. Outside the window the integral leaks toward zero.
         const float speed = std::sqrt( vel_filtered_.x * vel_filtered_.x +
                                        vel_filtered_.y * vel_filtered_.y );
-        // Distance used for the integral enable-radius gate. By default the planar
-        // (X/Y) error; when integral_z_based is set, fold in the depth term
-        // (displacement_.z) so the gate is a true 3D sphere around the target
-        // centre (a 100 mm radius includes fingertip-to-target depth) rather than
-        // an in-plane radius. The deadband below still uses the planar errMag.
-        const float intGateDist = cfg_.integral_z_based
+        // Distance + radius used for the integral enable-radius gate, chosen by
+        // task. errorFrameActive_ is the discriminator: SetErrorFrameRotation()
+        // is called with active=true ONLY by the OBJECTS retrieval path, and it
+        // is exactly that arrow-frame rotation which moves the remaining reach
+        // out of X/Y and into displacement_.z.
+        //   RETRIEVAL (arrow-frame error) - the full 3D fingertip-to-target
+        //     distance against integral_enable_radius_3D_mm: a true sphere around
+        //     the target. In this frame X/Y is only the lateral deviation from the
+        //     finger's pointing line, so an in-plane gate would open while the
+        //     finger is still far from the object but well aimed.
+        //   ACCURACY (camera-frame error) - the planar (X/Y) error against
+        //     integral_enable_radius_2D_mm. Depth is deliberately ignored: the
+        //     camera rides the hand, so the image-plane error is what is guided.
+        // The deadband above still uses the planar errMag in both tasks.
+        const float intGateDist = errorFrameActive_
                                       ? std::sqrt( error.x * error.x + error.y * error.y +
                                                    displacement_.z * displacement_.z )
                                       : errMag;
-        const bool  inEndgame = intGateDist < cfg_.integral_enable_radius_mm && speed < cfg_.integral_enable_speed_mm_s;
+        const float intGateRadius = errorFrameActive_ ? cfg_.integral_enable_radius_3D_mm
+                                                      : cfg_.integral_enable_radius_2D_mm;
+        const bool  inEndgame = intGateDist < intGateRadius && speed < cfg_.integral_enable_speed_mm_s;
         if ( inEndgame ) {
             integral_.x += error.x * dt;
             integral_.y += error.y * dt;

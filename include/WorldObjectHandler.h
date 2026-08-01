@@ -59,6 +59,36 @@
 // persists off any single world marker even if the object marker never
 // reappears. 't'/'u' remain available after the scan phase for re-training.
 //
+// CONTACT DETECTION (retrieval task): while guidance is running to the active
+// object, its own marker - when visible alongside the world board - is compared
+// against its LOCKED trained anchor. Horizontal (ground-plane) displacement past
+// objects.contact_move_threshold_mm on kContactConfirmFrames consecutive frames
+// LATCHES ObjectOverlay::contact, which DisplayHandler renders as " CONTACT"
+// after the object's name: the participant has reached the object and moved it.
+// World Y is ignored (a slide triggers, a pure vertical lift does not), and the
+// multi-frame confirmation keeps the 40 mm marker's solo-IPPE noise from
+// latching a false positive at the small default threshold. Because the reaching
+// hand is exactly what occludes the object marker, detection resumes the moment
+// the marker reappears - so this marks "the object has been disturbed", not the
+// instant of first touch. The latch clears on OnNewTarget ('m'/'r'),
+// StartTraining ('t' - the anchor itself is re-measured), UntrainAll ('u') and
+// Reset. The anchor is never re-mapped, so a displaced object keeps rendering
+// (and guiding) at its trained location - the CONTACT flag is also the signal
+// that the anchor has gone stale.
+//
+// OVERSHOOT DETECTION (retrieval task): with a resolved target AND a ring
+// fingertip, the guidance error Δp = target - fingertip is rotated into the ring
+// arrow frame (see GetCamYupToArrowR) and its z component - the reach still to go
+// along the finger's pointing direction - is tested against
+// objects.overshoot_threshold_mm. A depth that has gone NEGATIVE by more than the
+// threshold means the fingertip is now past the object along that direction, and
+// DisplayHandler renders "OVERSHOOT" in the top right of the operator view. The
+// cue is LIVE, not latched: it clears the frame the fingertip comes back inside
+// the threshold, and goes false whenever either half of the error vector is
+// missing. Note the axis is the FINGER's, not the reach path's, so re-aiming the
+// finger without moving the hand can flip the sign - raise the threshold if that
+// shows up as flicker.
+//
 // All PnP runs on the MAIN thread from the corners ArucoHandler already returns
 // (single detection thread; no extra threads / VideoCapture). Frame convention
 // (marker frame, mm): origin = marker centre, +X right, +Y up, +Z out of the
@@ -88,6 +118,8 @@ struct ObjectOverlay {
     bool        anchored = false;   // reconstructed from the world board (marker not seen)
     bool        trained  = false;   // has a locked trained anchor (untrained = live preview)
     bool        active   = false;   // this object is the current guidance target
+    bool        contact  = false;   // LATCHED: the object has been displaced from its
+                                    // trained anchor while being guided to (reached)
     int         worldRefCount = 0;  // world markers backing this frame's world pose
                                     // (target-dot confidence colour; 0 = no world pose)
 
@@ -222,6 +254,18 @@ public:
     bool        TargetIsLive()   const { return targetLive_; }    // object marker itself seen
     int         GetActiveObjectId() const { return activeId_; }
 
+    // ---- Overshoot (retrieval task, see the header notes) --------------------
+    /** @brief True while the fingertip has passed the active object's target by
+     *         more than objects.overshoot_threshold_mm along the finger's
+     *         pointing direction. LIVE (never latched); false whenever there is
+     *         no target or no ring fingertip this frame. */
+    bool  IsOvershooting()     const { return overshooting_; }
+    /** @brief How far [mm] the fingertip is PAST the target along the pointing
+     *         direction (= -Δp.z in the arrow frame): positive = beyond the
+     *         target, negative = still short of it. Valid whenever
+     *         HasTarget() && HasRingFingertip(); 0 otherwise. */
+    float GetOvershootMm()     const { return overshootMm_; }
+
     // ---- Ring fingertip (for ControllerHandler::SetFingertipOffsetOverride) --
     // Live-measured fingertip position in the camera frame, Y-up (same frame as
     // GetTargetPosMm): base ring marker pose * fingertip_offset, with the second
@@ -329,6 +373,13 @@ private:
         cv::Vec3d   lastT;
         bool        hasLast   = false;
         int         coastLeft = 0;
+
+        // Contact detection (see the header notes): consecutive frames whose
+        // measured horizontal displacement from the trained anchor exceeded the
+        // threshold, and the resulting LATCHED flag. Cleared by OnNewTarget /
+        // StartTraining / UntrainAll / Reset.
+        int  contactRun    = 0;
+        bool contactLatched = false;
     };
 
     // Precomputed world-frame geometry for one world-board marker: its 4 corner
@@ -351,6 +402,11 @@ private:
      *         false = solver threw, caller should fall back to RANSAC. */
     bool SolvePlanarWorldPose(const std::vector<cv::Point3f>& worldPts,
                               const std::vector<cv::Point2f>& imgPts);
+
+    /** @brief Recompute overshooting_/overshootMm_ from this frame's resolved
+     *         target, ring fingertip and arrow-frame rotation. Called at the end
+     *         of Update(), once both halves of the error vector are final. */
+    void UpdateOvershoot();
 
     const ObjectWorldConfig& objCfg_;
     const CameraConfig&      camCfg_;
@@ -420,6 +476,11 @@ private:
     bool        targetLive_  = false;
     cv::Point3f targetPosMm_ = {};
     float       targetRoll_  = 0.0f;
+
+    // Per-frame overshoot state (see UpdateOvershoot / the header notes). LIVE -
+    // recomputed from scratch every Update(), never latched.
+    bool  overshooting_ = false;
+    float overshootMm_  = 0.0f;   // + = fingertip is past the target
 
     // Per-frame effective world->camera rotation for the active target (see the
     // HasEffectiveWorldR()/GetEffectiveWorldR() accessors).

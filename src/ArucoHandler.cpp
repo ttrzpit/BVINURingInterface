@@ -361,7 +361,15 @@ void ArucoHandler::SetTargetOutline(bool visible, int targetId) {
 }
 
 void ArucoHandler::RedrawTouchscreenOverlay() {
-    if (singleMarkerImage_.empty()) return;
+    // The overlay (target circle / error triangle / touch dot) draws on top of
+    // the Fitts board, so it is only valid while that board window is shown.
+    // Bail out if it is not: the FITTS teardown (SetTargetOffsetCircle(false),
+    // SetFittsOverlay(false), SetTargetOutline(false)) fires as the state clears
+    // to IDLE, AFTER SetFittsBoardVisible(false) has already destroyed the
+    // window. cv::imshow silently RE-CREATES a destroyed window as a normal,
+    // non-fullscreen window at the default position - which looked like the
+    // touchscreen display jumping to another monitor instead of closing.
+    if (!fittsBoardVisible_ || singleMarkerImage_.empty()) return;
 
     cv::Mat img = singleMarkerImage_.clone();
 

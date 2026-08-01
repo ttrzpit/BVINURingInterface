@@ -205,7 +205,7 @@ void KeyboardHandler::DispatchTableCommand(int key) {
         if (row.requiredState != InputState::ANY && row.requiredState != state_.inputState) continue;
 
         InputState oldState = state_.inputState;
-        ExecuteAction(row.action);
+        ExecuteAction(row.action, row.actionValue);
 
         if (row.newState == InputState::QUIT) {
             state_.quitRequested = true;
@@ -250,6 +250,23 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
             // The distance-stratified pick needs marker positions, which live in
             // main with the board layout - just flag the request here.
             state_.pendingRandomTarget = true;
+            break;
+
+        case KeyAction::START_ACCURACY_BLOCK:
+            // 'b' + digit: main draws the block (AccuracyBlockHandler needs the
+            // config target sets and the study RNG). Clear the active target so
+            // guidance can't keep pulling toward the previous one while the
+            // operator sets up - the first 'n' presents the block's first target.
+            state_.pendingBlockStart = value;
+            state_.activeTagId   = -1;
+            state_.fittsTargetId = -1;
+            break;
+
+        case KeyAction::ADVANCE_ACCURACY_BLOCK:
+            // 'n': main asks AccuracyBlockHandler for the next target. It refuses
+            // while the current trial has no touch yet, so this is a request, not
+            // a guaranteed advance.
+            state_.pendingBlockAdvance = true;
             break;
 
         case KeyAction::TOGGLE_LOGGING:
@@ -514,6 +531,7 @@ SystemState DeriveSystemState(InputState state) {
         case InputState::FIT_SEL:
         case InputState::FIT_RUN:
         case InputState::FIT_ACT:
+        case InputState::FIT_BLK:
             return SystemState::FITTS;
         case InputState::OBJ_SCAN:
         case InputState::OBJ_SEL:

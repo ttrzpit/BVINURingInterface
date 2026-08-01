@@ -20,7 +20,7 @@ Display Text            Text to display after command entered
 ## SYSTEM TOP-LEVEL INPUTS ["SYSTEM"]
  Command   | KeyID    | Description                             | Required Input State       | New Input State         | Display Text            
 -----------|----------|-----------------------------------------|----------------------------|-------------------------|-------------------------------------------------------------------------------
- `ESC`     | 27       | "Quit the program cleanly"              | ANY                        | NONE                    | "Exiting.""
+ `ESC`     | 27       | "Quit the program cleanly"              | ANY                        | NONE                    | "Exiting."
  `SPACE`   | 32       | "E-stop toggle (tension PWM only / full output)" | ANY               | (same as previous)      | "E-STOP engaged - tension PWM only." or "E-STOP released - full guidance output resumed." (see Note4)
  `Delete`  | 255      | "Cancel input / task, return to idle"   | ANY                        | IDLE                    | "Input cleared."
  `grave`   | 96       | "Exit task, return system to idle"      | ANY                        | IDLE                    | "System cleared, returning to IDLE state."
@@ -162,9 +162,13 @@ Two parallel overlays: `P` tunes the per-motor proportional gain (`gainTune`), `
  `m`       | 109      | "Manually set active marker (1 to 45)"  | FIT_SEL or FIT_RUN         | FIT_ACT                 | "Which marker (1-45)..."
  `r`       | 114      | "Randomly set active marker (1 to 45)"  | FIT_SEL                    | FIT_RUN                 | "Active marker set to [MARKER_ID]."
  `nn`      | [NUM]    | NONE                                    | FIT_ACT                    | FIT_RUN                 | "Active marker set to [MARKER_ID]."
+ `b`       | 98       | "Start a study block"                   | FIT_SEL or FIT_RUN         | FIT_BLK                 | "Which block? [0] - [9]..."
+ `0`-`9`   | 48-57    | "Draw and arm that block (0-9)"         | FIT_BLK                    | FIT_RUN                 | (set by AccuracyBlockHandler)
+ `n`       | 110      | "Present the next block target"         | FIT_RUN                    | FIT_RUN                 | (set by AccuracyBlockHandler)
 **Note1** For command `nn`, this represents a 2-digit value from 00 to 45, always entered with two digits (e.g., 01, 04, 45) 
 **Note3** `F` from IDLE only goes straight to FIT_SEL when all three calibrations (AROM, stiffness, fingertip offset) are complete. Otherwise it diverts to the FIT_WARN confirmation handled in `KeyboardHandler::ProcessKey` (gated by `SetCalibrationsComplete()`): `p` proceeds into the task with whatever calibration data exists, `r` returns to IDLE. 
 **Note2** The keyID [NUM] means any acceptable value entered via keyboard number row or numpad
+**Note4** Study blocks (`AccuracyBlockHandler`): `b` then a single digit 0-9 (no Enter - FIT_BLK is not a numeric-entry state; number row or numpad) draws one marker from each configured `accuracy_trials.target_set_NN`, shuffles them, and prints the block to the terminal as `Block 1 target set: b01_108, b11_302, ...` (`bNN` = the set the marker came from). Starting a block clears the active target, so guidance stays off until the first `n`. Each `n` presents the next target and, when logging is primed, opens a trial capture exactly as `r` does. `n` REFUSES to advance until the participant's touchscreen contact ends the current trial ("Trial 4/12 (b03_120) not complete - waiting for touch."); after the last trial it reports the block complete and disarms. Blocks are drawn independently, so a marker may recur across blocks. `r`/`m` still work mid-block as an operator override - they present an off-sequence target, and the next `n` resumes the block where it left off.
 
 
 
@@ -186,3 +190,94 @@ Two parallel overlays: `P` tunes the per-motor proportional gain (`gainTune`), `
 **Note2** `u` forgets every trained anchor. Objects revert to live "(preview)" wireframes (drawn only while their marker is visible) and produce NO guidance target until re-trained.
 **Note3** `r` first runs a PRESENCE RE-SCAN (`object_world.presence_scan_frames` detection frames, ~0.4 s): each TRAINED object's marker must be re-detected on at least a few frames to count as still present, so a physically removed object is never randomly selected again. The pick then draws from pool ∩ trained ∩ present, with no repeats until that subset is exhausted (then the pool refills, still presence-filtered). An untrained object has no world anchor, so it never resolves a guidance target - train it first. A manual `m` selection made while the re-scan is running cancels the pending random pick.
 **Note4** `D` runs the corner-jitter diagnostic: with the camera held rigidly still, it accumulates the RAW detected corner positions of world markers 1, 5, 9, 19, 27, 37, 45 over 300 detection frames, then prints one copy/paste-friendly row to the terminal - per-marker corner standard deviation [px], computed as sqrt(mean over the 4 corners of (var_x + var_y)). "nan" = that marker was seen fewer than 2 frames. Use it to A/B jitter fixes (`camera.detect_on_clahe`, `aruco_detector.object_corner_refinement_method`, gain/exposure/lighting changes).
+
+
+
+## SUMMARY - ALL COMMANDS (alphabetical)
+Every command from the sections above, in one list. **State** is the section the command is documented under, so a key bound in several sections gets one row per section - look up the key, then read across to see which contexts it is live in. Refer back to that section for the required/new InputState, key IDs, and notes.
+
+ Command   | Description                                             | State
+-----------|---------------------------------------------------------|-------------------------
+ `+`       | Increase [MOTOR] gain (P: +0.01, I: +0.005)             | GAIN TUNING
+ `+`       | Increase [MOTOR] preload tension by 0.1 N               | PRETENSION
+ `+`       | Increase [MOTOR] tension by 0.1 N                       | TENSION_ADJUST
+ `-`       | Decrease [MOTOR] gain (P: -0.01, I: -0.005)             | GAIN TUNING
+ `-`       | Decrease [MOTOR] preload tension by 0.1 N               | PRETENSION
+ `-`       | Decrease [MOTOR] tension by 0.1 N                       | TENSION_ADJUST
+ `0`-`9`   | Draw and arm that study block (one target per set)      | ACCURACY
+ `a`       | Start ARoM calibration                                  | CALIBRATION
+ `a`       | Tune motor A's gain (P or I, per current mode)          | GAIN TUNING
+ `a`       | Select motor A to adjust preload tension                | PRETENSION
+ `a`       | Send PWM value to motor A for 1 s                       | PWM_TEST
+ `a`       | Adjust motor A tension directly                         | TENSION_ADJUST
+ `b`       | Start a study block (then a digit 0-9)                  | ACCURACY
+ `b`       | Tune motor B's gain (P or I, per current mode)          | GAIN TUNING
+ `b`       | Select motor B to adjust preload tension                | PRETENSION
+ `b`       | Send PWM value to motor B for 1 s                       | PWM_TEST
+ `b`       | Adjust motor B tension directly                         | TENSION_ADJUST
+ `c`       | Tune motor C's gain (P or I, per current mode)          | GAIN TUNING
+ `c`       | Select motor C to adjust preload tension                | PRETENSION
+ `c`       | Send PWM value to motor C for 1 s                       | PWM_TEST
+ `c`       | Adjust motor C tension directly                         | TENSION_ADJUST
+ `C`       | Enter calibration mode                                  | CALIBRATION
+ `d`       | Tune all motors' gain together                          | GAIN TUNING
+ `d`       | Select all motors to adjust preload tension             | PRETENSION
+ `d`       | Send PWM value to all motors for 1 s                    | PWM_TEST
+ `d`       | Adjust all motors' tension directly                     | TENSION_ADJUST
+ `D`       | Corner-jitter probe (result printed to terminal)        | OBJECTS
+ `Delete`  | Cancel input / task, return to idle                     | SYSTEM
+ `e`       | Disable guidance output (tension only)                  | SYSTEM
+ `E`       | Enable guidance output                                  | SYSTEM
+ `Enter`   | Close proportional / integral gain tuning, resume task  | GAIN TUNING
+ `Enter`   | Finish the scan phase                                   | OBJECTS
+ `Enter`   | Advance the guided pretension step                      | PRETENSION
+ `Enter`   | Confirm buffered n.n -> [MOTOR] preload tension [N]     | PRETENSION
+ `Enter`   | Advance step 2/3 -> 3/3 (record home pose)              | PRETENSION
+ `Enter`   | Confirm buffered n.n -> [MOTOR] tension [N]             | TENSION_ADJUST
+ `ESC`     | Quit the program cleanly                                | SYSTEM
+ `F`       | Enter guidance accuracy mode                            | ACCURACY
+ `F`       | Enter accuracy mode (cals incomplete - proceed/return)  | ACCURACY
+ `grave`   | Exit ARoM / stiffness calibration, return to IDLE       | CALIBRATION
+ `grave`   | Abandon gain tuning AND the active task, return to IDLE | GAIN TUNING
+ `grave`   | Exit task, return system to idle                        | SYSTEM
+ `grave`   | Exit tension adjustment, return to IDLE                 | TENSION_ADJUST
+ `I`       | Open integral gain tuning (all motors)                  | GAIN TUNING
+ `I`       | Close integral gain tuning, resume task                 | GAIN TUNING
+ `k`       | Toggle K(theta) stiffness gain                          | SYSTEM
+ `L`       | Toggle trial logging (prime / disarm)                   | LOGGING
+ `m`       | Manually set active marker                              | ACCURACY
+ `m`       | Manually set active object marker                       | OBJECTS
+ `M`       | Enter motor test mode                                   | PWM_TEST
+ `n`       | Present the next study-block target                     | ACCURACY
+ `n`       | Ignore stored participant calibration                   | LOGGING
+ `n.n`     | Buffer an absolute preload tension value (0.0-10.0 N)   | PRETENSION
+ `n.n`     | Buffer an absolute tension value (0.0-10.0 N)           | TENSION_ADJUST
+ `nn`      | Set active marker (manual entry)                        | ACCURACY
+ `nn`      | Set active object marker (00-99)                        | OBJECTS
+ `nnn`     | Set user ID value (000-999)                             | LOGGING
+ `nnnn`    | Set PWM value (0000-2047) for [MOTOR]                   | PWM_TEST
+ `o`       | Start fingertip offset calibration                      | CALIBRATION
+ `O`       | Enter object guidance (scan phase)                      | OBJECTS
+ `O`       | Enter object mode (cals incomplete - proceed/return)    | OBJECTS
+ `p`       | Proceed into accuracy mode anyway                       | ACCURACY
+ `p`       | Proceed into object mode anyway                         | OBJECTS
+ `p`       | Start guided pretensioning sequence                     | PRETENSION
+ `P`       | Open proportional gain tuning (all motors)              | GAIN TUNING
+ `P`       | Close proportional gain tuning, resume task             | GAIN TUNING
+ `r`       | Return to idle to finish calibrations                   | ACCURACY
+ `r`       | Randomly set active marker                              | ACCURACY
+ `r`       | Return to idle to finish calibrations                   | OBJECTS
+ `r`       | Randomly pick a TRAINED object from the pool            | OBJECTS
+ `R`       | One-time rig alignment capture (screen <-> world board) | RIG_ALIGN (see Note2)
+ `s`       | Start stiffness calibration                             | CALIBRATION
+ `S`       | Toggle Teensy serial connection                         | SERIAL
+ `SPACE`   | E-stop toggle (tension PWM only / full output)          | SYSTEM
+ `t`       | Train visible objects (burst-average into anchors)      | OBJECTS
+ `T`       | Open tensioning menu                                    | PRETENSION / TENSION_ADJUST
+ `T`       | Exit tension adjustment, reopen tensioning menu         | TENSION_ADJUST
+ `u`       | Untrain (forget) all trained objects                    | OBJECTS
+ `U`       | Set user ID                                             | LOGGING
+ `y`       | Load stored participant calibration                     | LOGGING
+ `Z`       | Record the current encoder pose as home position        | SYSTEM (see Note2)
+**Note1** Sorted case-insensitively by command, lowercase before uppercase where a letter is bound to both (e.g. `c` = select motor C, `C` = enter calibration mode). Rows for the same command are then ordered by State. "GAIN TUNING" covers the GAIN_ALL / GAIN_[A/B/C] / IGAIN_ALL / IGAIN_[A/B/C] overlay states.
+**Note2** `R` and `Z` are in `kKeyCommandTable` but have no section of their own above: `R` (IDLE -> RIG_CAP) runs the one-time screen<->world-board rotation capture that writes `rig_alignment.yaml` - only needed if the touchscreen or world board physically moves; `Z` (any state) records the current encoder pose as the home position.

@@ -1,0 +1,18 @@
+%YAML:1.0
+---
+user_id: 717
+note: "Per-participant calibration (Cal1 AROM / Cal2 stiffness / Cal3 offset)."
+arom:
+   valid: 1
+   theta: [ 0., 1.57079637, 3.14159274, 4.71238899 ]
+   radius: [ 8.65739059, 14.3111925, 12.8988428, 6.18641376 ]
+   accel: [ 1.29135752, -3.65213704, -3.86562967, 6.22640896 ]
+stiffness:
+   valid: 1
+   k_theta: [ 0.228816181, 0.154923558, 0.119880117, 0.587023437 ]
+fingertip_offset:
+   valid: 1
+   x: 3.3697249889373779
+   y: 31.560430526733398
+   z: 20.914926528930664
+   roll_ref_rad: 0.060548298060894012

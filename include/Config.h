@@ -211,8 +211,18 @@ struct FittsBoardConfig {
 // been used, selection falls back to the normal whole-board random picker.
 // Leave random_pool empty ([]) to disable and always use the normal picker.
 
+// One explicitly configured target set (config.yaml [accuracy_trials.target_set_NN]).
+// A study block ('b0'-'b9') draws exactly ONE marker from each set, so the
+// sets define both the trial count per block and its spread across the board.
+struct AccuracyTargetSet {
+    int              index = 0;   // The NN in target_set_NN - the "bNN_<id>" trial label
+    std::vector<int> ids;         // Candidate marker IDs for that set
+};
+
 struct AccuracyTrialsConfig {
     std::vector<int> randomPool;  // Marker IDs to cycle through on 'r' (empty = disabled)
+    // target_set_01..NN in configured order, for the block draw (AccuracyBlockHandler).
+    std::vector<AccuracyTargetSet> targetSets;
 };
 
 // ---- Object-Guidance World (OBJECTS mode, 'O') ------------------------------
@@ -310,6 +320,22 @@ struct ObjectWorldConfig {
     // only the ones actually seen stay in the random pool (a physically removed
     // object is never re-selected). ~30 frames is about 0.4 s.
     int presenceScanFrames = 30;
+
+    // Horizontal (ground-plane) displacement [mm] of the ACTIVE object's own
+    // marker from its trained anchor that latches the "CONTACT" label - the
+    // object has been disturbed, i.e. the participant reached it. World Y
+    // (height) is ignored, so a pure vertical lift does not trigger; sliding
+    // across the board does. See WorldObjectHandler's contact-detection notes.
+    float contactMoveThresholdMm = 5.0f;
+
+    // Overshoot detection (retrieval task): how far [mm] the fingertip must pass
+    // BEYOND the active object's target along the finger's pointing direction
+    // before the operator view shows "OVERSHOOT". Measured as -Δp.z in the ring
+    // arrow frame (Δp = target - fingertip), i.e. the depth the participant has
+    // reached past the object; lateral deviation is not part of the test. The
+    // cue is LIVE - it clears the moment the fingertip comes back. Raise this if
+    // ring-pose noise flickers it at the target; 0 (or negative) disables it.
+    float overshootThresholdMm = 15.0f;
 
     // Roll trim [deg] added to the world-board camera roll used to orient the Cal3
     // fingertip offset for objects. LEGACY scalar-roll fallback path only: used
@@ -457,13 +483,25 @@ struct ControllerConfig {
     float gain_kD             = 0.0f;    // Derivative gain [N·s/mm]
     float gain_kI             = 0.02f;   // Integral gain [N/(mm·s)] - seeds the per-direction iGainTune
     // ---- Gated ("endgame") integrator -------------------------------------
-    // The integrator only winds up when the finger is within
-    // integral_enable_radius_mm of the target AND slower than
-    // integral_enable_speed_mm_s (the final settling phase, where a constant
-    // bias such as gravity/friction shows up). Outside that window the
+    // The integrator only winds up when the finger is close to the target AND
+    // slower than integral_enable_speed_mm_s (the final settling phase, where a
+    // constant bias such as gravity/friction shows up). Outside that window the
     // integral decays by integral_leak each frame to bleed stale windup.
-    float integral_enable_radius_mm  = 100.0f; // Wind up only within this error radius [mm]
-    int   integral_z_based           = 1;      // 0 = in-plane (X/Y) radius; 1 = full 3D fingertip-to-target distance (includes Z depth)
+    //
+    // "Close" is measured per task, because the two tasks put the reach distance
+    // in different components of the error (see ControllerHandler's Stage 1):
+    //   ACCURACY (FITTS)    - the in-plane (X/Y) PID error only; depth is
+    //                         ignored, since the camera rides the hand and the
+    //                         image-plane error is the guided quantity.
+    //   RETRIEVAL (OBJECTS) - the full 3D fingertip-to-target distance
+    //                         sqrt(err.x² + err.y² + Δp.z²), a true sphere
+    //                         around the target. The arrow-frame error puts the
+    //                         whole remaining reach in Δp.z and leaves only the
+    //                         lateral aim error in X/Y, so an in-plane gate
+    //                         would open while the finger is still far from the
+    //                         object but well aimed.
+    float integral_enable_radius_2D_mm = 100.0f; // ACCURACY: in-plane error radius [mm]
+    float integral_enable_radius_3D_mm = 100.0f; // RETRIEVAL: 3D fingertip-to-target radius [mm]
     float integral_enable_speed_mm_s = 60.0f;  // Wind up only below this finger speed [mm/s]
     float integral_leak              = 0.92f;  // Per-frame decay of the integral while not winding up
     float deflection_force_max = 20.0f;  // Maximum allowable guidance deflection force magnitude [N]

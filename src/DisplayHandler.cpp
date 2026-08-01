@@ -297,15 +297,51 @@ void DisplayHandler::PopulateTelemetryPanel(
     }
     AddBorder( "A1", 12, 8, Colors::GraMd, 2 );
 
+    // --- Active Trial Status ---
+    // Name and target of the trial in progress.
+    AddHeadingCell( "Active Trial", "M1", 6, 1, "center", headerFontSize );
+
+    // Trial name - one per guidance task ("Demonstration" is not a task in the
+    // code yet; add it here when it becomes one). While an ACCURACY study block
+    // runs the cell also carries the block number and position in it, e.g.
+    // "Accuracy B1 4/12".
+    std::string trialName = "--";
+    if ( kb.systemState == SystemState::FITTS ) {
+        trialName = "Accuracy";
+        if ( blockActive_ )
+            trialName += " B" + std::to_string( blockIndex_ ) + " " +
+                         std::to_string( blockTrialNumber_ ) + "/" +
+                         std::to_string( blockTrialCount_ );
+    } else if ( kb.systemState == SystemState::OBJECTS ) {
+        trialName = "Retrieval";
+    }
+    AddBodyCell( trialName, "M2", 6, 1, "center", bodyFontSize );
+
+    // Current target - the marker ID in ACCURACY, the object's configured name in
+    // RETRIEVAL (its marker ID as a fallback until the overlay carries a name).
+    AddSubheadingCell( "Current Target", "M3", 6, 1, "center", bodyFontSize );
+    std::string trialTargetStr = "--";
+    if ( kb.systemState == SystemState::FITTS && kb.activeTagId > 0 ) {
+        std::ostringstream ss;
+        ss << std::setw( 3 ) << std::setfill( '0' ) << kb.activeTagId;
+        trialTargetStr = ss.str();
+    } else if ( kb.systemState == SystemState::OBJECTS && kb.activeObjectId > 0 ) {
+        trialTargetStr = std::to_string( kb.activeObjectId );
+        for ( const ObjectOverlay &ov : objectOverlays_ )
+            if ( ov.id == kb.activeObjectId && !ov.name.empty() ) trialTargetStr = ov.name;
+    }
+    AddBodyCell( trialTargetStr, "M4", 6, 1, "center", bodyFontSize );
+    AddBorder( "M1", 6, 4, Colors::GraMd, 2 );
+
     // ---- Trial logging status -----------------------------------------------
     // REC (red) = capturing; PRIMED (green) = armed, next 'r' starts capture;
     // OFF (gray) = idle.
-    AddHeadingCell( "Trial Logging", "M1", 6, 1, "center", headerFontSize );
+    AddHeadingCell( "Trial Logging", "M7", 6, 1, "center", headerFontSize );
     std::string logStr = loggingActive_ ? "REC" : ( loggingPrimed_ ? "PRIMED" : "OFF" );
     cv::Scalar  logFill = loggingActive_ ? Colors::GreDk
                                          : ( loggingPrimed_ ? Colors::GreBk : Colors::GraBk );
-    AddBodyCell( logStr, "M2", 6, 1, "center", bodyFontSize, logFill );
-    AddBorder( "M1", 6, 2, Colors::GraMd, 2 );
+    AddBodyCell( logStr, "M8", 6, 1, "center", bodyFontSize, logFill );
+    AddBorder( "M7", 6, 2, Colors::GraMd, 2 );
 
     // ---- Keyboard inputs -------------------
     // Row 8 spans 29 columns (S..AU, cols 18-46) to match the heading at S7.
@@ -475,6 +511,14 @@ void DisplayHandler::SetLoggingStatus( bool primed, bool active ) {
     loggingActive_ = active;
 }
 
+void DisplayHandler::SetAccuracyBlockStatus( bool active, int blockIndex,
+                                             int trialNumber, int trialCount ) {
+    blockActive_ = active;
+    blockIndex_ = blockIndex;
+    blockTrialNumber_ = trialNumber;
+    blockTrialCount_ = trialCount;
+}
+
 void DisplayHandler::SetArucoStats( float detectionHz, float lagMs ) {
     arucoDetectionHz_ = detectionHz;
     arucoLagMs_ = lagMs;
@@ -516,6 +560,10 @@ void DisplayHandler::SetRingOverlay( bool visible, const RingOverlay &ring ) {
 void DisplayHandler::SetObjectGuidanceStatus( bool visible, const std::string &text ) {
     objGuidanceVisible_ = visible;
     objGuidanceText_ = text;
+}
+
+void DisplayHandler::SetObjectOvershoot( bool visible ) {
+    objOvershootVisible_ = visible;
 }
 
 void DisplayHandler::SetKnownLayoutOutlines( bool                                           visible,
@@ -1093,19 +1141,23 @@ void DisplayHandler::DrawMarkerOverlays(
     // Top-left label: what the PID error is currently driving toward.
     // Before Cal3: the offset terms cancel, so error = marker position only.
     // After Cal3:  roll-compensated offset shifts the error target.
-    std::string targetLabel;
-    if ( activeTagId <= 0 ) {
-        targetLabel = "Target: None";
-    } else if ( cal3Complete_ ) {
-        targetLabel = "Target: Marker Center + Cal3 Offset";
-    } else {
-        targetLabel = "Target: Marker Center";
+    // Suppressed in OBJECTS mode - DrawObjectOverlays draws its own
+    // "Guiding to: <name>" label in the same spot, so only one shows at a time.
+    if ( !objectOverlaysVisible_ ) {
+        std::string targetLabel;
+        if ( activeTagId <= 0 ) {
+            targetLabel = "Target: None";
+        } else if ( cal3Complete_ ) {
+            targetLabel = "Target: Marker Center + Cal3 Offset";
+        } else {
+            targetLabel = "Target: Marker Center";
+        }
+        // Black shadow then white text for readability on any camera background.
+        cv::putText( frame, targetLabel, cv::Point( 11, 23 ), cv::FONT_HERSHEY_SIMPLEX,
+                     0.55, cv::Scalar( 0, 0, 0 ), 3 );
+        cv::putText( frame, targetLabel, cv::Point( 10, 22 ), cv::FONT_HERSHEY_SIMPLEX,
+                     0.55, Colors::White, 1 );
     }
-    // Black shadow then white text for readability on any camera background.
-    cv::putText( frame, targetLabel, cv::Point( 11, 23 ), cv::FONT_HERSHEY_SIMPLEX,
-                 0.55, cv::Scalar( 0, 0, 0 ), 3 );
-    cv::putText( frame, targetLabel, cv::Point( 10, 22 ), cv::FONT_HERSHEY_SIMPLEX,
-                 0.55, Colors::White, 1 );
 
     bool activeDrawn = false;
     for ( const auto &m : markers ) {
@@ -1181,18 +1233,37 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
     if ( !objectOverlaysVisible_ ) return;
 
     // Guidance-target name banner: the object currently being guided to, from
-    // its config "name" property. Drawn prominently at the top-left so the
-    // operator always knows the active target (the per-object labels below also
-    // suffix the active object with '*'). Magenta matches those labels.
+    // its config "name" property. Occupies the same top-left slot as the FITTS
+    // "Target:" label (suppressed there while in OBJECTS mode), with matching
+    // formatting - black shadow then white text - so only one shows at a time.
     for ( const auto &o : objectOverlays_ ) {
         if ( o.active && !o.name.empty() ) {
             const std::string banner = "Guiding to: " + o.name;
-            cv::putText( frame, banner, cv::Point( 11, 25 ), cv::FONT_HERSHEY_SIMPLEX,
-                         0.8, cv::Scalar( 0, 0, 0 ), 4, cv::LINE_AA );
-            cv::putText( frame, banner, cv::Point( 10, 24 ), cv::FONT_HERSHEY_SIMPLEX,
-                         0.8, Colors::MagLt, 2, cv::LINE_AA );
+            cv::putText( frame, banner, cv::Point( 11, 23 ), cv::FONT_HERSHEY_SIMPLEX,
+                         0.55, cv::Scalar( 0, 0, 0 ), 3 );
+            cv::putText( frame, banner, cv::Point( 10, 22 ), cv::FONT_HERSHEY_SIMPLEX,
+                         0.55, Colors::White, 1 );
             break;
         }
+    }
+
+    // Retrieval overshoot cue: the fingertip has reached PAST the active object
+    // along the finger's pointing direction (WorldObjectHandler::IsOvershooting).
+    // Top RIGHT, right-aligned so it never collides with the top-left guidance
+    // banner / status line, in red with a black shadow. LIVE - it disappears the
+    // moment the participant comes back inside the threshold.
+    if ( objOvershootVisible_ ) {
+        const std::string overshootText = "OVERSHOOT";
+        constexpr double  overshootScale = 0.9;
+        constexpr int     overshootThick = 2;
+        int               baseLine = 0;
+        const cv::Size    sz = cv::getTextSize( overshootText, cv::FONT_HERSHEY_SIMPLEX,
+                                                overshootScale, overshootThick, &baseLine );
+        const cv::Point org( frame.cols - sz.width - 14, sz.height + 14 );
+        cv::putText( frame, overshootText, org + cv::Point( 1, 1 ), cv::FONT_HERSHEY_SIMPLEX,
+                     overshootScale, cv::Scalar( 0, 0, 0 ), overshootThick + 2, cv::LINE_4 );
+        cv::putText( frame, overshootText, org, cv::FONT_HERSHEY_SIMPLEX,
+                     overshootScale, Colors::RedMd, overshootThick, cv::LINE_4 );
     }
 
     // Rig-diagnostic status line (world markers / pose / active-object state),
@@ -1251,7 +1322,11 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
                 }
                 poly[k] = ipt( q[k] );
             }
-            if ( ok ) cv::polylines( frame, poly, true, Colors::BluMd, 1, cv::LINE_4 );
+            if ( ok ) {
+                // Fill world markers
+                // cv::fillPoly( frame, poly, Colors::White, cv::LINE_4 );
+                cv::polylines( frame, poly, true, Colors::BluLt, 1, cv::LINE_4 );
+            }
         }
     }
 
@@ -1309,17 +1384,26 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
         // Name label at the marker origin (black shadow + magenta text). State
         // suffix: untrained objects are a live "(preview)" (never guided);
         // trained objects show "(memory)" while drawn with their marker occluded.
-        // The active object is marked with *.
+        // The active object is marked with *. " CONTACT" follows the name once
+        // the guided-to object has been displaced from its trained anchor
+        // (latched by WorldObjectHandler - the participant reached it).
         if ( o.hasLabel && sane( o.labelPos ) ) {
             std::string label = o.name;
+            if ( o.contact )
+                label += " CONTACT";
             if ( !o.trained )
                 label += " (preview)";
             else if ( !o.visible )
                 label += " (memory)";
-            if ( o.active ) label += " *";
+            // if ( o.active ) label += " *";
             const cv::Point p = ipt( o.labelPos );
-            cv::putText( frame, label, p, cv::FONT_HERSHEY_SIMPLEX, 0.75, Colors::White, 5, cv::LINE_4 );
-            cv::putText( frame, label, p, cv::FONT_HERSHEY_SIMPLEX, 0.75, Colors::MagDk, 2, cv::LINE_4 );
+            if ( o.active ) {
+                cv::putText( frame, label, p, cv::FONT_HERSHEY_SIMPLEX, 0.75, Colors::White, 5, cv::LINE_4 );
+                cv::putText( frame, label, p, cv::FONT_HERSHEY_SIMPLEX, 0.75, Colors::MagMd, 2, cv::LINE_4 );
+            } else {
+                cv::putText( frame, label, p, cv::FONT_HERSHEY_SIMPLEX, 0.75, Colors::White, 2, cv::LINE_4 );
+                cv::putText( frame, label, p, cv::FONT_HERSHEY_SIMPLEX, 0.75, Colors::MagDk, 2, cv::LINE_4 );
+            }
         }
     }
 
@@ -1343,7 +1427,7 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
         }
         if ( ringOverlay_.hasArrow && sane( ringOverlay_.arrowTail ) && sane( ringOverlay_.arrowTip ) ) {
             cv::arrowedLine( frame, ipt( ringOverlay_.arrowTail ), ipt( ringOverlay_.arrowTip ),
-                             ringCol, 2, cv::LINE_AA, 0, 0.3 );
+                             ringCol, 2, cv::LINE_4, 0, 0.3 );
 
             // Thin 400 mm pointing ray extending from the arrowhead along the
             // finger's pointing direction (endpoint projected in 3D by
@@ -1356,15 +1440,15 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
                 if ( ringOverlay_.hasGroundHit && sane( ringOverlay_.groundHit ) ) {
                     // Draw line
                     cv::line( frame, ipt( ringOverlay_.arrowTip ), ipt( ringOverlay_.groundHit ),
-                              ringCol, 1, cv::LINE_AA );
+                              ringCol, 1, cv::LINE_4 );
 
                     // Draw ground-plane intersection
-                    cv::circle( frame, ipt( ringOverlay_.groundHit ), 4, ringCol, -1, cv::LINE_AA );
+                    cv::circle( frame, ipt( ringOverlay_.groundHit ), 4, ringCol, -1, cv::LINE_4 );
 
                 } else {
                     // If ray is not intersecting Y=0 plane, do not project intersection point
                     cv::line( frame, ipt( ringOverlay_.arrowTip ), ipt( ringOverlay_.rayEnd ),
-                              ringCol, 1, cv::LINE_AA );
+                              ringCol, 1, cv::LINE_4 );
                 }
         }
     }
