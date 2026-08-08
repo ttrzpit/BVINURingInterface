@@ -246,6 +246,7 @@ int main() {
     double       lastObjDiagSecs = 0.0;              ///< Throttles the OBJECTS once/sec console diagnostic
     bool         prevObjTraining = false;            ///< Detects training-burst completion -> one-shot result report
     bool         prevObjWorldScan = false;           ///< Detects world-marker mask scan completion -> one-shot result report
+    bool         prevObjLockDrift = false;           ///< Detects the world-pose lock going stale -> one-shot warning
     // OBJECTS random pool ('r' cycles these object marker IDs, no repeats until
     // exhausted, then refills). Refreshed on every OBJECTS entry.
     std::vector<int> objectPoolRemaining;
@@ -444,6 +445,7 @@ int main() {
                 worldObj.Reset();
                 prevObjTraining = false;    // Reset() cleared any mid-burst training
                 prevObjWorldScan = false;   // Reset() also dropped the world-marker mask
+                prevObjLockDrift = false;   // ...and the world-pose lock
                 objectPoolRemaining = cfg.objectWorld.objectMarkerPool;
                 objectPickPending = false;    // Reset() also dropped any presence scan
             } else if ( kb.systemState == SystemState::RIG_ALIGN ) {
@@ -1097,13 +1099,37 @@ int main() {
             keyboard.SetExternalStatus( "Scanning world markers (keep the workspace clear)... " +
                                         std::to_string( worldObj.WorldScanFramesLeft() ) );
         } else if ( prevObjWorldScan && kb.systemState == SystemState::OBJECTS ) {
-            keyboard.SetExternalStatus(
-                worldObj.WorldMaskCount() > 0
-                    ? "Masked " + std::to_string( worldObj.WorldMaskCount() ) +
-                          " world marker(s) - place the objects, then [t] to train."
-                    : "No world markers captured - check the board is in view, then press [w] again." );
+            if ( worldObj.WorldMaskCount() == 0 ) {
+                keyboard.SetExternalStatus(
+                    "No world markers captured - check the board is in view, then press [w] again." );
+            } else if ( worldObj.HasWorldPoseLock() ) {
+                keyboard.SetExternalStatus(
+                    "Masked " + std::to_string( worldObj.WorldMaskCount() ) +
+                    " world marker(s), pose LOCKED (" + std::to_string( worldObj.LockSampleCount() ) +
+                    " frames) - place the objects, then [t] to train." );
+            } else {
+                keyboard.SetExternalStatus(
+                    "Masked " + std::to_string( worldObj.WorldMaskCount() ) +
+                    " world marker(s) - pose NOT locked (no world pose during the scan), "
+                    "objects will track the per-frame solve." );
+            }
         }
         prevObjWorldScan = worldObj.IsWorldScanning();
+
+        // Locked world pose gone stale - the detected markers no longer land
+        // where the lock says they should, i.e. the camera was bumped. Warn once
+        // per latch (console + Output row); the fix is to clear the workspace
+        // and re-press 'w', which re-locks without disturbing trained anchors
+        // (they live in the world frame, not the camera frame).
+        if ( kb.systemState == SystemState::OBJECTS && worldObj.LockDrifting() && !prevObjLockDrift ) {
+            const std::string msg =
+                "World pose lock has drifted (" +
+                std::to_string( static_cast<int>( std::lround( worldObj.LockDriftPx() ) ) ) +
+                " px) - camera moved? Clear the workspace and press [w] to re-lock.";
+            keyboard.SetExternalStatus( msg );
+            std::cout << "[OBJ] " << msg << "\n";
+        }
+        prevObjLockDrift = worldObj.LockDrifting();
 
         // 'r' presence re-scan: live countdown on the Output row while the
         // burst runs. The deferred pick above reports the result once the scan
@@ -1687,6 +1713,24 @@ int main() {
             display.SetObjectOvershoot( kb.systemState == SystemState::OBJECTS &&
                                         worldObj.IsOvershooting() );
 
+            // Fingertip -> target distance under the "Guiding to:" banner: the
+            // magnitude of the guidance error vector Δp = target - fingertip,
+            // both camera-frame Y-up, so it is the same quantity the green
+            // error line draws and the device is steering to zero. Needs both
+            // halves; when either is missing the readout shows "--".
+            {
+                const bool haveBoth = worldObj.HasTarget() && worldObj.HasRingFingertip();
+                float      distMm = 0.0f;
+                if ( haveBoth ) {
+                    const cv::Point3f d = worldObj.GetTargetPosMm() - worldObj.GetRingFingertipCamYup();
+                    distMm = std::sqrt( d.x * d.x + d.y * d.y + d.z * d.z );
+                }
+                display.SetObjectTargetDistance( kb.systemState == SystemState::OBJECTS,
+                                                 haveBoth, distMm,
+                                                 worldObj.HasMinDistance(),
+                                                 worldObj.GetMinDistanceMm() );
+            }
+
             // OBJECTS status line + once/sec console diagnostic: shows why guidance
             // is (or isn't) locked - world marker count, world-pose availability,
             // and the active object's LIVE/ANCHORED/lost state. Essential for
@@ -1722,9 +1766,19 @@ int main() {
                             : worldObj.RingRelLearned()  ? "2nd"
                                                          : "2nd(seed)" );
 
+                // "pose: LOCK 3.2px" = running off the frozen 'w' pose, with the
+                // detected markers' mean reprojection error against it (the
+                // staleness measure); "OK"/"--" = per-frame solve, locked off.
+                const std::string poseState =
+                    !worldObj.HasWorldPoseLock()
+                        ? std::string( worldObj.HasWorldPose() ? "OK" : "--" )
+                        : "LOCK " + std::to_string( worldObj.LockDriftPx() ).substr( 0, 4 ) + "px" +
+                              std::string( worldObj.LockDrifting() ? " DRIFT!" : "" ) +
+                              std::string( worldObj.HasLiveWorldPose() ? "" : " (live --)" );
+
                 const std::string status =
                     "OBJ  world mk: " + std::to_string( worldObj.GetWorldMarkerCount() ) +
-                    "  pose: " + std::string( worldObj.HasWorldPose() ? "OK" : "--" ) +
+                    "  pose: " + poseState +
                     "  ring: " + ringState +
                     "  trained: " + std::to_string( worldObj.ScannedCount() ) + "/" +
                     std::to_string( static_cast<int>( cfg.objectWorld.targetObjects.size() ) ) +

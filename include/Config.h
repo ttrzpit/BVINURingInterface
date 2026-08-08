@@ -315,6 +315,26 @@ struct ObjectWorldConfig {
     // is mapped into the world frame). ~20 frames is about 0.25 s.
     int trainFrames = 20;
 
+    // LOCK the world->camera pose at the end of a 'w' scan instead of re-solving
+    // it every frame. With a fixed overhead camera the pose is a CONSTANT, so
+    // re-deriving it from whatever marker subset the hand leaves visible only
+    // injects noise: each subset settles on a slightly different compromise
+    // between the (few-mm inconsistent) marker_positions entries, which is what
+    // makes trained objects jump when a hand crosses the board. The 'w' burst
+    // averages the pose over its frames and every downstream consumer (training,
+    // anchors, targets, contact, ring ground-plane hit) then runs off that one
+    // constant. Set 0 to go back to the per-frame solve for comparison.
+    // The lock is only valid while the camera does not move - see
+    // worldLockDriftPx for the staleness monitor.
+    bool lockWorldPose = true;
+
+    // Staleness monitor for the locked world pose: mean corner reprojection
+    // error [px] of the DETECTED world markers against the lock, above which
+    // (for ~15 consecutive frames) the lock is flagged as drifted - almost
+    // always a bumped camera, fixed by clearing the workspace and pressing 'w'
+    // again. Raise it if normal detection noise trips the warning; 0 disables.
+    float worldLockDriftPx = 3.0f;
+
     // Opacity of the 'w' world-marker mask (the white boxes painted over the
     // printed world board in the operator view / logged video). 1.0 = fully
     // opaque, the markers are gone; lower values wash them out but leave them

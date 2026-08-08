@@ -263,6 +263,27 @@ object_world:
    # alone. ~20 frames is about 0.25 s - hold the camera steady during a burst.
    train_frames: 60
 
+   # LOCK the world->camera pose at the end of a 'w' scan instead of re-solving
+   # it on every frame. With a fixed overhead camera that pose is a CONSTANT, so
+   # re-deriving it from whatever marker subset the reaching hand leaves visible
+   # only injects noise: each subset settles on a slightly different compromise
+   # between the (few-mm inconsistent) marker_positions entries, and that is what
+   # makes trained objects jump when a hand crosses the board. The 'w' burst
+   # averages the pose over its frames, and training, anchors, targets, contact
+   # detection and the ring ground-plane hit all then run off that one constant -
+   # occluding half the board no longer moves anything. Only valid while the
+   # camera does not move; a bump is caught by world_lock_drift_px below and
+   # fixed by clearing the workspace and pressing 'w' again.
+   # Set to 0 to go back to the per-frame solve for an A/B comparison.
+   lock_world_pose: 1
+
+   # Staleness monitor for the locked pose: mean corner reprojection error [px]
+   # of the detected world markers against the lock, above which (sustained for
+   # ~15 frames) the operator is warned that the lock has drifted - almost always
+   # a bumped camera. Raise it if normal detection noise trips the warning;
+   # 0 disables the check.
+   world_lock_drift_px: 3.0
+
    # Opacity of the 'w' world-marker mask - the white boxes painted over the
    # printed world board in the operator view (and therefore in the logged
    # video). 1.0 = fully opaque, the fiducials are gone. Lower values wash them
@@ -403,7 +424,7 @@ object_world:
       arrow_yaw_trim_deg: 0
 
    # --- Object marker IDs to randomise among for the 'r' selection -----------
-   object_marker_pool: [ 60, 61, 62, 70, 71, 72 ]
+   object_marker_pool: [ 60, 61, 62, 63, 64, 72, 73, 74 ]
 
    # --- Virtual objects tagged by object markers -----------------------------
    # type: "cylinder" (general) - base_origin_mm + base_normal_mm + radius + height.
@@ -452,7 +473,7 @@ object_world:
         marker_size_mm:     40
         cylinder_radius_mm: 7
         cylinder_height_mm: 69 
-        base_origin_mm:     { x: 49,  y:  0, z:  5 }
+        base_origin_mm:     { x: 49,  y:  0, z:  7 }
         base_normal_mm:     { x:   1, y:  0, z:  0 }
         target_point_mm:    { x:  30, y:  0, z:  3 }
 

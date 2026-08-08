@@ -589,6 +589,15 @@ void DisplayHandler::SetObjectStatusLine( bool visible, const std::string &text 
     objectStatusLine_ = text;
 }
 
+void DisplayHandler::SetObjectTargetDistance( bool visible, bool hasValue, float distanceMm,
+                                              bool hasMin, float minDistanceMm ) {
+    objDistanceVisible_ = visible;
+    objDistanceValid_ = hasValue;
+    objDistanceMm_ = distanceMm;
+    objMinDistanceValid_ = hasMin;
+    objMinDistanceMm_ = minDistanceMm;
+}
+
 void DisplayHandler::SetWorldMarkerOutlines( bool                                           visible,
                                              const std::vector<std::array<cv::Point2f, 4>> &outlines ) {
     worldOutlinesVisible_ = visible;
@@ -1367,6 +1376,7 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
     // its config "name" property. Occupies the same top-left slot as the FITTS
     // "Target:" label (suppressed there while in OBJECTS mode), with matching
     // formatting - black shadow then white text - so only one shows at a time.
+    bool bannerDrawn = false;
     for ( const auto &o : objectOverlays_ ) {
         if ( o.active && !o.name.empty() ) {
             const std::string banner = "Guiding to: " + o.name;
@@ -1374,8 +1384,40 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
                          0.55, cv::Scalar( 0, 0, 0 ), 3 );
             cv::putText( frame, banner, cv::Point( 10, 22 ), cv::FONT_HERSHEY_SIMPLEX,
                          0.55, Colors::White, 1 );
+            bannerDrawn = true;
             break;
         }
+    }
+
+    // Straight-line distance from the ring fingertip (the cyan arrow's tip) to
+    // the active object's target - the magnitude of the same error vector the
+    // green line draws, in millimetres. Directly under the banner, and only
+    // alongside it: a distance with no named target it belongs to would be
+    // ambiguous. "--" means one half of the vector is missing this frame (no
+    // resolved target, or both ring markers lost past the coast window), which
+    // is exactly when guidance is cut - worth seeing rather than hiding.
+    if ( objDistanceVisible_ && bannerDrawn ) {
+        const std::string distText =
+            objDistanceValid_
+                ? "Distance: " + std::to_string( static_cast<int>( std::lround( objDistanceMm_ ) ) ) + " mm"
+                : "Distance: -- mm";
+        cv::putText( frame, distText, cv::Point( 11, 47 ), cv::FONT_HERSHEY_SIMPLEX,
+                     0.55, cv::Scalar( 0, 0, 0 ), 3, cv::LINE_4 );
+        cv::putText( frame, distText, cv::Point( 10, 46 ), cv::FONT_HERSHEY_SIMPLEX,
+                     0.55, objDistanceValid_ ? Colors::White : Colors::YelMd, 1, cv::LINE_4 );
+
+        // Closest approach of this trial - the running minimum of the row above,
+        // reset when a new target is selected. It never rises, so the best reach
+        // stays legible after the participant has moved away (and stays in the
+        // logged video frame).
+        const std::string closestText =
+            objMinDistanceValid_
+                ? "Closest: " + std::to_string( static_cast<int>( std::lround( objMinDistanceMm_ ) ) ) + " mm"
+                : "Closest: -- mm";
+        cv::putText( frame, closestText, cv::Point( 11, 71 ), cv::FONT_HERSHEY_SIMPLEX,
+                     0.55, cv::Scalar( 0, 0, 0 ), 3, cv::LINE_4 );
+        cv::putText( frame, closestText, cv::Point( 10, 70 ), cv::FONT_HERSHEY_SIMPLEX,
+                     0.55, objMinDistanceValid_ ? Colors::GreLt : Colors::YelMd, 1, cv::LINE_4 );
     }
 
     // Retrieval overshoot cue: the fingertip has reached PAST the active object
@@ -1398,11 +1440,12 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
     }
 
     // Rig-diagnostic status line (world markers / pose / active-object state),
-    // top-left under the guidance-target banner. Black shadow then white for contrast.
+    // top-left below the banner and the two distance rows (fourth row). Black
+    // shadow then white for contrast.
     if ( objectStatusVisible_ && !objectStatusLine_.empty() ) {
-        cv::putText( frame, objectStatusLine_, cv::Point( 11, 47 ), cv::FONT_HERSHEY_SIMPLEX,
+        cv::putText( frame, objectStatusLine_, cv::Point( 11, 95 ), cv::FONT_HERSHEY_SIMPLEX,
                      0.55, cv::Scalar( 0, 0, 0 ), 3, cv::LINE_4 );
-        cv::putText( frame, objectStatusLine_, cv::Point( 10, 46 ), cv::FONT_HERSHEY_SIMPLEX,
+        cv::putText( frame, objectStatusLine_, cv::Point( 10, 94 ), cv::FONT_HERSHEY_SIMPLEX,
                      0.55, Colors::White, 1, cv::LINE_4 );
     }
 

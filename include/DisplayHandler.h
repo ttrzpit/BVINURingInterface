@@ -229,6 +229,20 @@ public:
      *         Pass visible=false outside OBJECTS mode. */
     void SetObjectStatusLine(bool visible, const std::string &text);
 
+    /** @brief Straight-line distance [mm] from the ring fingertip (the arrow tip)
+     *         to the active object's guidance target, shown under the
+     *         "Guiding to:" banner. Pass hasValue=false when either half of the
+     *         error vector is missing this frame (no target, or no ring marker
+     *         and the coast window expired) - the line then reads "--", which is
+     *         also the operator's cue that guidance is currently cut.
+     *         @param hasMin,minDistanceMm closest approach of the current trial
+     *                (running minimum since the target was selected), drawn as a
+     *                third "Closest:" row - it only falls, so backing away from
+     *                an object leaves the best reach on screen and in the video.
+     *         Pass visible=false outside OBJECTS mode. */
+    void SetObjectTargetDistance(bool visible, bool hasValue, float distanceMm,
+                                 bool hasMin, float minDistanceMm);
+
     /** @brief Detected world-board marker outlines (4 image-px corners each) for
      *         OBJECTS mode, drawn as faint blue squares so the operator can see
      *         which world markers are anchoring the scene. Pass visible=false
@@ -392,6 +406,11 @@ private:
     std::vector<ObjectOverlay> objectOverlays_        = {};
     bool                       objectStatusVisible_   = false;
     std::string                objectStatusLine_      = {};
+    bool                       objDistanceVisible_    = false;
+    bool                       objDistanceValid_      = false;
+    float                      objDistanceMm_         = 0.0f;
+    bool                       objMinDistanceValid_   = false;
+    float                      objMinDistanceMm_      = 0.0f;
     bool                       worldOutlinesVisible_  = false;
     std::vector<std::array<cv::Point2f, 4>> worldOutlines_ = {};
     bool                       worldMaskVisible_      = false;

@@ -72,6 +72,24 @@
 // - press 'w' again (workspace blank) to re-scan after any camera change. 'u'
 // does NOT clear them (it untrains objects only); Reset ('O') does.
 //
+// WORLD-POSE LOCK ('w', config lock_world_pose): the same burst also AVERAGES
+// the solved world->camera pose over its frames and LOCKS it. With a fixed
+// overhead camera that pose is a constant, so from then on every consumer -
+// training, anchor rendering, guidance targets, contact detection, the ring
+// ground-plane hit - runs off the locked pose and the per-frame solve is kept
+// only as a diagnostic. This removes the dominant source of trained-object
+// jitter: the per-frame solve re-derives the pose from whatever marker subset
+// the reaching hand leaves visible, and because the configured marker positions
+// are only consistent to a few mm, each subset settles on a slightly different
+// compromise - so markers dropping in and out SHIFTED every trained object
+// together. Locked, occluding half the board changes nothing, and trained
+// objects stop coasting entirely (a world pose is always available).
+// The lock is only valid while the camera holds still: each frame the detected
+// markers' mean corner reprojection error against the lock is measured, and
+// sustained error past objects.world_lock_drift_px raises LockDrifting() - clear
+// the workspace and press 'w' again. Anchors are stored in the WORLD frame, so
+// re-locking after a camera move keeps every trained object.
+//
 // CONTACT DETECTION (retrieval task): while guidance is running to the active
 // object, its own marker - when visible alongside the world board - is compared
 // against its LOCKED trained anchor. Horizontal (ground-plane) displacement past
@@ -224,6 +242,24 @@ public:
      *         raw detections are enough. */
     void StartWorldScan();
     bool IsWorldScanning()     const { return worldScanning_; }
+    /** @brief True once a 'w' burst has locked the world->camera pose (config
+     *         lock_world_pose). While set, every consumer runs off that one
+     *         constant pose instead of the per-frame solve. */
+    bool HasWorldPoseLock()    const { return lockActive_; }
+    /** @brief Frames averaged into the current lock (0 = no lock). */
+    int  LockSampleCount()     const { return lockSamples_; }
+    /** @brief LATCHED: the detected world markers no longer reproject onto the
+     *         locked pose (mean error past objects.world_lock_drift_px for
+     *         kLockDriftConfirmFrames frames) - the camera has almost certainly
+     *         been bumped. Cleared by a new 'w' scan or Reset. */
+    bool LockDrifting()        const { return lockDrifting_; }
+    /** @brief This frame's mean corner reprojection error [px] of the detected
+     *         world markers against the LOCKED pose (0 when not locked or no
+     *         world marker is visible). The live staleness measure. */
+    float LockDriftPx()        const { return lockDriftPx_; }
+    /** @brief Whether the per-frame solve itself succeeded this frame. Distinct
+     *         from HasWorldPose(), which is always true while locked. */
+    bool HasLiveWorldPose()    const { return liveOk_; }
     /** @brief Detection frames remaining in the current mask burst (HUD countdown). */
     int  WorldScanFramesLeft() const { return worldScanFramesLeft_; }
     /** @brief World markers currently masked (0 = no 'w' scan captured yet). */
@@ -294,6 +330,15 @@ public:
      *         target, negative = still short of it. Valid whenever
      *         HasTarget() && HasRingFingertip(); 0 otherwise. */
     float GetOvershootMm()     const { return overshootMm_; }
+
+    // ---- Closest approach (per trial) ----------------------------------------
+    /** @brief True once a target/fingertip pair has been seen since the current
+     *         target was selected. */
+    bool  HasMinDistance()   const { return hasMinDist_; }
+    /** @brief Smallest |target - fingertip| [mm] reached since the target was
+     *         selected - the best approach of this trial. Monotonically
+     *         non-increasing; reset by OnNewTarget ('m'/'r') and Reset ('O'). */
+    float GetMinDistanceMm() const { return minDistMm_; }
 
     // ---- Ring fingertip (for ControllerHandler::SetFingertipOffsetOverride) --
     // Live-measured fingertip position in the camera frame, Y-up (same frame as
@@ -490,6 +535,25 @@ private:
     int                             worldScanFramesLeft_ = 0;
     std::map<int, WorldScanAccum>   worldScanAcc_;
 
+    // World-pose LOCK ('w'). The burst accumulates the per-frame solved pose in
+    // lockAcc_ (translation summed, rotations summed then SVD-orthonormalized -
+    // same treatment as a training burst) and locks the mean. Once lockActive_,
+    // Update() substitutes it for the live solve, so the whole downstream chain
+    // sees one constant scene pose. lockDriftRun_ counts consecutive frames
+    // whose mean reprojection error against the lock exceeds the configured
+    // gate, so a single blurred frame (a hand sweeping over the board) cannot
+    // raise the drift warning.
+    static constexpr int kLockDriftConfirmFrames = 15;
+    TrainAccum  lockAcc_;
+    bool        lockActive_   = false;
+    cv::Matx33d lockR_        = cv::Matx33d::eye();   // world -> camera, frozen
+    cv::Vec3d   lockT_;
+    int         lockSamples_  = 0;
+    float       lockDriftPx_  = 0.0f;
+    int         lockDriftRun_ = 0;
+    bool        lockDrifting_ = false;
+    bool        liveOk_       = false;   // the per-frame solve itself succeeded
+
     // Corner-jitter probe ('D'): running sums for each probe marker's corner
     // std. 8 coordinates per marker (4 corners x X/Y); naive sum / sum-of-
     // squares in double is plenty of precision here (~1600^2 x 300 frames).
@@ -532,6 +596,13 @@ private:
     // recomputed from scratch every Update(), never latched.
     bool  overshooting_ = false;
     float overshootMm_  = 0.0f;   // + = fingertip is past the target
+
+    // Closest approach since the current target was selected (per-trial running
+    // minimum of |target - fingertip|). Only ever falls, so it survives the
+    // participant backing away - the point being that the best reach stays
+    // readable on screen and in the logged video.
+    bool  hasMinDist_ = false;
+    float minDistMm_  = 0.0f;
 
     // Per-frame effective world->camera rotation for the active target (see the
     // HasEffectiveWorldR()/GetEffectiveWorldR() accessors).

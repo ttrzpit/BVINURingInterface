@@ -214,6 +214,13 @@ bool Config::load(const std::string& filepath) {
             ow["train_frames"] >> objectWorld.trainFrames;
         if (!ow["presence_scan_frames"].empty())
             ow["presence_scan_frames"] >> objectWorld.presenceScanFrames;
+        if (!ow["lock_world_pose"].empty()) {
+            int lwp = 1;
+            ow["lock_world_pose"] >> lwp;
+            objectWorld.lockWorldPose = (lwp != 0);
+        }
+        if (!ow["world_lock_drift_px"].empty())
+            ow["world_lock_drift_px"] >> objectWorld.worldLockDriftPx;
         if (!ow["world_mask_alpha"].empty()) {
             ow["world_mask_alpha"] >> objectWorld.worldMaskAlpha;
             objectWorld.worldMaskAlpha = std::clamp(objectWorld.worldMaskAlpha, 0.0f, 1.0f);

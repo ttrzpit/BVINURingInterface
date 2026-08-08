@@ -217,6 +217,8 @@ void WorldObjectHandler::Reset() {
     targetRoll_  = 0.0f;
     overshooting_ = false;
     overshootMm_  = 0.0f;
+    hasMinDist_   = false;
+    minDistMm_    = 0.0f;
     overlays_.clear();
     worldOutlines_.clear();
     knownLayoutOutlines_.clear();
@@ -240,6 +242,13 @@ void WorldObjectHandler::Reset() {
     worldScanFramesLeft_ = 0;
     worldScanAcc_.clear();
     worldMaskQuads_.clear();
+    lockAcc_      = TrainAccum{};
+    lockActive_   = false;
+    lockSamples_  = 0;
+    lockDriftPx_  = 0.0f;
+    lockDriftRun_ = 0;
+    lockDrifting_ = false;
+    liveOk_       = false;
     probeActive_      = false;
     probeFramesLeft_  = 0;
     probeStats_.clear();
@@ -278,13 +287,22 @@ void WorldObjectHandler::StartTraining() {
 }
 
 void WorldObjectHandler::StartWorldScan() {
-    // Clear the old mask up front: the operator pressed 'w' because the current
-    // boxes are stale (or absent), and seeing the bare markers again is the
-    // feedback that a re-scan is running.
+    // Clear the old mask AND the old pose lock up front: the operator pressed
+    // 'w' because both are stale (or absent), and seeing the bare markers again
+    // - with the objects live off the per-frame solve - is the feedback that a
+    // re-scan is running. Trained anchors live in the WORLD frame, so dropping
+    // the lock never invalidates them: re-locking after a camera move keeps
+    // every trained object exactly where it was taught.
     worldScanning_       = true;
     worldScanFramesLeft_ = std::max(1, objCfg_.trainFrames);
     worldScanAcc_.clear();
     worldMaskQuads_.clear();
+    lockAcc_      = TrainAccum{};
+    lockActive_   = false;
+    lockSamples_  = 0;
+    lockDriftPx_  = 0.0f;
+    lockDriftRun_ = 0;
+    lockDrifting_ = false;
 }
 
 void WorldObjectHandler::StartPresenceScan() {
@@ -328,23 +346,16 @@ int WorldObjectHandler::ScannedCount() const {
 std::string WorldObjectHandler::GetScanStatus() const {
     if (training_)
         return "TRAINING - hold the camera steady... " + std::to_string(trainFramesLeft_);
-    std::string names;
-    int         n = 0;
-    for (const auto& [id, rt] : objects_) {
-        if (!rt.anchor.has) continue;
-        if (n++) names += ", ";
-        names += rt.def->name;
-    }
-    std::string s = "SCANNING - trained " + std::to_string(n) + "/" +
-                    std::to_string(static_cast<int>(objects_.size()));
-    if (n) s += " (" + names + ")";
-    // World mask state rides along: until 'w' has run, the operator's first step
-    // is to scan the BLANK workspace, so advertise it here.
-    s += worldMaskQuads_.empty()
-             ? " - [w] mask world markers (workspace clear), [t] train visible, [Enter] finish"
-             : " [world mask " + std::to_string(worldMaskQuads_.size()) +
-                   "] - [t] train visible, [Enter] finish";
-    return s;
+    // Two facts and the live key menu - the two things the operator acts on. The
+    // world pose reads "Locked" only after a 'w' scan actually froze one, so an
+    // un-run (or failed) scan is visible at a glance; "Live" means the lock is
+    // switched off in config and the per-frame solve is in charge.
+    const std::string pose = lockActive_              ? "Locked"
+                             : !objCfg_.lockWorldPose ? "Live (lock off)"
+                                                      : "Not locked";
+    return "World Pose: " + pose +
+           ",  Objects Trained: " + std::to_string(ScannedCount()) +
+           "  -  [w] scan world (workspace clear), [t] train visible, [u] untrain, [Enter] finish";
 }
 
 void WorldObjectHandler::OnNewTarget(int objectMarkerId) {
@@ -353,6 +364,8 @@ void WorldObjectHandler::OnNewTarget(int objectMarkerId) {
     targetLive_ = false;
     overshooting_ = false;   // live cue, but don't carry a stale one into the new trial
     overshootMm_  = 0.0f;
+    hasMinDist_   = false;   // closest approach is per-trial
+    minDistMm_    = 0.0f;
     // Held anchors are kept across target changes. CONTACT latches are per-trial,
     // so they all re-arm here (including the object just guided to, whose object
     // may have been carried away and put back).
@@ -693,14 +706,37 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
         }
     }
 
+    // --- 2a. World-pose LOCK ('w') ----------------------------------------------
+    // Everything above solved THIS frame's pose from THIS frame's marker subset.
+    // That subset changes as the hand crosses the board, and because the
+    // configured marker positions are only consistent to a few mm, each subset
+    // settles on a slightly different pose - which shifted every trained object
+    // together. With a fixed camera the true pose is constant, so a 'w' burst
+    // averages it once and locks it; from here on the live solve is retained
+    // only as a diagnostic (liveOk_ / the drift monitor below) and the locked
+    // pose is what the rest of Update() consumes.
+    liveOk_ = poseOk_;
+    if (worldScanning_ && liveOk_ && objCfg_.lockWorldPose) {
+        lockAcc_.Rsum += worldR_;
+        lockAcc_.tsum += worldT_;
+        lockAcc_.n++;
+    }
+    if (lockActive_ && objCfg_.lockWorldPose) {
+        worldR_ = lockR_;
+        worldT_ = lockT_;
+        poseOk_ = true;   // a world pose is ALWAYS available while locked
+    }
+
     // --- 2a'. Pose diagnostics ---------------------------------------------------
     // Count frames where world markers were seen but no pose was accepted
-    // (exposes intermittent solve failures), and compute each detected marker's
-    // mean corner reprojection error against the accepted pose - a marker
+    // (exposes intermittent solve failures - measured on the LIVE solve, which
+    // the lock would otherwise mask), and compute each detected marker's mean
+    // corner reprojection error against the accepted pose - a marker
     // consistently above its neighbours has a biased marker_positions entry
     // (bias the corner-std probe cannot see). Consumed by the 'D' probe below
-    // and GetWorldReprojErrors().
-    if (worldMarkerCount_ >= 1 && !poseOk_) ++poseFailCount_;
+    // and GetWorldReprojErrors(). While locked these errors are measured against
+    // the LOCK, which makes them double as its staleness monitor.
+    if (worldMarkerCount_ >= 1 && !liveOk_) ++poseFailCount_;
     if (poseOk_) {
         for (size_t m = 0; m < worldIds_.size(); ++m) {
             double em = 0.0;
@@ -714,7 +750,27 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
         }
     }
 
-    // --- 2a''. Corner-jitter probe ('D') ----------------------------------------
+    // --- 2a''. Lock staleness monitor -------------------------------------------
+    // While locked, the reprojection errors just computed ARE the measure of how
+    // well the frozen pose still explains what the camera sees: a bumped camera
+    // moves every detected marker away from where the lock says it should be.
+    // Sustained error past the gate (a single blurred frame under a sweeping
+    // hand must not trip it) latches the warning for the operator, who clears
+    // the workspace and re-presses 'w'.
+    if (lockActive_ && !worldReprojErr_.empty()) {
+        double sum = 0.0;
+        for (const auto& [id, e] : worldReprojErr_) sum += e;
+        lockDriftPx_ = static_cast<float>(sum / worldReprojErr_.size());
+        if (objCfg_.worldLockDriftPx > 0.0f && lockDriftPx_ > objCfg_.worldLockDriftPx) {
+            if (++lockDriftRun_ >= kLockDriftConfirmFrames) lockDrifting_ = true;
+        } else {
+            lockDriftRun_ = 0;
+        }
+    } else if (!lockActive_) {
+        lockDriftPx_ = 0.0f;
+    }
+
+    // --- 2a'''. Corner-jitter probe ('D') ---------------------------------------
     // Accumulates the RAW detected corners of the probe world markers plus their
     // per-frame reprojection error, and when the window completes prints two
     // copy/paste rows: per-marker corner std [px] (= sqrt(mean over the 4
@@ -1017,6 +1073,21 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
                 worldMaskQuads_.push_back(quad);
             }
             worldScanAcc_.clear();
+
+            // Lock the burst-averaged world pose (translation mean, rotation
+            // SVD-orthonormalized - same treatment as a trained object anchor).
+            // A burst that never saw a valid pose leaves the lock off and the
+            // per-frame solve in charge; the operator is told so.
+            if (objCfg_.lockWorldPose && lockAcc_.n > 0) {
+                lockR_        = Orthonormalize(lockAcc_.Rsum * (1.0 / lockAcc_.n));
+                lockT_        = lockAcc_.tsum * (1.0 / lockAcc_.n);
+                lockSamples_  = lockAcc_.n;
+                lockActive_   = true;
+                lockDriftPx_  = 0.0f;
+                lockDriftRun_ = 0;
+                lockDrifting_ = false;
+            }
+            lockAcc_ = TrainAccum{};
         }
     }
 
@@ -1219,6 +1290,19 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
 
     // Both halves of the guidance error vector are final now - test for overshoot.
     UpdateOvershoot();
+
+    // Closest approach of this trial: the running minimum of |target - fingertip|
+    // since the target was selected. Unlike the live distance it only ever falls,
+    // so backing away from an object leaves the best reach on screen (and in the
+    // logged video). Reset by OnNewTarget ('m'/'r') and Reset ('O').
+    if (hasTarget_ && hasRingFingertip_) {
+        const cv::Point3f d    = targetPosMm_ - ringFingertipCamYup_;
+        const float       dist = std::sqrt(d.dot(d));
+        if (!hasMinDist_ || dist < minDistMm_) {
+            minDistMm_  = dist;
+            hasMinDist_ = true;
+        }
+    }
 }
 
 // =============================================================================
