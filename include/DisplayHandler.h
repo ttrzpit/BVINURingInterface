@@ -243,6 +243,14 @@ public:
     void SetObjectTargetDistance(bool visible, bool hasValue, float distanceMm,
                                  bool hasMin, float minDistanceMm);
 
+    /** @brief OBJECTS per-trial timer, drawn directly above the video-recording
+     *         stamp so both land in the recorded frame. Started by 'r' (which
+     *         also releases the e-stop) and stopped by the SPACEBAR press that
+     *         re-engages it; the stopped value stays on screen until the next
+     *         trial. @param running true while counting (white), false once the
+     *         trial is complete (green). Pass visible=false to hide the row. */
+    void SetObjectTrialTimer(bool visible, bool running, double elapsedSecs);
+
     /** @brief Detected world-board marker outlines (4 image-px corners each) for
      *         OBJECTS mode, drawn as faint blue squares so the operator can see
      *         which world markers are anchoring the scene. Pass visible=false
@@ -411,6 +419,9 @@ private:
     float                      objDistanceMm_         = 0.0f;
     bool                       objMinDistanceValid_   = false;
     float                      objMinDistanceMm_      = 0.0f;
+    bool                       objTimerVisible_       = false;
+    bool                       objTimerRunning_       = false;
+    double                     objTimerSecs_          = 0.0;
     bool                       worldOutlinesVisible_  = false;
     std::vector<std::array<cv::Point2f, 4>> worldOutlines_ = {};
     bool                       worldMaskVisible_      = false;

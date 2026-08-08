@@ -247,6 +247,15 @@ int main() {
     bool         prevObjTraining = false;            ///< Detects training-burst completion -> one-shot result report
     bool         prevObjWorldScan = false;           ///< Detects world-marker mask scan completion -> one-shot result report
     bool         prevObjLockDrift = false;           ///< Detects the world-pose lock going stale -> one-shot warning
+    // OBJECTS per-trial timer: starts when 'r' arms a random target (which also
+    // releases the e-stop) and stops on the SPACEBAR press that re-engages it -
+    // i.e. it measures the retrieval itself, from "go" to the operator calling
+    // the trial complete. Frozen (not cleared) after the stop so the final time
+    // stays readable on screen and in the recorded video until the next 'r'.
+    double       objTimerStartSecs = 0.0;
+    double       objTimerSecs = 0.0;
+    bool         objTimerRunning = false;
+    bool         objTimerHasValue = false;
     // OBJECTS random pool ('r' cycles these object marker IDs, no repeats until
     // exhausted, then refills). Refreshed on every OBJECTS entry.
     std::vector<int> objectPoolRemaining;
@@ -365,6 +374,17 @@ int main() {
         if ( kb.pendingEStopToggle ) {
             const bool enable = !controller.IsGuidanceOutputEnabled();
             controller.SetGuidanceOutputEnabled( enable );
+            // In OBJECTS, ENGAGING the e-stop is also how the operator calls a
+            // retrieval trial complete ("the participant has the object"), so it
+            // stops the object timer. The elapsed value is frozen, not cleared -
+            // the next 'r' restarts it. Releasing by hand does NOT restart the
+            // timer; only 'r' arming a new target does.
+            if ( !enable && objTimerRunning ) {
+                // nowSecs is computed further down the loop, so read the clock
+                // directly here rather than timing against a stale value.
+                objTimerSecs = cv::getTickCount() / cv::getTickFrequency() - objTimerStartSecs;
+                objTimerRunning = false;
+            }
             keyboard.SetExternalStatus( enable ? "E-STOP released - full guidance output resumed."
                                                : "E-STOP engaged - tension PWM only." );
             keyboard.ClearEStopToggle();
@@ -446,6 +466,9 @@ int main() {
                 prevObjTraining = false;    // Reset() cleared any mid-burst training
                 prevObjWorldScan = false;   // Reset() also dropped the world-marker mask
                 prevObjLockDrift = false;   // ...and the world-pose lock
+                objTimerRunning = false;    // no trial is in flight on entry
+                objTimerHasValue = false;
+                objTimerSecs = 0.0;
                 objectPoolRemaining = cfg.objectWorld.objectMarkerPool;
                 objectPickPending = false;    // Reset() also dropped any presence scan
             } else if ( kb.systemState == SystemState::RIG_ALIGN ) {
@@ -966,8 +989,22 @@ int main() {
                 objectPoolRemaining.erase(
                     std::find( objectPoolRemaining.begin(), objectPoolRemaining.end(), nextId ) );
                 keyboard.SetActiveObjectId( nextId );
+
+                // Arming a random target IS the start of a retrieval trial:
+                // release the e-stop so the device drives at full output, and
+                // start the object timer. Both happen HERE rather than on the
+                // keypress, because 'r' first runs a ~0.4 s presence re-scan and
+                // may then find nothing to guide to - driving the finger (and
+                // timing) before a target exists would be wrong on both counts.
+                controller.SetGuidanceOutputEnabled( true );
+                objTimerStartSecs = nowSecs;
+                objTimerSecs = 0.0;
+                objTimerRunning = true;
+                objTimerHasValue = true;
+
                 keyboard.SetExternalStatus( "Object marker set to " + std::to_string( nextId ) + " (" +
-                                            std::to_string( ( int )present.size() ) + " present)." );
+                                            std::to_string( ( int )present.size() ) +
+                                            " present) - E-STOP released, timing." );
             }
         }
 
@@ -1692,6 +1729,13 @@ int main() {
             // display.Update() so the frame handed to VideoLogger below carries
             // the stamp for its own capture instant.
             display.SetVideoLoggingStatus( videoLogger.IsRecording(), videoLogger.ElapsedSecs() );
+
+            // OBJECTS per-trial timer (row above the recording stamp): ticks from
+            // the 'r' that armed this target until the SPACEBAR that ends the
+            // trial, then holds the final time until the next 'r'.
+            if ( objTimerRunning ) objTimerSecs = nowSecs - objTimerStartSecs;
+            display.SetObjectTrialTimer( kb.systemState == SystemState::OBJECTS && objTimerHasValue,
+                                         objTimerRunning, objTimerSecs );
             display.SetAccuracyBlockStatus( accuracyBlock.IsActive(), accuracyBlock.BlockIndex(),
                                             accuracyBlock.TrialNumber(), accuracyBlock.TrialCount() );
             display.SetArucoStats( aruco.GetDetectionHz(), aruco.GetDetectionLagMs() );

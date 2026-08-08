@@ -167,6 +167,21 @@ void DisplayHandler::Update( const cv::Mat                     &frame,
                          0.6, Colors::White, 1, cv::LINE_4 );
         }
 
+        // OBJECTS per-trial timer, one row above the recording stamp and drawn on
+        // the same canvas, so a recorded frame carries both the session time and
+        // the time into the current retrieval. White while the trial runs, green
+        // once SPACEBAR has stopped it - the final time stays put until the next
+        // 'r'. Independent of the recorder: it shows whether or not 'l' is armed.
+        if ( objTimerVisible_ ) {
+            char timerBuf[48];
+            std::snprintf( timerBuf, sizeof( timerBuf ), "Object timer: %.4f s", objTimerSecs_ );
+            const cv::Point timerOrg( 10, canvas.rows - 38 );
+            cv::putText( canvas, timerBuf, timerOrg + cv::Point( 1, 1 ), cv::FONT_HERSHEY_SIMPLEX,
+                         0.6, cv::Scalar( 0, 0, 0 ), 3, cv::LINE_4 );
+            cv::putText( canvas, timerBuf, timerOrg, cv::FONT_HERSHEY_SIMPLEX,
+                         0.6, objTimerRunning_ ? Colors::White : Colors::GreLt, 1, cv::LINE_4 );
+        }
+
         cv::imshow( WIN_OPERATOR, canvas );
 
         // Publish the finished frame for VideoLogger. `canvas` is a uniquely
@@ -596,6 +611,12 @@ void DisplayHandler::SetObjectTargetDistance( bool visible, bool hasValue, float
     objDistanceMm_ = distanceMm;
     objMinDistanceValid_ = hasMin;
     objMinDistanceMm_ = minDistanceMm;
+}
+
+void DisplayHandler::SetObjectTrialTimer( bool visible, bool running, double elapsedSecs ) {
+    objTimerVisible_ = visible;
+    objTimerRunning_ = running;
+    objTimerSecs_ = elapsedSecs;
 }
 
 void DisplayHandler::SetWorldMarkerOutlines( bool                                           visible,
