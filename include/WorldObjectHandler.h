@@ -59,6 +59,19 @@
 // persists off any single world marker even if the object marker never
 // reappears. 't'/'u' remain available after the scan phase for re-training.
 //
+// WORLD-MARKER MASK ('w'): with the workspace BLANK (no objects placed yet), a
+// 'w' burst records where every detected world marker sits in the IMAGE and
+// stores those pixel quads (burst-averaged corners, slightly padded). The
+// operator view - and therefore the logged video - then paints them white for
+// the rest of the run (opacity object_world.world_mask_alpha), so the printed
+// fiducials disappear from the recorded workspace. Because the quads never
+// change between scans, DisplayHandler rasterizes them into a cached mask once
+// and only composites it per frame. The quads are FROZEN in pixel space: no world pose is needed to
+// draw them, they never flicker, and they stay put once objects and the hand
+// start occluding the board. They are only valid while the camera does not move
+// - press 'w' again (workspace blank) to re-scan after any camera change. 'u'
+// does NOT clear them (it untrains objects only); Reset ('O') does.
+//
 // CONTACT DETECTION (retrieval task): while guidance is running to the active
 // object, its own marker - when visible alongside the world board - is compared
 // against its LOCKED trained anchor. Horizontal (ground-plane) displacement past
@@ -200,6 +213,22 @@ public:
      *         progress. Works during and after the scan phase. */
     void StartTraining();
 
+    // ---- World-marker mask scan ('w') -----------------------------------------
+    /** @brief Start a world-marker mask burst (config train_frames detection
+     *         frames) over the BLANK workspace. Every detected world marker's
+     *         image corners are accumulated; on expiry each marker seen on at
+     *         least kWorldScanMinSeenFrames frames contributes one averaged,
+     *         padded pixel quad to GetWorldMaskQuads(), which DisplayHandler
+     *         fills solid white from then on. Restarts (and clears) any mask in
+     *         place, so a second 'w' simply re-scans. No world pose required -
+     *         raw detections are enough. */
+    void StartWorldScan();
+    bool IsWorldScanning()     const { return worldScanning_; }
+    /** @brief Detection frames remaining in the current mask burst (HUD countdown). */
+    int  WorldScanFramesLeft() const { return worldScanFramesLeft_; }
+    /** @brief World markers currently masked (0 = no 'w' scan captured yet). */
+    int  WorldMaskCount()      const { return static_cast<int>( worldMaskQuads_.size() ); }
+
     // ---- Presence re-scan ('r' random-target pre-check) -----------------------
     /** @brief Start a presence re-scan burst (config presence_scan_frames
      *         detection frames). Counts how often each object's own marker is
@@ -332,6 +361,11 @@ public:
     /** @brief Detected world-board marker outlines (4 image-px corners each) this
      *         frame, for the faint blue world-marker overlay. */
     const std::vector<std::array<cv::Point2f, 4>>& GetWorldOutlines() const { return worldOutlines_; }
+    /** @brief Frozen pixel quads captured by the last completed 'w' scan, filled
+     *         solid white by DisplayHandler to hide the printed world markers.
+     *         Empty until a scan completes; unchanged frame to frame (see the
+     *         header's WORLD-MARKER MASK notes). */
+    const std::vector<std::array<cv::Point2f, 4>>& GetWorldMaskQuads() const { return worldMaskQuads_; }
     /** @brief Ring-marker outlines + fingertip arrow this frame (cyan overlay). */
     const RingOverlay& GetRingOverlay() const { return ringOverlay_; }
     /** @brief Expected outline of EVERY configured world marker, reprojected
@@ -439,6 +473,23 @@ private:
     std::map<int, int>   presenceSeen_;
     std::vector<int>     presentIds_;
 
+    // World-marker mask scan ('w'). Corners are summed per marker id over the
+    // burst and averaged on expiry, so the frozen quad carries none of the
+    // single-frame corner jitter. A marker must be seen on at least
+    // kWorldScanMinSeenFrames frames (a phantom decode must not leave a white
+    // box floating over the workspace). Each averaged quad is then pushed
+    // outward from its centroid by kWorldMaskPadFrac so the marker's
+    // anti-aliased outer edge is covered too.
+    struct WorldScanAccum {
+        std::array<cv::Point2d, 4> sum{};
+        int                        n = 0;
+    };
+    static constexpr int   kWorldScanMinSeenFrames = 3;
+    static constexpr float kWorldMaskPadFrac       = 0.08f;
+    bool                            worldScanning_       = false;
+    int                             worldScanFramesLeft_ = 0;
+    std::map<int, WorldScanAccum>   worldScanAcc_;
+
     // Corner-jitter probe ('D'): running sums for each probe marker's corner
     // std. 8 coordinates per marker (4 corners x X/Y); naive sum / sum-of-
     // squares in double is plenty of precision here (~1600^2 x 300 frames).
@@ -522,6 +573,7 @@ private:
 
     std::vector<ObjectOverlay>              overlays_;
     std::vector<std::array<cv::Point2f, 4>> worldOutlines_;
+    std::vector<std::array<cv::Point2f, 4>> worldMaskQuads_;   // frozen 'w' mask (pixels)
     RingOverlay                             ringOverlay_;
     std::vector<std::array<cv::Point2f, 4>> knownLayoutOutlines_;
 };

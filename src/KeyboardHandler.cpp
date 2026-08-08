@@ -322,6 +322,12 @@ void KeyboardHandler::ExecuteAction(KeyAction action, int value) {
             state_.pendingUntrainObjects = true;
             break;
 
+        case KeyAction::SCAN_WORLD_MARKERS:
+            // 'w' in OBJECTS - main calls WorldObjectHandler::StartWorldScan()
+            // (record the blank workspace's world markers, then mask them white).
+            state_.pendingScanWorldMarkers = true;
+            break;
+
         case KeyAction::PROBE_CORNER_JITTER:
             // 'D' in OBJECTS - main calls StartCornerJitterProbe(); results
             // print to the terminal after ~300 detection frames.

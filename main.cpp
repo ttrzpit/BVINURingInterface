@@ -245,6 +245,7 @@ int main() {
     int          prevActiveObjectId = 0;             ///< Detects kb.activeObjectId changes -> ramp reset in OBJECTS mode
     double       lastObjDiagSecs = 0.0;              ///< Throttles the OBJECTS once/sec console diagnostic
     bool         prevObjTraining = false;            ///< Detects training-burst completion -> one-shot result report
+    bool         prevObjWorldScan = false;           ///< Detects world-marker mask scan completion -> one-shot result report
     // OBJECTS random pool ('r' cycles these object marker IDs, no repeats until
     // exhausted, then refills). Refreshed on every OBJECTS entry.
     std::vector<int> objectPoolRemaining;
@@ -442,6 +443,7 @@ int main() {
                 aruco.SetObjectDetection( true );
                 worldObj.Reset();
                 prevObjTraining = false;    // Reset() cleared any mid-burst training
+                prevObjWorldScan = false;   // Reset() also dropped the world-marker mask
                 objectPoolRemaining = cfg.objectWorld.objectMarkerPool;
                 objectPickPending = false;    // Reset() also dropped any presence scan
             } else if ( kb.systemState == SystemState::RIG_ALIGN ) {
@@ -996,6 +998,16 @@ int main() {
             keyboard.ClearUntrainObjects();
         }
 
+        // 'w' in OBJECTS - world-marker mask scan. Pressed with the workspace
+        // BLANK: a burst records where the world markers sit in the image, and
+        // the operator view (hence the logged video) then fills those boxes
+        // white for the rest of the run. Pressing 'w' again re-scans; 'u' leaves
+        // the mask alone.
+        if ( kb.pendingScanWorldMarkers ) {
+            worldObj.StartWorldScan();
+            keyboard.ClearScanWorldMarkers();
+        }
+
         // 'D' in OBJECTS - corner-jitter probe: accumulate the probe world
         // markers' raw corners for ~300 detection frames, then print one
         // copy/paste row of per-marker corner std [px] to the terminal.
@@ -1076,6 +1088,22 @@ int main() {
         if ( kb.systemState == SystemState::OBJECTS && worldObj.IsScanning() ) {
             keyboard.SetExternalStatus( worldObj.GetScanStatus() );
         }
+
+        // 'w' world-marker mask scan: live countdown, then a one-shot result.
+        // Placed AFTER the scan-status block above so the countdown wins the
+        // Output row in OBJ_SCAN too; from the next frame on, GetScanStatus()
+        // carries the resulting mask count.
+        if ( kb.systemState == SystemState::OBJECTS && worldObj.IsWorldScanning() ) {
+            keyboard.SetExternalStatus( "Scanning world markers (keep the workspace clear)... " +
+                                        std::to_string( worldObj.WorldScanFramesLeft() ) );
+        } else if ( prevObjWorldScan && kb.systemState == SystemState::OBJECTS ) {
+            keyboard.SetExternalStatus(
+                worldObj.WorldMaskCount() > 0
+                    ? "Masked " + std::to_string( worldObj.WorldMaskCount() ) +
+                          " world marker(s) - place the objects, then [t] to train."
+                    : "No world markers captured - check the board is in view, then press [w] again." );
+        }
+        prevObjWorldScan = worldObj.IsWorldScanning();
 
         // 'r' presence re-scan: live countdown on the Output row while the
         // burst runs. The deferred pick above reports the result once the scan
@@ -1648,6 +1676,8 @@ int main() {
             // config show_known_layout). Hidden elsewhere.
             display.SetObjectOverlays( kb.systemState == SystemState::OBJECTS, worldObj.GetOverlays() );
             display.SetWorldMarkerOutlines( kb.systemState == SystemState::OBJECTS, worldObj.GetWorldOutlines() );
+            display.SetWorldMarkerMask( kb.systemState == SystemState::OBJECTS, worldObj.GetWorldMaskQuads(),
+                                        cfg.objectWorld.worldMaskAlpha );
             display.SetRingOverlay( kb.systemState == SystemState::OBJECTS, worldObj.GetRingOverlay() );
             display.SetKnownLayoutOutlines( kb.systemState == SystemState::OBJECTS, worldObj.GetKnownLayoutOutlines() );
 
@@ -1699,8 +1729,12 @@ int main() {
                     "  trained: " + std::to_string( worldObj.ScannedCount() ) + "/" +
                     std::to_string( static_cast<int>( cfg.objectWorld.targetObjects.size() ) ) +
                     "  |  target: " + objState +
+                    "  mask: " + std::to_string( worldObj.WorldMaskCount() ) +
                     ( worldObj.IsTraining()
                           ? "  [TRAINING " + std::to_string( worldObj.TrainingFramesLeft() ) + "]"
+                          : "" ) +
+                    ( worldObj.IsWorldScanning()
+                          ? "  [WORLD SCAN " + std::to_string( worldObj.WorldScanFramesLeft() ) + "]"
                           : "" );
                 display.SetObjectStatusLine( true, status );
 

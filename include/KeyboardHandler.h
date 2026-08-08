@@ -128,6 +128,7 @@ enum class KeyAction {
     FINISH_OBJECT_SCAN,
     TRAIN_OBJECTS,
     UNTRAIN_OBJECTS,
+    SCAN_WORLD_MARKERS,
     PROBE_CORNER_JITTER,
     PRETENSION_ADVANCE,
     ADJUST_TENSION_INC,
@@ -209,6 +210,7 @@ struct KeyboardState {
     bool                 pendingFinishObjectScan = false;                       ///< One-shot: Enter in OBJ_SCAN - main ends the object scan phase
     bool                 pendingTrainObjects = false;                           ///< One-shot: 't' in OBJECTS - main starts a training burst
     bool                 pendingUntrainObjects = false;                         ///< One-shot: 'u' in OBJECTS - main clears all trained anchors
+    bool                 pendingScanWorldMarkers = false;                       ///< One-shot: 'w' in OBJECTS - main starts the world-marker mask scan
     bool                 pendingCornerJitterProbe = false;                      ///< One-shot: 'D' in OBJECTS - main starts the corner-jitter probe
     bool                 pendingLoggingToggle = false;                          ///< One-shot: 'L' pressed - main toggles the trial logger
     bool                 pendingVideoLoggingToggle = false;                     ///< One-shot: 'l' pressed - main starts/stops the operator-view recorder
@@ -286,6 +288,9 @@ class KeyboardHandler {
 
     /** @brief Clear the one-shot 'u' untrain-objects request (main consumed it). */
     void ClearUntrainObjects() { state_.pendingUntrainObjects = false; }
+
+    /** @brief Clear the one-shot world-marker mask scan request ('w' in OBJECTS). */
+    void ClearScanWorldMarkers() { state_.pendingScanWorldMarkers = false; }
 
     /** @brief Clear the one-shot 'D' corner-jitter-probe request (main consumed it). */
     void ClearCornerJitterProbe() { state_.pendingCornerJitterProbe = false; }

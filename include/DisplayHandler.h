@@ -235,6 +235,19 @@ public:
      *         outside OBJECTS mode. */
     void SetWorldMarkerOutlines(bool visible, const std::vector<std::array<cv::Point2f, 4>> &outlines);
 
+    /** @brief World-marker MASK for OBJECTS mode: frozen pixel quads captured by
+     *         the operator's 'w' scan of the blank workspace, painted white so
+     *         the printed fiducials are hidden in the operator view and the
+     *         logged video. Unlike SetWorldMarkerOutlines these do not change
+     *         frame to frame - they stay put once objects and the hand occlude
+     *         the board - so the quads are rasterized into a cached mask ONCE
+     *         (whenever the set changes) and only composited per frame.
+     *         @param alpha opacity in [0, 1]: 1 = opaque, lower washes the
+     *                markers out without hiding them, 0 draws nothing.
+     *         Pass visible=false outside OBJECTS mode. */
+    void SetWorldMarkerMask(bool visible, const std::vector<std::array<cv::Point2f, 4>> &quads,
+                            float alpha);
+
     /** @brief Ring-marker fingertip overlay for OBJECTS mode: cyan outlines on
      *         the detected ring markers plus the cyan fingertip arrow (tail ->
      *         tip = live-measured fingertip). Pre-projected to operator-view
@@ -287,6 +300,10 @@ public:
 
 private:
     // ---- Operator display helpers -------------------------------------------
+    /** @brief Fill the frozen 'w'-scan world-marker quads solid white. Called
+     *         FIRST on the camera image so every overlay below draws on top of
+     *         the boxes (the mask hides scene content, not overlays). */
+    void DrawWorldMarkerMask(cv::Mat &frame);
     void DrawCameraElements(cv::Mat &frame);
     void DrawMarkerOverlays(cv::Mat &frame,
                             const std::vector<DetectedMarker> &markers,
@@ -377,6 +394,16 @@ private:
     std::string                objectStatusLine_      = {};
     bool                       worldOutlinesVisible_  = false;
     std::vector<std::array<cv::Point2f, 4>> worldOutlines_ = {};
+    bool                       worldMaskVisible_      = false;
+    float                      worldMaskAlpha_        = 1.0f;
+    std::vector<std::array<cv::Point2f, 4>> worldMaskQuads_ = {};
+    // Rasterized mask cache. The quads only change when the operator re-runs a
+    // 'w' scan, so the polygon fill happens once per scan (and once per frame-
+    // size change) instead of every frame; the render loop then only composites
+    // the cached mask over worldMaskRect_, the quads' clipped bounding box.
+    cv::Mat                    worldMaskImg_          = {};      // CV_8UC1, frame-sized
+    cv::Rect                   worldMaskRect_         = {};      // ROI actually touched
+    bool                       worldMaskDirty_        = false;   // quads changed - re-rasterize
     bool                       ringOverlayVisible_    = false;
     RingOverlay                ringOverlay_           = {};
     bool                       knownLayoutVisible_    = false;

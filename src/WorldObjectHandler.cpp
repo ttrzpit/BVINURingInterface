@@ -236,6 +236,10 @@ void WorldObjectHandler::Reset() {
     presenceResultReady_ = false;
     presenceSeen_.clear();
     presentIds_.clear();
+    worldScanning_       = false;
+    worldScanFramesLeft_ = 0;
+    worldScanAcc_.clear();
+    worldMaskQuads_.clear();
     probeActive_      = false;
     probeFramesLeft_  = 0;
     probeStats_.clear();
@@ -271,6 +275,16 @@ void WorldObjectHandler::StartTraining() {
         rt.contactRun     = 0;
         rt.contactLatched = false;
     }
+}
+
+void WorldObjectHandler::StartWorldScan() {
+    // Clear the old mask up front: the operator pressed 'w' because the current
+    // boxes are stale (or absent), and seeing the bare markers again is the
+    // feedback that a re-scan is running.
+    worldScanning_       = true;
+    worldScanFramesLeft_ = std::max(1, objCfg_.trainFrames);
+    worldScanAcc_.clear();
+    worldMaskQuads_.clear();
 }
 
 void WorldObjectHandler::StartPresenceScan() {
@@ -324,7 +338,12 @@ std::string WorldObjectHandler::GetScanStatus() const {
     std::string s = "SCANNING - trained " + std::to_string(n) + "/" +
                     std::to_string(static_cast<int>(objects_.size()));
     if (n) s += " (" + names + ")";
-    s += " - [t] train visible, [Enter] finish";
+    // World mask state rides along: until 'w' has run, the operator's first step
+    // is to scan the BLANK workspace, so advertise it here.
+    s += worldMaskQuads_.empty()
+             ? " - [w] mask world markers (workspace clear), [t] train visible, [Enter] finish"
+             : " [world mask " + std::to_string(worldMaskQuads_.size()) +
+                   "] - [t] train visible, [Enter] finish";
     return s;
 }
 
@@ -570,6 +589,14 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
             soloMk   = &m;
             worldOutlines_.push_back(m.cornersPx);
             ++worldMarkerCount_;
+            // Mask scan ('w'): accumulate this marker's raw image corners. No
+            // pose needed - the mask is frozen pixels, not world geometry.
+            if (worldScanning_) {
+                WorldScanAccum& acc = worldScanAcc_[m.id];
+                for (int k = 0; k < 4; ++k)
+                    acc.sum[k] += cv::Point2d(m.cornersPx[k]);
+                acc.n++;
+            }
             continue;
         }
         if (ringEnabled && (m.id == ring.baseMarker || m.id == ring.secondMarker)) {
@@ -959,6 +986,37 @@ void WorldObjectHandler::Update(const std::vector<DetectedMarker>& markers) {
                 ++lastTrainedCount_;
             }
             trainAcc_.clear();
+        }
+    }
+
+    // --- 2c2. World-marker mask burst ('w') -------------------------------------
+    // Countdown decrements once per Update() (detection frame) like the training
+    // burst. On expiry every world marker seen on >= kWorldScanMinSeenFrames
+    // frames becomes one averaged, padded pixel quad; DisplayHandler fills those
+    // solid white for the rest of the run (see the header's mask notes).
+    if (worldScanning_) {
+        if (--worldScanFramesLeft_ <= 0) {
+            worldScanning_       = false;
+            worldScanFramesLeft_ = 0;
+            worldMaskQuads_.clear();
+            for (const auto& [id, acc] : worldScanAcc_) {
+                if (acc.n < kWorldScanMinSeenFrames) continue;
+                std::array<cv::Point2f, 4> quad{};
+                cv::Point2d                c(0.0, 0.0);
+                for (int k = 0; k < 4; ++k) {
+                    quad[k] = cv::Point2f(static_cast<float>(acc.sum[k].x / acc.n),
+                                          static_cast<float>(acc.sum[k].y / acc.n));
+                    c += cv::Point2d(quad[k]);
+                }
+                c *= 0.25;
+                // Push each corner outward from the quad centre so the fill also
+                // covers the marker's outer anti-aliased edge.
+                for (int k = 0; k < 4; ++k)
+                    quad[k] = cv::Point2f(quad[k]) +
+                              (cv::Point2f(quad[k]) - cv::Point2f(c)) * kWorldMaskPadFrac;
+                worldMaskQuads_.push_back(quad);
+            }
+            worldScanAcc_.clear();
         }
     }
 

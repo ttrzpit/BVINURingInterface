@@ -1,5 +1,6 @@
 #include "Config.h"
 
+#include <algorithm>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -213,6 +214,10 @@ bool Config::load(const std::string& filepath) {
             ow["train_frames"] >> objectWorld.trainFrames;
         if (!ow["presence_scan_frames"].empty())
             ow["presence_scan_frames"] >> objectWorld.presenceScanFrames;
+        if (!ow["world_mask_alpha"].empty()) {
+            ow["world_mask_alpha"] >> objectWorld.worldMaskAlpha;
+            objectWorld.worldMaskAlpha = std::clamp(objectWorld.worldMaskAlpha, 0.0f, 1.0f);
+        }
         if (!ow["contact_move_threshold_mm"].empty())
             ow["contact_move_threshold_mm"] >> objectWorld.contactMoveThresholdMm;
         if (!ow["overshoot_threshold_mm"].empty())

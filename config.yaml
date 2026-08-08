@@ -263,6 +263,15 @@ object_world:
    # alone. ~20 frames is about 0.25 s - hold the camera steady during a burst.
    train_frames: 60
 
+   # Opacity of the 'w' world-marker mask - the white boxes painted over the
+   # printed world board in the operator view (and therefore in the logged
+   # video). 1.0 = fully opaque, the fiducials are gone. Lower values wash them
+   # out but leave them visible, which is handy while setting the rig up: a box
+   # that no longer lines up with its marker means the camera moved and 'w'
+   # needs re-running. The ArUco patterns stay legible below about 0.85, so use
+   # 1.0 for participant runs. Clamped to [0, 1]; 0 hides the mask entirely.
+   world_mask_alpha: 0.5
+
    # Detection frames of the 'r' presence re-scan. Pressing 'r' first re-checks
    # which TRAINED object markers are actually still visible for this many
    # frames (an object counts as present when its marker is seen on at least a
@@ -403,9 +412,9 @@ object_world:
    #   top UL/UR/BL/BR then bottom UL/UR/BL/BR. target_point_mm is relative to
    #   the marker origin.
    target_objects:
-      # Pen
+      # Permanent Marker
       - id:                 60
-        name:               "pen"
+        name:               "marker"
         type:               "cylinder"
         marker_size_mm:     40
         cylinder_radius_mm: 7
@@ -414,7 +423,7 @@ object_world:
         base_normal_mm:     { x:   1, y:  0, z:  0 }
         target_point_mm:    { x:  95, y:  0, z:  0 }
 
-      # Can
+      # Beverage Can
       - id:                 61
         name:               "can"
         type:               "cylinder"
@@ -436,37 +445,61 @@ object_world:
         base_normal_mm:     { x:   0, y:  0, z:  1 }
         target_point_mm:    { x:   0, y:  0, z:  1 }
 
-      # Cell phone
-      - id:                 70
-        name:               "cellphone"
-        type:               "box"
+      # Lip Balm Tube
+      - id:                 63
+        name:               "lip balm"
+        type:               "cylinder"
         marker_size_mm:     40
-        points:
-           - { x: -32.0, y:  32.0, z:   0.0 }   # 1 top    UL
-           - { x:  92.0, y:  32.0, z:   0.0 }   # 2 top    UR
-           - { x: -32.0, y: -32.0, z:   0.0 }   # 3 top    BL
-           - { x:  92.0, y: -32.0, z:   0.0 }   # 4 top    BR
-           - { x: -32.0, y:  32.0, z: -13.0 }   # 5 bottom UL
-           - { x:  92.0, y:  32.0, z: -13.0 }   # 6 bottom UR
-           - { x: -32.0, y: -32.0, z: -13.0 }   # 7 bottom BL
-           - { x:  92.0, y: -32.0, z: -13.0 }   # 8 bottom BR
-        target_point_mm:    { x: 55, y:  0, z:  0 }
+        cylinder_radius_mm: 7
+        cylinder_height_mm: 69 
+        base_origin_mm:     { x: 49,  y:  0, z:  5 }
+        base_normal_mm:     { x:   1, y:  0, z:  0 }
+        target_point_mm:    { x:  30, y:  0, z:  3 }
 
-      # Knife
-      - id:                 71
-        name:               "knife"
+      # Medicine bottle
+      - id:                 64
+        name:               "pills"
+        type:               "cylinder"
+        marker_size_mm:     40
+        cylinder_radius_mm: 17
+        cylinder_height_mm: 69
+        base_origin_mm:     { x:   0, y: 61, z:  0 }
+        base_normal_mm:     { x:   0, y:  0, z:  1 }
+        target_point_mm:    { x:   0, y:  0, z:  60 }
+
+
+
+      # Spoon
+      - id:                 73
+        name:               "spoon"
         type:               "box"
         marker_size_mm:     40
         points:
-           - { x: 48.0, y: 10.0, z:  2.0 }   # 1 top    UL
-           - { x:   280.0, y: 10.0, z:  2.0 }   # 2 top    UR
-           - { x: 48.0, y: -10.0, z:  2.0 }   # 3 top    BL
-           - { x:   280.0, y: -10.0, z:  2.0 }   # 4 top    BR
-           - { x: 48.0, y: 10.0, z: -2.0 }   # 5 bottom UL
-           - { x:   280.0, y: 10.0, z: -2.0 }   # 6 bottom UR
-           - { x: 48.0, y: -10.0, z: -2.0 }   # 7 bottom BL
-           - { x:   280.0, y: -10.0, z: -2.0 }   # 8 bottom BR
-        target_point_mm:    { x: 240, y: 0, z:  2 }
+           - { x:  35.0, y:  18.0, z: 20.0 }   # 1 top    UL
+           - { x: 196.0, y:  18.0, z: 20.0 }   # 2 top    UR
+           - { x:  35.0, y: -18.0, z: 20.0 }   # 3 top    BL
+           - { x: 196.0, y: -18.0, z: 20.0 }   # 4 top    BR
+           - { x:  35.0, y:  18.0, z: 0.0 }   # 5 bottom UL
+           - { x: 196.0, y:  18.0, z: 0.0 }   # 6 bottom UR
+           - { x:  35.0, y: -18.0, z: 0.0 }   # 7 bottom BL
+           - { x: 196.0, y: -18.0, z: 0.0 }   # 8 bottom BR
+        target_point_mm:    { x: 160, y:  0, z:  0 }
+
+      # Scissors
+      - id:                 74
+        name:               "scissors"
+        type:               "box"
+        marker_size_mm:     40
+        points:
+           - { x:   48.0, y:  18.0, z:  8.0 }   # 1 top    UL
+           - { x:  260.0, y:  18.0, z:  8.0 }   # 2 top    UR
+           - { x:   48.0, y: -60.0, z:  8.0 }   # 3 top    BL
+           - { x:  260.0, y: -60.0, z:  8.0 }   # 4 top    BR
+           - { x:   48.0, y:  18.0, z: 0.0 }   # 5 bottom UL
+           - { x:  260.0, y:  18.0, z: 0.0 }   # 6 bottom UR
+           - { x:   48.0, y: -60.0, z: 0.0 }   # 7 bottom BL
+           - { x:  260.0, y: -60.0, z: 0.0 }   # 8 bottom BR
+        target_point_mm:    { x: 225, y: -26.0, z:  2 }
 
 
 

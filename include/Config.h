@@ -315,6 +315,15 @@ struct ObjectWorldConfig {
     // is mapped into the world frame). ~20 frames is about 0.25 s.
     int trainFrames = 20;
 
+    // Opacity of the 'w' world-marker mask (the white boxes painted over the
+    // printed world board in the operator view / logged video). 1.0 = fully
+    // opaque, the markers are gone; lower values wash them out but leave them
+    // visible, which is useful while setting the rig up (a box that has drifted
+    // off its marker means the camera moved and 'w' needs re-running). Note the
+    // ArUco patterns stay legible below ~0.85, so use 1.0 for participant runs.
+    // Clamped to [0, 1]; 0 disables the mask without clearing it.
+    float worldMaskAlpha = 1.0f;
+
     // Detection frames of the 'r' presence re-scan: before a random object is
     // picked, trained object markers are re-checked for this many frames and
     // only the ones actually seen stay in the random pool (a physically removed

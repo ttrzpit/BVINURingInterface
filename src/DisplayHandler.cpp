@@ -125,6 +125,10 @@ void DisplayHandler::Update( const cv::Mat                     &frame,
         int     cropH = std::min( frame.rows, cfg_.height );
         cv::Mat canvas = frame( cv::Rect( 0, 0, cropW, cropH ) ).clone();
 
+        // Mask first: it covers part of the physical scene (the printed world
+        // board), so every overlay drawn below lands on top of the white boxes
+        // and stays visible.
+        DrawWorldMarkerMask( canvas );
         DrawCameraElements( canvas );
         DrawMarkerOverlays( canvas, markers, kb.activeTagId );
         DrawObjectOverlays( canvas );
@@ -589,6 +593,30 @@ void DisplayHandler::SetWorldMarkerOutlines( bool                               
                                              const std::vector<std::array<cv::Point2f, 4>> &outlines ) {
     worldOutlinesVisible_ = visible;
     worldOutlines_ = outlines;
+}
+
+void DisplayHandler::SetWorldMarkerMask( bool                                           visible,
+                                         const std::vector<std::array<cv::Point2f, 4>> &quads,
+                                         float                                          alpha ) {
+    worldMaskVisible_ = visible;
+    worldMaskAlpha_ = std::clamp( alpha, 0.0f, 1.0f );
+    // Called every frame with the same frozen set; only a fresh 'w' scan (or
+    // OBJECTS re-entry, which empties it) actually changes the quads, so compare
+    // and flag the raster cache stale only then. The copies are bit-exact, so an
+    // exact comparison is safe here.
+    const bool changed =
+        quads.size() != worldMaskQuads_.size() ||
+        !std::equal( quads.begin(), quads.end(), worldMaskQuads_.begin(),
+                     []( const std::array<cv::Point2f, 4> &a,
+                         const std::array<cv::Point2f, 4> &b ) {
+                         for ( int k = 0; k < 4; k++ )
+                             if ( a[k] != b[k] ) return false;
+                         return true;
+                     } );
+    if ( changed ) {
+        worldMaskQuads_ = quads;
+        worldMaskDirty_ = true;
+    }
 }
 
 void DisplayHandler::SetRingOverlay( bool visible, const RingOverlay &ring ) {
@@ -1263,6 +1291,70 @@ void DisplayHandler::DrawMarkerOverlays(
     }
 }
 
+void DisplayHandler::DrawWorldMarkerMask( cv::Mat &frame ) {
+    // World-marker MASK ('w' scan of the blank workspace): solid white boxes over
+    // the printed fiducials, so neither the operator view nor the logged video
+    // shows the board. Frozen pixel quads - they neither flicker with detection
+    // nor disappear once objects and the reaching hand cover the markers. Stale
+    // after any camera move; the operator re-presses 'w' with the workspace clear.
+    //
+    // Drawn as the FIRST thing on the camera image, before the principal-point
+    // crosshair, the marker overlays and the object wireframes/labels: the mask
+    // hides part of the physical SCENE, so every drawn cue must sit on top of it
+    // (a box under an object's wireframe or the guidance banner would otherwise
+    // erase them).
+    if ( !worldMaskVisible_ || worldMaskAlpha_ <= 0.0f || frame.empty() ) return;
+
+    const int W = frame.cols, H = frame.rows;
+
+    // Rasterize once per 'w' scan (or whenever the operator view is resized) into
+    // a frame-sized 8-bit mask, and remember the quads' clipped bounding box so
+    // the per-frame composite touches only those pixels.
+    if ( worldMaskDirty_ || worldMaskImg_.size() != frame.size() ) {
+        worldMaskImg_.create( frame.size(), CV_8UC1 );
+        worldMaskImg_.setTo( 0 );
+        worldMaskRect_ = cv::Rect();
+        for ( const auto &q : worldMaskQuads_ ) {
+            bool                   ok = true;
+            std::vector<cv::Point> poly( 4 );
+            for ( int k = 0; k < 4; k++ ) {
+                // A quad is only ever as sane as the scan that produced it -
+                // reject non-finite / wildly out-of-range corners so one bad
+                // marker can never smear a fill across the view.
+                if ( !std::isfinite( q[k].x ) || !std::isfinite( q[k].y ) ||
+                     q[k].x <= -4 * W || q[k].x >= 5 * W ||
+                     q[k].y <= -4 * H || q[k].y >= 5 * H ) {
+                    ok = false;
+                    break;
+                }
+                poly[k] = cv::Point( static_cast<int>( std::lround( q[k].x ) ),
+                                     static_cast<int>( std::lround( q[k].y ) ) );
+            }
+            if ( !ok ) continue;
+            cv::fillPoly( worldMaskImg_, poly, cv::Scalar( 255 ), cv::LINE_4 );
+            const cv::Rect r = cv::boundingRect( poly ) & cv::Rect( 0, 0, W, H );
+            worldMaskRect_ = worldMaskRect_.empty() ? r : ( worldMaskRect_ | r );
+        }
+        worldMaskDirty_ = false;
+    }
+
+    if ( worldMaskRect_.empty() ) return;
+
+    cv::Mat roi = frame( worldMaskRect_ );
+    const cv::Mat roiMask = worldMaskImg_( worldMaskRect_ );
+    if ( worldMaskAlpha_ >= 1.0f ) {
+        // Opaque: straight masked write, no blend buffer at all.
+        roi.setTo( Colors::White, roiMask );
+    } else {
+        // Translucent: white only where the mask is set, then one blend over the
+        // ROI. Pixels outside the quads blend with an identical copy of
+        // themselves, so they come out unchanged.
+        cv::Mat overlay = roi.clone();
+        overlay.setTo( Colors::White, roiMask );
+        cv::addWeighted( overlay, worldMaskAlpha_, roi, 1.0f - worldMaskAlpha_, 0.0, roi );
+    }
+}
+
 void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
     // OBJECTS mode only - every other state passes visible=false so the operator
     // view is unchanged. All points are already projected to operator-view pixels
@@ -1361,11 +1453,7 @@ void DisplayHandler::DrawObjectOverlays( cv::Mat &frame ) {
                 }
                 poly[k] = ipt( q[k] );
             }
-            if ( ok ) {
-                // Fill world markers
-                // cv::fillPoly( frame, poly, Colors::White, cv::LINE_4 );
-                cv::polylines( frame, poly, true, Colors::BluLt, 1, cv::LINE_4 );
-            }
+            if ( ok ) cv::polylines( frame, poly, true, Colors::BluLt, 1, cv::LINE_4 );
         }
     }
 

@@ -146,6 +146,13 @@ inline const std::vector<KeyCommand> kKeyCommandTable = {
     { { 'u' }, InputState::OBJ_SCAN, InputState::SAME, "Clearing all trained objects...", KeyAction::UNTRAIN_OBJECTS },
     { { 'u' }, InputState::OBJ_SEL, InputState::SAME, "Clearing all trained objects...", KeyAction::UNTRAIN_OBJECTS },
     { { 'u' }, InputState::OBJ_RUN, InputState::SAME, "Clearing all trained objects...", KeyAction::UNTRAIN_OBJECTS },
+    // World-marker mask ('w') - press with the workspace BLANK (no objects): a
+    // burst records where the world markers sit in the image and the operator
+    // view then paints those boxes white for the rest of the run. Press again to
+    // re-scan (e.g. after moving the camera). 'u' does not clear the mask.
+    { { 'w' }, InputState::OBJ_SCAN, InputState::SAME, "Scanning world markers - clear the workspace and hold the camera steady...", KeyAction::SCAN_WORLD_MARKERS },
+    { { 'w' }, InputState::OBJ_SEL, InputState::SAME, "Scanning world markers - clear the workspace and hold the camera steady...", KeyAction::SCAN_WORLD_MARKERS },
+    { { 'w' }, InputState::OBJ_RUN, InputState::SAME, "Scanning world markers - clear the workspace and hold the camera steady...", KeyAction::SCAN_WORLD_MARKERS },
     // Corner-jitter probe ('D') - accumulates world-marker corners for ~300
     // detection frames, then prints one row of per-marker corner std [px] to
     // the terminal. Camera must be held rigidly still.
